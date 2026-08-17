@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Presence student attendance dashboard.">
+  <title>Student Dashboard — Presence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body data-dashboard="student">
+  <div class="app-shell">
+    <aside class="sidebar" style="--nav-count: 6">
+      <a class="brand" href="index.html"><span class="brand-mark"><span></span></span><span>presence</span></a>
+      <p class="nav-label">Student space</p>
+      <nav class="nav-list" aria-label="Student navigation">
+        <button class="nav-button active" data-view="dashboard" type="button"><span class="nav-icon">⊞</span><span>Dashboard</span></button>
+        <button class="nav-button" data-view="events" type="button"><span class="nav-icon">◇</span><span>Events</span></button>
+        <button class="nav-button" data-view="history" type="button"><span class="nav-icon">◷</span><span>Event History</span></button>
+        <button class="nav-button" data-view="face" type="button"><span class="nav-icon">◎</span><span>Face Registration</span></button>
+        <button class="nav-button" data-view="profile" type="button"><span class="nav-icon">○</span><span>Profile</span></button>
+        <button class="nav-button logout-button" data-logout type="button"><span class="nav-icon">↙</span><span>Logout</span></button>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-user"><span class="mini-avatar"><img data-student-photo alt="" hidden><span data-student-initials>ST</span></span><div><strong data-student-name>Student account</strong><small data-student-meta>Profile pending</small></div></div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div><h1 id="pageTitle">Dashboard</h1><p id="pageSubtitle">Your attendance at a glance</p></div>
+        <div class="topbar-actions"><span class="date-pill" data-current-date></span><button class="topbar-profile" type="button" data-go-view="profile" aria-label="Open your profile"><span class="avatar"><img data-student-photo alt="" hidden><span data-student-initials>ST</span></span><span class="profile-name" data-student-name>Student account</span></button></div>
+      </header>
+
+      <div class="content">
+        <section class="view-section" data-section="dashboard">
+          <div class="welcome-card">
+            <div class="welcome-copy"><p class="eyebrow">Good morning</p><h2>Ready for today, <span data-student-first-name>Student</span>?</h2><p>Check in when you arrive. Your administrator-managed profile and events will appear here automatically.</p></div>
+            <button class="primary-button" type="button" data-go-view="events"><span>◇</span> View events</button>
+          </div>
+          <div class="stats-grid student-stats">
+            <article class="stat-card"><div class="stat-top"><span class="stat-label">Events attended</span><span class="stat-icon">◇</span></div><div class="stat-value" id="eventsAttendedCount">0</div><div class="stat-meta" id="eventsAttendedMeta">No attendance recorded yet</div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-label">Absences</span><span class="stat-icon red">−</span></div><div class="stat-value" id="absenceCount">0</div><div class="stat-meta" id="absenceMeta">No missed events</div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-label">Days present</span><span class="stat-icon green">✓</span></div><div class="stat-value" id="daysPresentCount">0</div><div class="stat-meta" id="daysPresentMeta">Based on attended events</div></article>
+          </div>
+          <div class="dashboard-grid single">
+            <article class="panel">
+              <div class="panel-head"><div><h3>Upcoming events</h3><p>Published by your administrator</p></div><button class="link-button" type="button" data-go-view="events">View events</button></div>
+              <div id="studentEventTimeline"><div class="empty-state">No events have been published yet.</div></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view-section" data-section="events" hidden>
+          <div class="section-head"><div><p class="eyebrow">School updates</p><h2>Announcements &amp; Events</h2><p>Read announcements and view upcoming attendance schedules.</p></div></div>
+          <div class="event-grid" id="studentEventGrid"><div class="empty-state panel event-empty">No events have been published yet.</div></div>
+        </section>
+
+        <section class="view-section" data-section="history" hidden>
+          <div class="section-head"><div><p class="eyebrow">Attendance records</p><h2>Event History</h2><p>Your completed events and recorded absences.</p></div></div>
+          <div class="history-card-grid history-section" id="studentEventHistory"><div class="empty-state panel">No finished event history yet.</div></div>
+        </section>
+
+        <section class="view-section" data-section="face" hidden>
+          <div class="section-head"><div><p class="eyebrow">Secure identity</p><h2>Face Registration</h2><p>Register once to make future check-ins faster.</p></div><span class="badge orange" id="faceStatus">Not registered</span></div>
+          <div class="face-grid">
+            <article class="panel">
+              <div class="camera-box"><video id="cameraPreview" playsinline muted hidden></video><div class="camera-placeholder" id="cameraPlaceholder"><div class="face-target"></div><strong>Position your face inside the frame</strong><small>Use a bright, evenly lit area</small></div></div>
+              <div class="camera-actions"><button class="primary-button" id="startCamera" type="button">Start camera</button><button class="outline-button" id="captureFace" type="button" disabled>Register face</button></div>
+            </article>
+            <article class="panel"><div class="panel-head"><div><h3>Before you begin</h3><p>A clear image gives better attendance matching.</p></div></div><div class="info-list"><div class="info-item"><span class="info-number">01</span><div><strong>Remove face coverings</strong><small>Glasses are okay, but masks and hats should be removed.</small></div></div><div class="info-item"><span class="info-number">02</span><div><strong>Face the camera directly</strong><small>Keep your full face visible and centered in the guide.</small></div></div><div class="info-item"><span class="info-number">03</span><div><strong>Use good lighting</strong><small>Avoid strong backlight or very dark environments.</small></div></div></div><p class="notice">Prototype privacy note: this camera preview does not upload or permanently store an image. Production face data requires consent, encryption, and a clear school retention policy.</p></article>
+          </div>
+        </section>
+
+        <section class="view-section" data-section="profile" hidden>
+          <div class="section-head"><div><p class="eyebrow">Your information</p><h2>Profile</h2><p>Review and update your personal information.</p></div><span class="badge orange" id="profileStatusBadge">Pending registration</span></div>
+          <div id="studentProfileContent"><article class="panel"><div class="empty-state profile-empty"><div class="empty-icon">○</div><strong>Profile not registered yet</strong><p>Ask your school administrator to register your student information. Refresh this page after they save it.</p></div></article></div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <div class="dashboard-modal-backdrop" id="studentProfileModal" hidden>
+    <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="studentProfileModalTitle">
+      <button class="modal-close" type="button" data-close-student-profile aria-label="Close">×</button>
+      <span class="modal-icon">○</span>
+      <h2 id="studentProfileModalTitle">Edit profile</h2>
+      <p>Your Student ID and account access cannot be changed here.</p>
+      <form id="studentProfileForm">
+        <div class="form-grid">
+          <div class="field full profile-photo-field"><label for="profilePhoto">Profile photo</label><div class="profile-photo-control"><span class="profile-photo-preview" id="profilePhotoPreview"><span id="profilePhotoPreviewInitials">ST</span><img id="profilePhotoPreviewImage" alt="Selected profile preview" hidden></span><div><input id="profilePhoto" type="file" accept="image/jpeg,image/png,image/webp"><small>Choose a JPG, PNG, or WebP image. It will be resized automatically.</small><button class="link-button" id="removeProfilePhoto" type="button">Remove photo</button></div></div></div>
+          <div class="field"><label for="profileFirstName">First name</label><input id="profileFirstName" required></div>
+          <div class="field"><label for="profileMiddleName">Middle name</label><input id="profileMiddleName"></div>
+          <div class="field"><label for="profileLastName">Last name</label><input id="profileLastName" required></div>
+          <div class="field"><label for="profileSection">Section</label><select id="profileSection" required><option value="1A">1A</option><option value="1B">1B</option><option value="2A">2A</option><option value="2B">2B</option><option value="3A">3A</option><option value="3B">3B</option><option value="4A">4A</option><option value="4B">4B</option></select></div>
+          <div class="field"><label for="profileEmail">Email address</label><input id="profileEmail" type="email"></div>
+          <div class="field"><label for="profilePhone">Phone number</label><input id="profilePhone" type="tel"></div>
+        </div>
+        <div class="modal-actions"><button class="outline-button" type="button" data-close-student-profile>Cancel</button><button class="primary-button" type="submit">Save profile</button></div>
+      </form>
+    </section>
+  </div>
+  <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
+  <script type="module" src="dashboard.js?v=20260817-presence4"></script>
+</body>
+</html>

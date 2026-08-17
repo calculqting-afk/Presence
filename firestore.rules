@@ -1,0 +1,136 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && request.auth.token.email == "mikhailovna2007@gmail.com";
+    }
+
+    function isStudent() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/students/$(request.auth.uid))
+        && get(/databases/$(database)/documents/students/$(request.auth.uid)).data.active == true;
+    }
+
+    match /students/{studentUid} {
+      allow get: if isAdmin()
+        || (signedIn() && request.auth.uid == studentUid && resource.data.active == true);
+      allow list: if isAdmin();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (isStudent()
+          && request.auth.uid == studentUid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "firstName", "middleName", "lastName", "section", "email", "phone", "photoDataUrl", "updatedAt"
+          ])
+          && request.resource.data.firstName is string
+          && request.resource.data.lastName is string
+          && (!("photoDataUrl" in request.resource.data)
+            || (request.resource.data.photoDataUrl is string
+              && request.resource.data.photoDataUrl.size() <= 350000))
+          && request.resource.data.section in ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"]);
+    }
+
+    match /adminProfiles/{adminUid} {
+      allow read, create, update: if isAdmin() && request.auth.uid == adminUid;
+      allow delete: if false;
+    }
+
+    // Normalized Student IDs are used as document names. A duplicate write is
+    // an update, and updates are denied, so the same ID cannot be registered twice.
+    match /studentIds/{studentIdKey} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && !exists(/databases/$(database)/documents/studentIds/$(studentIdKey));
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    match /events/{eventId} {
+      allow read: if isAdmin() || isStudent();
+      allow create, update: if isAdmin()
+        && request.resource.data.openAt is timestamp
+        && request.resource.data.closeAt is timestamp
+        && request.resource.data.openAt < request.resource.data.closeAt;
+      allow delete: if isAdmin();
+    }
+
+    match /attendance/{attendanceId} {
+      allow read: if isAdmin()
+        || (isStudent() && resource.data.studentUid == request.auth.uid);
+      allow create: if isStudent()
+        && request.resource.data.studentUid == request.auth.uid
+        && attendanceId == request.auth.uid + "_" + request.resource.data.eventId
+        && exists(/databases/$(database)/documents/events/$(request.resource.data.eventId))
+        && request.time >= get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.openAt
+        && request.time <= get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.closeAt
+        && request.resource.data.keys().hasOnly([
+          "studentUid", "studentId", "eventId", "eventName", "eventDate",
+          "eventType", "eventDescription", "timeIn", "timeOut", "location",
+          "audience", "attendedAt"
+        ]);
+      allow update, delete: if isAdmin();
+    }
+
+    match /dismissedHistory/{dismissalId} {
+      allow read, delete: if isAdmin()
+        || (isStudent() && resource.data.studentUid == request.auth.uid);
+      allow create: if isStudent()
+        && request.resource.data.studentUid == request.auth.uid;
+      allow update: if false;
+    }
+
+    match /faceRegistrations/{studentUid} {
+      allow read: if isAdmin() || (isStudent() && request.auth.uid == studentUid);
+      allow create, update: if isStudent()
+        && request.auth.uid == studentUid
+        && request.resource.data.registered == true;
+      allow delete: if isAdmin();
+    }
+
+    match /presence/{studentUid} {
+      allow read: if isAdmin()
+        || (isStudent() && request.auth.uid == studentUid);
+      allow create, update: if isStudent()
+        && request.auth.uid == studentUid
+        && request.resource.data.keys().hasOnly(["online", "lastSeen", "offlineAt"])
+        && request.resource.data.online is bool
+        && request.resource.data.lastSeen is timestamp
+        && (!("offlineAt" in request.resource.data)
+          || request.resource.data.offlineAt is timestamp);
+      allow delete: if isAdmin();
+    }
+
+    match /presenceSessions/{sessionId} {
+      allow read: if isAdmin()
+        || (isStudent() && resource.data.studentUid == request.auth.uid);
+      allow create: if isStudent()
+        && request.resource.data.studentUid == request.auth.uid
+        && request.resource.data.sessionId == sessionId
+        && request.resource.data.keys().hasOnly(["studentUid", "sessionId", "online", "lastSeen", "offlineAt"])
+        && request.resource.data.online is bool
+        && request.resource.data.lastSeen is timestamp
+        && (!("offlineAt" in request.resource.data)
+          || request.resource.data.offlineAt is timestamp);
+      allow update: if isStudent()
+        && resource.data.studentUid == request.auth.uid
+        && request.resource.data.studentUid == request.auth.uid
+        && request.resource.data.sessionId == sessionId
+        && request.resource.data.keys().hasOnly(["studentUid", "sessionId", "online", "lastSeen", "offlineAt"])
+        && request.resource.data.online is bool
+        && request.resource.data.lastSeen is timestamp
+        && (!("offlineAt" in request.resource.data)
+          || request.resource.data.offlineAt is timestamp);
+      allow delete: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

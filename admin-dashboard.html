@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Presence administrator attendance dashboard.">
+  <title>Admin Dashboard — Presence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body data-dashboard="admin">
+  <div class="app-shell">
+    <aside class="sidebar" style="--nav-count: 7">
+      <a class="brand" href="index.html"><span class="brand-mark"><span></span></span><span>Presence</span></a>
+      <p class="nav-label">Admin console</p>
+      <nav class="nav-list" aria-label="Admin navigation">
+        <button class="nav-button active" data-view="dashboard" type="button"><span class="nav-icon">⊞</span><span>Dashboard</span></button>
+        <button class="nav-button" data-view="add-student" type="button"><span class="nav-icon">＋</span><span>Add Students</span></button>
+        <button class="nav-button" data-view="modify-students" type="button"><span class="nav-icon">◎</span><span>Modify Students</span></button>
+        <button class="nav-button" data-view="create" type="button"><span class="nav-icon">◇</span><span>Create Events</span></button>
+        <button class="nav-button" data-view="modify-events" type="button"><span class="nav-icon">✎</span><span>Modify Events</span></button>
+        <button class="nav-button" data-view="profile" type="button"><span class="nav-icon">○</span><span>Profile</span></button>
+        <button class="nav-button logout-button" data-logout type="button"><span class="nav-icon">↙</span><span>Logout</span></button>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-user"><span class="mini-avatar" data-admin-initials>AD</span><div><strong data-admin-name>School Admin</strong><small>Full access</small></div></div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div><h1 id="pageTitle">Dashboard</h1><p id="pageSubtitle">School attendance overview</p></div>
+        <div class="topbar-actions"><span class="date-pill" data-current-date></span><span class="avatar">AD</span></div>
+      </header>
+      <div class="content">
+        <section class="view-section" data-section="dashboard">
+          <div class="welcome-card"><div class="welcome-copy"><p class="eyebrow">Administrator view</p><h2>Good morning, Admin.</h2><p>No events or student profiles are preloaded. Create and register them when you are ready.</p></div><button class="primary-button" type="button" data-go-view="create">＋ Create event</button></div>
+          <div class="stats-grid">
+            <article class="stat-card"><div class="stat-top"><span class="stat-label">Registered students</span><span class="stat-icon">◎</span></div><div class="stat-value" id="registeredCount">0</div><div class="stat-meta">Admin-managed profiles</div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-label">Present today</span><span class="stat-icon green">✓</span></div><div class="stat-value" id="presentTodayCount">0</div><div class="stat-meta" id="presentTodayMeta">No attendance records yet</div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-label">Active events</span><span class="stat-icon orange">◇</span></div><div class="stat-value" id="eventCount">0</div><div class="stat-meta">Published events</div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-label">Not checked in</span><span class="stat-icon red">−</span></div><div class="stat-value" id="notCheckedInCount">0</div><div class="stat-meta" id="notCheckedInMeta">No students registered</div></article>
+          </div>
+          <div class="dashboard-grid">
+            <article class="panel"><div class="panel-head"><div><h3>Published events</h3><p>Saved event overview</p></div><button class="link-button" type="button" data-go-view="modify-events">Manage events</button></div><div class="timeline" id="adminEventTimeline"><div class="empty-state">No events have been created yet.</div></div></article>
+            <article class="panel"><div class="panel-head"><div><h3>Attendance today</h3><p>Across all grade levels</p></div></div><div class="ring-wrap"><div class="progress-ring" id="adminAttendanceRing" style="background:#e8eef7"></div><div class="progress-value"><strong id="adminAttendancePercent">0%</strong><small id="adminAttendanceDetail">No records</small></div></div><div class="attendance-legend"><span class="legend-item"><i class="legend-dot" style="background:#1f6feb"></i>Present</span><span class="legend-item"><i class="legend-dot" style="background:#e8eef7"></i>Pending</span></div></article>
+          </div>
+        </section>
+
+        <section class="view-section" data-section="create" hidden>
+          <div class="section-head"><div><p class="eyebrow">Attendance setup</p><h2>Create Events</h2><p>Create an attendance window for students.</p></div></div>
+          <div class="form-layout">
+            <article class="panel"><div class="panel-head"><div><h3 id="eventFormTitle">Event details</h3><p>Attendance opens and closes automatically using this schedule.</p></div></div><form id="eventForm"><input id="editingEventId" type="hidden"><div class="form-grid"><div class="field full"><label for="eventName">Event name</label><input id="eventName" required placeholder="e.g. Science Fair Attendance"></div><div class="field"><label for="eventDate">Date</label><input id="eventDate" type="date" required></div><div class="field"><label for="eventLocation">Location</label><input id="eventLocation" required placeholder="e.g. Activity center"></div><div class="field"><label for="eventTimeIn">Time In — attendance opens</label><input id="eventTimeIn" type="time" required></div><div class="field"><label for="eventTimeOut">Time Out — attendance closes</label><input id="eventTimeOut" type="time" required></div><div class="field full"><label for="eventAudience">Student group</label><select id="eventAudience"><option>All students</option><option>Section 1A</option><option>Section 1B</option><option>Section 2A</option><option>Section 2B</option><option>Section 3A</option><option>Section 3B</option><option>Section 4A</option><option>Section 4B</option></select></div><div class="field full"><label for="eventNotes">Instructions</label><textarea id="eventNotes" placeholder="Optional check-in instructions"></textarea></div></div><div class="form-actions"><button class="outline-button" id="clearEventForm" type="button">Clear</button><button class="primary-button" id="eventSubmitButton" type="submit">Create event</button></div></form></article>
+            <article class="panel"><div class="panel-head"><div><h3>Event timing</h3><p>Set up an accurate attendance window.</p></div></div><div class="info-list"><div class="info-item"><span class="info-number">01</span><div><strong>Before Time In</strong><small>Students can see the event but cannot take attendance yet.</small></div></div><div class="info-item"><span class="info-number">02</span><div><strong>Between Time In and Time Out</strong><small>Attendance opens automatically and students can check in.</small></div></div><div class="info-item"><span class="info-number">03</span><div><strong>After Time Out</strong><small>Attendance closes and unchecked students receive an absence.</small></div></div></div><p class="notice">Events are saved in this browser and appear on the student dashboard after refresh. A database will be required for syncing across different devices.</p></article>
+          </div>
+        </section>
+
+        <section class="view-section" data-section="modify-events" hidden>
+          <div class="section-head"><div><p class="eyebrow">Event management</p><h2>Modify Events</h2><p>Edit schedules or remove published events.</p></div><button class="primary-button" type="button" data-go-view="create">＋ Create event</button></div>
+          <div class="admin-event-card-grid" id="eventTableBody"><div class="empty-state panel">No events have been created yet.</div></div>
+        </section>
+
+        <section class="view-section" data-section="add-student" hidden>
+          <div class="section-head"><div><p class="eyebrow">Student registration</p><h2 id="studentPageTitle">Add Student</h2><p>Register the information that will appear in the student profile.</p></div></div>
+          <article class="panel">
+            <div class="panel-head"><div><h3 id="studentFormTitle">Student information</h3><p>All identity and login details are entered by the administrator.</p></div></div>
+            <form id="studentForm">
+              <input id="originalStudentId" type="hidden">
+              <div class="form-grid">
+                <div class="field"><label for="managedLastName">Last name</label><input id="managedLastName" required></div>
+                <div class="field"><label for="managedFirstName">First name</label><input id="managedFirstName" required></div>
+                <div class="field"><label for="managedMiddleName">Middle name</label><input id="managedMiddleName"></div>
+                <div class="field"><label for="managedStudentId">Student ID number</label><input id="managedStudentId" required pattern="[A-Za-z0-9._-]+" title="Use only letters, numbers, periods, underscores, or dashes" placeholder="e.g. 25100-1"></div>
+                <div class="field"><label for="managedSection">Section</label><select id="managedSection" required><option value="" selected disabled>Select a section</option><option value="1A">1A</option><option value="1B">1B</option><option value="2A">2A</option><option value="2B">2B</option><option value="3A">3A</option><option value="3B">3B</option><option value="4A">4A</option><option value="4B">4B</option></select></div>
+                <div class="field"><label for="managedCourse">Course</label><select id="managedCourse" required><option value="" selected disabled>Select a course</option><option value="BSInfo Tech">BSInfo Tech</option><option value="BSA">BSA</option><option value="BSFI">BSFI</option><option value="BSMB">BSMB</option></select></div>
+                <div class="field"><label for="managedPassword">Password</label><input id="managedPassword" type="text" required minlength="6" autocomplete="off" placeholder="Visible · minimum 6 characters" aria-describedby="managedPasswordHelp"><small id="managedPasswordHelp">The password stays visible while you type and must contain at least 6 characters.</small></div>
+                <div class="field"><label for="managedEmail">Email address</label><input id="managedEmail" type="email"></div>
+                <div class="field"><label for="managedPhone">Phone number</label><input id="managedPhone" type="tel"></div>
+              </div>
+              <div class="form-actions"><button class="outline-button" id="cancelStudentForm" type="button">Reset form</button><button class="primary-button" id="studentSubmitButton" type="submit">Add student</button></div>
+            </form>
+          </article>
+        </section>
+
+        <section class="view-section" data-section="modify-students" hidden>
+          <div class="section-head"><div><p class="eyebrow">Student directory</p><h2>Modify Students</h2><p>Edit records and monitor live student status.</p></div><div class="button-row"><button class="outline-button" id="refreshStudentStatus" type="button">↻ Refresh status</button><button class="primary-button" type="button" data-go-view="add-student">＋ Add student</button></div></div>
+          <div id="adminStudentDetail" class="admin-student-detail" hidden></div>
+          <article class="panel"><div class="table-toolbar"><div class="search-wrap"><span class="search-icon">⌕</span><input class="search-input" id="studentSearch" type="search" placeholder="Search name or student ID" aria-label="Search students"></div><span class="count-label" id="studentResultCount">0 students shown</span></div><div class="table-wrap"><table><thead><tr><th>Student</th><th>Section</th><th>Face registration</th><th>Email</th><th>Actions</th></tr></thead><tbody id="studentTableBody"><tr><td colspan="5"><div class="empty-state">No student profiles have been registered yet.</div></td></tr></tbody></table></div></article>
+        </section>
+
+        <section class="view-section" data-section="profile" hidden>
+          <div class="section-head"><div><p class="eyebrow">Administrator account</p><h2>Profile</h2><p>Update your information and see changes immediately.</p></div><span class="badge green">Active</span></div>
+          <article class="panel">
+            <div class="panel-head"><div><h3>Profile information</h3><p>Your administrator email remains fixed for account security.</p></div></div>
+            <form id="adminProfileForm">
+              <div class="form-grid">
+                <div class="field"><label for="adminDisplayName">Display name</label><input id="adminDisplayName" required placeholder="School Admin"></div>
+                <div class="field"><label for="adminProfileEmail">Administrator email</label><input id="adminProfileEmail" type="email" disabled></div>
+                <div class="field"><label for="adminProfilePhone">Phone number</label><input id="adminProfilePhone" type="tel"></div>
+              </div>
+              <div class="form-actions"><button class="primary-button" type="submit">Save profile</button></div>
+            </form>
+          </article>
+        </section>
+      </div>
+    </main>
+  </div>
+  <div class="dashboard-modal-backdrop" id="passwordModal" hidden>
+    <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="passwordModalTitle">
+      <button class="modal-close" type="button" data-close-password aria-label="Close">×</button>
+      <span class="modal-icon">◇</span>
+      <h2 id="passwordModalTitle">Change student password</h2>
+      <p id="passwordStudentName">Enter the current password before setting a new one.</p>
+      <form id="passwordChangeForm">
+        <div class="field"><label for="currentStudentPassword">Current password</label><input id="currentStudentPassword" type="text" required minlength="6" autocomplete="off"></div>
+        <div class="field"><label for="newStudentPassword">New password</label><input id="newStudentPassword" type="text" required minlength="6" autocomplete="off"><small>At least 6 characters. The password is visible while you type.</small></div>
+        <div class="modal-actions"><button class="outline-button" type="button" data-close-password>Cancel</button><button class="primary-button" type="submit">Change password</button></div>
+      </form>
+    </section>
+  </div>
+  <div class="dashboard-modal-backdrop" id="removeStudentModal" hidden>
+    <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="removeStudentTitle">
+      <button class="modal-close" type="button" data-close-remove aria-label="Close">×</button>
+      <span class="modal-icon danger">!</span>
+      <h2 id="removeStudentTitle">Clear student account?</h2>
+      <p id="removeStudentMessage">This permanently removes the student account and its attendance records.</p>
+      <div class="field"><label for="removeStudentPassword">Current student password</label><input id="removeStudentPassword" type="text" minlength="6" autocomplete="off" required><small>Required to permanently remove the student's sign-in account.</small></div>
+      <p class="clear-countdown" id="removeStudentCountdown">Review this action carefully.</p>
+      <div class="modal-actions"><button class="outline-button" type="button" data-close-remove>Cancel</button><button class="small-button danger modal-danger-button" id="confirmRemoveStudent" type="button" disabled>Wait 5 seconds</button></div>
+    </section>
+  </div>
+  <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
+  <script type="module" src="dashboard.js?v=20260817-presence4"></script>
+</body>
+</html>

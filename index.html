@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Presence — a simple, reliable attendance portal for students and administrators.">
+  <title>Presence — Attendance, made simple.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="site-header">
+      <a class="brand" href="#" aria-label="Presence home">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span>Presence</span>
+      </a>
+      <div class="system-status" aria-label="System status">
+        <span class="status-dot"></span>
+        System online
+      </div>
+    </header>
+
+    <main class="hero">
+      <section class="hero-copy" aria-labelledby="hero-title">
+        <div class="eyebrow">Your day starts here</div>
+        <h1 id="hero-title">Attendance,<br><em>made simple.</em></h1>
+        <p class="hero-intro">A focused space to check in, stay on track, and keep every school day accounted for.</p>
+
+        <div class="feature-row" aria-label="Presence benefits">
+          <div class="feature">
+            <span class="feature-icon" aria-hidden="true">✓</span>
+            <div><strong>Fast check-in</strong><small>Be present in seconds</small></div>
+          </div>
+          <div class="feature">
+            <span class="feature-icon" aria-hidden="true">↗</span>
+            <div><strong>Clear records</strong><small>Know where you stand</small></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="login-wrap" aria-labelledby="login-title">
+        <div class="decor decor-one"></div>
+        <div class="decor decor-two"></div>
+        <div class="login-card">
+          <div class="card-heading">
+            <div>
+              <p class="overline">Welcome back</p>
+              <h2 id="login-title">Sign in to Presence</h2>
+            </div>
+          </div>
+
+          <form id="loginForm" novalidate>
+            <div class="field-group">
+              <label for="accountId">Account ID</label>
+              <div class="input-wrap">
+                <span class="input-icon" aria-hidden="true">ID</span>
+                <input id="accountId" name="accountId" type="text" autocomplete="username" placeholder="Student ID or admin email" required>
+              </div>
+              <span class="field-error" id="accountError"></span>
+            </div>
+
+            <div class="field-group">
+              <div class="label-row">
+                <label for="password">Password</label>
+                <button class="text-button" type="button" id="helpButton">Need help?</button>
+              </div>
+              <div class="input-wrap">
+                <span class="input-icon lock-icon" aria-hidden="true"></span>
+                <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required>
+                <button class="password-toggle" type="button" id="passwordToggle" aria-label="Show password" aria-pressed="false">
+                  <span class="eye" aria-hidden="true"></span>
+                </button>
+              </div>
+              <span class="field-error" id="passwordError"></span>
+            </div>
+
+            <label class="remember">
+              <input type="checkbox" name="remember">
+              <span>Keep me signed in on this device</span>
+            </label>
+
+            <button class="submit-button" type="submit">
+              <span>Continue</span><span aria-hidden="true">→</span>
+            </button>
+            <p class="privacy-note"><span aria-hidden="true">◆</span> Your account is protected and private.</p>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>© 2026 Presence</p>
+      <p>Built for better school days.</p>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <span class="toast-icon">✓</span>
+    <div><strong id="toastTitle">Welcome back</strong><p id="toastMessage"></p></div>
+    <button type="button" id="toastClose" aria-label="Close message">×</button>
+  </div>
+
+  <div class="dialog-backdrop" id="helpDialog" hidden>
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+      <button class="dialog-close" type="button" id="dialogClose" aria-label="Close">×</button>
+      <span class="dialog-icon">?</span>
+      <h2 id="dialogTitle">Having trouble?</h2>
+      <p>Ask your class adviser or school administrator to reset your Presence credentials.</p>
+      <button class="dialog-action" type="button" id="dialogOkay">Got it</button>
+    </section>
+  </div>
+
+  <script type="module" src="script.js"></script>
+</body>
+</html>
