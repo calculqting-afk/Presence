@@ -592,7 +592,8 @@ function initializeAdmin() {
   let selectedManagedStudentUid;
   let removalCountdownTimer;
 
-  document.querySelector(".notice").textContent = "Events are saved online and sync automatically to student dashboards, including after refresh.";
+  const eventSyncNotice = document.querySelector(".notice");
+  if (eventSyncNotice) eventSyncNotice.textContent = "Events are saved online and sync automatically to student dashboards, including after refresh.";
   studentTableBody.closest("table").querySelectorAll("th")[1].textContent = "Course / Section";
   studentTableBody.closest("table").querySelectorAll("th")[2].textContent = "Live status";
   document.querySelector('label[for="eventNotes"]').textContent = "Description";
