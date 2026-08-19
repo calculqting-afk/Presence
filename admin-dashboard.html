@@ -12,7 +12,7 @@
 </head>
 <body data-dashboard="admin">
   <div class="app-shell">
-    <aside class="sidebar" style="--nav-count: 7">
+    <aside class="sidebar" style="--nav-count: 9">
       <a class="brand" href="index.html"><span class="brand-mark"><span></span></span><span>Presence</span></a>
       <p class="nav-label">Admin console</p>
       <nav class="nav-list" aria-label="Admin navigation">
@@ -21,6 +21,8 @@
         <button class="nav-button" data-view="modify-students" type="button"><span class="nav-icon">◎</span><span>Modify Students</span></button>
         <button class="nav-button" data-view="create" type="button"><span class="nav-icon">◇</span><span>Create Events</span></button>
         <button class="nav-button" data-view="modify-events" type="button"><span class="nav-icon">✎</span><span>Modify Events</span></button>
+        <button class="nav-button" data-view="assign-fine" type="button"><span class="nav-icon">＋</span><span>Assign Fine</span></button>
+        <button class="nav-button" data-view="assigned-fines" type="button"><span class="nav-icon">!</span><span>Assigned Fines</span></button>
         <button class="nav-button" data-view="profile" type="button"><span class="nav-icon">○</span><span>Profile</span></button>
         <button class="nav-button logout-button" data-logout type="button"><span class="nav-icon">↙</span><span>Logout</span></button>
       </nav>
@@ -35,7 +37,7 @@
       </header>
       <div class="content">
         <section class="view-section" data-section="dashboard">
-          <div class="welcome-card"><div class="welcome-copy"><p class="eyebrow">Administrator view</p><h2>Good morning, Admin.</h2><p>No events or student profiles are preloaded. Create and register them when you are ready.</p></div><button class="primary-button" type="button" data-go-view="create">＋ Create event</button></div>
+          <div class="welcome-card"><div class="welcome-copy"><p class="eyebrow" data-dashboard-greeting>Good morning</p><h2 data-dashboard-greeting-title>Good morning, Admin.</h2><p data-dashboard-greeting-message>Start the day prepared and stay on top of attendance.</p></div><button class="primary-button" type="button" data-go-view="create">＋ Create event</button></div>
           <div class="stats-grid">
             <article class="stat-card"><div class="stat-top"><span class="stat-label">Registered students</span><span class="stat-icon">◎</span></div><div class="stat-value" id="registeredCount">0</div><div class="stat-meta">Admin-managed profiles</div></article>
             <article class="stat-card"><div class="stat-top"><span class="stat-label">Present today</span><span class="stat-icon green">✓</span></div><div class="stat-value" id="presentTodayCount">0</div><div class="stat-meta" id="presentTodayMeta">No attendance records yet</div></article>
@@ -89,6 +91,16 @@
           <article class="panel"><div class="table-toolbar"><div class="search-wrap"><span class="search-icon">⌕</span><input class="search-input" id="studentSearch" type="search" placeholder="Search name or student ID" aria-label="Search students"></div><span class="count-label" id="studentResultCount">0 students shown</span></div><div class="table-wrap"><table><thead><tr><th>Student</th><th>Section</th><th>Face registration</th><th>Email</th><th>Actions</th></tr></thead><tbody id="studentTableBody"><tr><td colspan="5"><div class="empty-state">No student profiles have been registered yet.</div></td></tr></tbody></table></div></article>
         </section>
 
+        <section class="view-section" data-section="assign-fine" hidden>
+          <div class="section-head"><div><p class="eyebrow">Attendance accountability</p><h2>Assign Fine</h2><p>Record a missed attendance requirement and the community-service hours to complete.</p></div><button class="outline-button" type="button" data-go-view="assigned-fines">View assigned fines</button></div>
+          <article class="panel fine-assignment-panel"><div class="panel-head"><div><h3 id="fineFormTitle">Assign a fine</h3><p>Only administrators can issue or modify fines.</p></div></div><form id="fineForm"><input id="editingFineId" type="hidden"><div class="form-grid"><div class="field full"><label for="fineStudent">Student</label><select id="fineStudent" required><option value="" selected disabled>Select a student</option></select></div><div class="field"><label for="fineEvent">Missed event</label><select id="fineEvent"><option value="">General attendance absence</option></select></div><div class="field"><label for="fineHours">Community service required</label><select id="fineHours" required><option value="30">30 minutes</option><option value="40">40 minutes</option><option value="50">50 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="180">3 hours</option><option value="240">4 hours</option><option value="300">5 hours</option><option value="360">6 hours</option><option value="420">7 hours</option><option value="480">8 hours</option><option value="540">9 hours</option><option value="600">10 hours</option></select></div><div class="field"><label for="fineStatus">Status</label><select id="fineStatus"><option value="Pending">Pending</option><option value="Completed">Completed</option></select></div><div class="field full"><label for="fineReason">Reason</label><textarea id="fineReason" required placeholder="e.g. Did not attend the required assembly"></textarea></div></div><div class="form-actions"><button class="outline-button" id="cancelFineEdit" type="reset">Clear</button><button class="primary-button" id="fineSubmitButton" type="submit">Assign fine</button></div></form></article>
+        </section>
+
+        <section class="view-section" data-section="assigned-fines" hidden>
+          <div class="section-head"><div><p class="eyebrow">Fine records</p><h2>Assigned Fines</h2><p>Search, filter, modify, and remove student community-service requirements.</p></div><button class="primary-button" type="button" data-go-view="assign-fine">＋ Assign fine</button></div>
+          <article class="panel"><div class="table-toolbar fine-toolbar"><div class="search-wrap"><span class="search-icon">⌕</span><input class="search-input" id="fineSearch" type="search" placeholder="Search student, ID, event, or reason" aria-label="Search fines"></div><div class="fine-filter-row"><select id="fineStatusFilter" aria-label="Filter fines by status"><option value="all">All statuses</option><option value="Pending">Pending</option><option value="Completed">Completed</option></select><span class="count-label" id="fineResultCount">0 fines shown</span></div></div><div class="fine-list-scroll"><div class="fine-record-grid" id="adminFineList"><div class="empty-state">No fines have been assigned.</div></div></div></article>
+        </section>
+
         <section class="view-section" data-section="profile" hidden>
           <div class="section-head"><div><p class="eyebrow">Administrator account</p><h2>Profile</h2><p>Update your information and see changes immediately.</p></div><span class="badge green">Active</span></div>
           <article class="panel">
@@ -131,6 +143,6 @@
     </section>
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
-  <script type="module" src="dashboard.js?v=20260817-presence4"></script>
+  <script type="module" src="dashboard.js?v=20260819-fines"></script>
 </body>
 </html>

@@ -12,13 +12,14 @@
 </head>
 <body data-dashboard="student">
   <div class="app-shell">
-    <aside class="sidebar" style="--nav-count: 6">
-      <a class="brand" href="index.html"><span class="brand-mark"><span></span></span><span>p]Presence</span></a>
+    <aside class="sidebar" style="--nav-count: 7">
+      <a class="brand" href="index.html"><span class="brand-mark"><span></span></span><span>Presence</span></a>
       <p class="nav-label">Student space</p>
       <nav class="nav-list" aria-label="Student navigation">
         <button class="nav-button active" data-view="dashboard" type="button"><span class="nav-icon">⊞</span><span>Dashboard</span></button>
         <button class="nav-button" data-view="events" type="button"><span class="nav-icon">◇</span><span>Events</span></button>
         <button class="nav-button" data-view="history" type="button"><span class="nav-icon">◷</span><span>Event History</span></button>
+        <button class="nav-button" data-view="fines" type="button"><span class="nav-icon">!</span><span>Fines</span></button>
         <button class="nav-button" data-view="face" type="button"><span class="nav-icon">◎</span><span>Face Registration</span></button>
         <button class="nav-button" data-view="profile" type="button"><span class="nav-icon">○</span><span>Profile</span></button>
         <button class="nav-button logout-button" data-logout type="button"><span class="nav-icon">↙</span><span>Logout</span></button>
@@ -36,7 +37,7 @@
       <div class="content">
         <section class="view-section" data-section="dashboard">
           <div class="welcome-card">
-            <div class="welcome-copy"><p class="eyebrow">Good morning</p><h2>Ready for today, <span data-student-first-name>Student</span>?</h2><p>Check in when you arrive. Your administrator-managed profile and events will appear here automatically.</p></div>
+            <div class="welcome-copy"><p class="eyebrow" data-dashboard-greeting>Good morning</p><h2 data-dashboard-greeting-title>Good morning, Student.</h2><p data-dashboard-greeting-message>Start the day prepared and stay on top of attendance.</p></div>
             <button class="primary-button" type="button" data-go-view="events"><span>◇</span> View events</button>
           </div>
           <div class="stats-grid student-stats">
@@ -60,6 +61,11 @@
         <section class="view-section" data-section="history" hidden>
           <div class="section-head"><div><p class="eyebrow">Attendance records</p><h2>Event History</h2><p>Your completed events and recorded absences.</p></div></div>
           <div class="history-card-grid history-section" id="studentEventHistory"><div class="empty-state panel">No finished event history yet.</div></div>
+        </section>
+
+        <section class="view-section" data-section="fines" hidden>
+          <div class="section-head"><div><p class="eyebrow">Community service</p><h2>Fines</h2><p>Review community-service requirements assigned by your administrator.</p></div></div>
+          <div class="history-card-grid history-section" id="studentFineList"><div class="empty-state panel">You have no assigned fines.</div></div>
         </section>
 
         <section class="view-section" data-section="face" hidden>
@@ -103,6 +109,6 @@
     </section>
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
-  <script type="module" src="dashboard.js?v=20260817-presence4"></script>
+  <script type="module" src="dashboard.js?v=20260819-fines"></script>
 </body>
 </html>
