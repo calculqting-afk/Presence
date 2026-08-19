@@ -581,6 +581,8 @@ function initializeAdmin() {
   const fineForm = document.querySelector("#fineForm");
   const fineStudent = document.querySelector("#fineStudent");
   const fineStudentSearch = document.querySelector("#fineStudentSearch");
+  fineStudentSearch.insertAdjacentHTML("afterend", '<div class="fine-student-search-results" id="fineStudentSearchResults" role="listbox" hidden></div>');
+  const fineStudentSearchResults = document.querySelector("#fineStudentSearchResults");
   const fineEvent = document.querySelector("#fineEvent");
   const adminFineList = document.querySelector("#adminFineList");
   const fineSearch = document.querySelector("#fineSearch");
@@ -730,6 +732,18 @@ function initializeAdmin() {
       const searchable = [student.firstName, student.middleName, student.lastName, student.accountId].filter(Boolean).join(" ").toLowerCase();
       return !search || searchable.includes(search) || student.uid === selectedStudent;
     });
+    if (search) {
+      fineStudentSearchResults.hidden = false;
+      fineStudentSearchResults.innerHTML = matchingStudents.length
+        ? matchingStudents.map((student) => {
+          const fullName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ");
+          return `<button class="fine-student-search-result" type="button" role="option" data-select-fine-student="${escapeHtml(student.uid)}"><strong>${escapeHtml(fullName)}</strong><small>Student ID · ${escapeHtml(student.accountId)}</small></button>`;
+        }).join("")
+        : '<p class="fine-student-search-empty">No student matches that name or Student ID.</p>';
+    } else {
+      fineStudentSearchResults.hidden = true;
+      fineStudentSearchResults.innerHTML = "";
+    }
     const emptyOption = matchingStudents.length ? "" : '<option value="" disabled selected>No students found</option>';
     fineStudent.innerHTML = `<option value="" disabled ${selectedStudent ? "" : "selected"}>Select a student</option>${emptyOption}${matchingStudents.map((student) => `<option value="${escapeHtml(student.uid)}">${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))} · ${escapeHtml(student.accountId)}</option>`).join("")}`;
     fineEvent.innerHTML = `<option value="">General attendance absence</option>${events.map((event) => `<option value="${escapeHtml(event.id)}">${escapeHtml(event.name)}${event.date ? ` · ${escapeHtml(event.date)}` : ""}</option>`).join("")}`;
@@ -830,6 +844,14 @@ function initializeAdmin() {
 
   document.querySelector("#cancelFineEdit").addEventListener("click", () => window.setTimeout(resetFineForm));
   fineStudentSearch.addEventListener("input", renderFineOptions);
+  fineStudentSearchResults.addEventListener("click", (event) => {
+    const result = event.target.closest("[data-select-fine-student]");
+    if (!result) return;
+    fineStudent.value = result.dataset.selectFineStudent;
+    fineStudentSearch.value = "";
+    renderFineOptions();
+    fineStudent.focus();
+  });
   fineSearch.addEventListener("input", renderAdminFines);
   fineStatusFilter.addEventListener("change", renderAdminFines);
 
