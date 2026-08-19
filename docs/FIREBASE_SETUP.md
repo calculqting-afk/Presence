@@ -17,17 +17,18 @@ If the administrator email changes later, update `ADMIN_EMAIL` in `config/fireba
 Install the Firebase CLI, sign in, then from this folder run:
 
 ```text
-firebase deploy --only functions,firestore:rules,hosting
+firebase deploy --only firestore:rules,hosting
 ```
 
-Student creation and complete account removal use the included Cloud Function. Enable billing for the Firebase project before deploying Cloud Functions.
+This version works on Firebase's Spark plan and does not require Cloud Functions.
 
 ## Account behavior
 
 - Administrators sign in with their Firebase email and password.
 - Students sign in with the Student ID and password created by an administrator.
-- The admin dashboard uses an administrator-only Cloud Function to create and remove student login accounts.
+- The admin dashboard uses a separate Firebase Authentication session to create student login accounts without signing out the administrator.
 - Firestore rules allow only the configured administrator email to create, modify, or remove authorized student profiles.
-- Removing a student deletes their Authentication account, Firestore profile, Student ID reservation, attendance, dismissed history, face registration, and presence records. If a prior partial removal left only an Authentication account, registering the ID again safely reclaims it.
+- Removing a student deletes their Authentication account, Firestore profile, Student ID reservation, attendance, dismissed history, face registration, and presence records after the administrator enters the student's current password.
+- If an account was partially removed and only its Firebase Authentication login remains, remove that login from **Firebase Console → Authentication → Users** before registering the Student ID again.
 - Authentication accounts created outside the admin panel do not become students automatically.
 - Never place an administrator password or a Firebase Admin service-account key in frontend files.

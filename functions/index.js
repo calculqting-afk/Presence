@@ -44,6 +44,7 @@ function toStudentError(error) {
     "auth/email-already-exists": ["already-exists", "This Student ID already has a Firebase login account."],
     "auth/invalid-email": ["invalid-argument", "Firebase could not create a login address from this Student ID."],
     "auth/invalid-password": ["invalid-argument", "Firebase requires a password containing at least 6 characters."],
+    "auth/internal-error": ["unavailable", "Firebase Authentication is temporarily unavailable. Please try again."],
     "auth/user-not-found": ["not-found", "The student's Firebase login account no longer exists."],
     "auth/uid-already-exists": ["already-exists", "This student already has a Firebase login account."]
   };
@@ -127,8 +128,11 @@ exports.manageStudent = onCall(async (request) => {
       const displayName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ");
       const existingId = await firestore.doc(`studentIds/${accountIdKey}`).get();
       if (existingId.exists) {
-        const indexedProfile = await firestore.doc(`students/${existingId.data().uid}`).get();
-        if (indexedProfile.exists) throw new HttpsError("already-exists", "This Student ID is already registered.");
+        const indexedUid = existingId.data()?.uid;
+        if (typeof indexedUid === "string" && indexedUid) {
+          const indexedProfile = await firestore.doc(`students/${indexedUid}`).get();
+          if (indexedProfile.exists) throw new HttpsError("already-exists", "This Student ID is already registered.");
+        }
         await firestore.doc(`studentIds/${accountIdKey}`).delete();
       }
       let user = await findUserByEmail(firebaseAuth, authEmail);

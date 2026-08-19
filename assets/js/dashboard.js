@@ -1,6 +1,5 @@
-import { ADMIN_EMAIL, app, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js";
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
-import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-functions.js";
+import { ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js";
+import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
   Timestamp,
   addDoc,
@@ -19,8 +18,6 @@ import {
   where,
   writeBatch
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
-
-const manageStudent = httpsCallable(getFunctions(app), "manageStudent");
 
 const dashboardRole = document.body.dataset.dashboard;
 const pageCopy = {
@@ -953,7 +950,48 @@ function initializeAdmin() {
         }
         await studentBatch.commit();
       } else {
-        await manageStudent({ action: "create", student });
+        const studentIdKey = student.accountId.toLowerCase();
+        const idReference = doc(db, "studentIds", studentIdKey);
+        const idSnapshot = await getDoc(idReference);
+        if (idSnapshot.exists()) {
+          const indexedUid = idSnapshot.data()?.uid;
+          if (typeof indexedUid === "string" && indexedUid) {
+            const indexedProfile = await getDoc(doc(db, "students", indexedUid));
+            if (indexedProfile.exists()) {
+              showDashboardToast("Student ID taken", "This Student ID is already registered by another student.");
+              return;
+            }
+          }
+          await deleteDoc(idReference);
+        }
+        const authEmail = studentIdToEmail(student.accountId);
+        let credential;
+        try {
+          credential = await createUserWithEmailAndPassword(studentProvisioningAuth, authEmail, student.password);
+          await updateProfile(credential.user, { displayName: [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ") });
+          const { password, ...profile } = student;
+          const registration = writeBatch(db);
+          registration.set(doc(db, "students", credential.user.uid), {
+            ...profile,
+            accountIdKey: studentIdKey,
+            uid: credential.user.uid,
+            authEmail,
+            active: true,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+          registration.set(idReference, {
+            studentId: student.accountId,
+            uid: credential.user.uid,
+            createdAt: serverTimestamp()
+          });
+          await registration.commit();
+        } catch (error) {
+          if (credential?.user) await deleteUser(credential.user).catch(() => {});
+          throw error;
+        } finally {
+          await signOut(studentProvisioningAuth).catch(() => {});
+        }
       }
       resetStudentForm();
       openView("modify-students");
@@ -961,10 +999,11 @@ function initializeAdmin() {
     } catch (error) {
       console.error("FULL FIREBASE ERROR:", error);
       const messages = {
-        "functions/already-exists": "This Student ID is already registered.",
-        "functions/invalid-argument": error.message || "Check the student information and password.",
-        "functions/permission-denied": "Only the administrator can register students.",
-        "functions/unavailable": "Student management is temporarily unavailable. Try again in a moment."
+        "auth/email-already-in-use": "This Student ID already has a Firebase login. Remove it from Firebase Authentication, or use the student’s password to clear the account first.",
+        "auth/invalid-email": "The Student ID could not be used as a login.",
+        "auth/weak-password": "The password must contain at least 6 characters.",
+        "permission-denied": "Registration was rejected. Deploy the latest Firestore rules, then try again.",
+        "firestore/permission-denied": "Registration was rejected. Deploy the latest Firestore rules, then try again."
       };
       const message = messages[error.code] || error.message || "The student could not be saved.";
       showDashboardToast("Unable to save student", message);
@@ -992,6 +1031,7 @@ function initializeAdmin() {
     window.clearInterval(removalCountdownTimer);
     removeStudentModal.hidden = true;
     selectedRemovalStudent = undefined;
+    document.querySelector("#removeStudentPassword").value = "";
     document.querySelector("#removeStudentCountdown").textContent = "Review this action carefully.";
     const confirmButton = document.querySelector("#confirmRemoveStudent");
     confirmButton.disabled = true;
@@ -1011,6 +1051,7 @@ function initializeAdmin() {
     if (!selectedRemovalStudent) return;
     window.clearInterval(removalCountdownTimer);
     document.querySelector("#removeStudentMessage").textContent = `${selectedRemovalStudent.firstName} ${selectedRemovalStudent.lastName} (${selectedRemovalStudent.accountId})'s account and saved records will be completely removed from Firebase and logged out.`;
+    document.querySelector("#removeStudentPassword").value = "";
     removeStudentModal.hidden = false;
     const countdown = document.querySelector("#removeStudentCountdown");
     const confirmButton = document.querySelector("#confirmRemoveStudent");
@@ -1030,7 +1071,7 @@ function initializeAdmin() {
       confirmButton.disabled = false;
       confirmButton.textContent = "Remove account completely";
     }, 1000);
-    confirmButton.focus();
+    document.querySelector("#removeStudentPassword").focus();
   }
 
   studentTableBody.addEventListener("click", (clickEvent) => {
@@ -1087,13 +1128,36 @@ function initializeAdmin() {
 
   document.querySelector("#confirmRemoveStudent").addEventListener("click", async () => {
     if (!selectedRemovalStudent) return;
+    const currentPassword = document.querySelector("#removeStudentPassword").value.trim();
+    if (currentPassword.length < 6) {
+      showDashboardToast("Student password required", "Enter the student's current password before clearing the account.");
+      document.querySelector("#removeStudentPassword").focus();
+      return;
+    }
     const studentToRemove = selectedRemovalStudent;
     const confirmButton = document.querySelector("#confirmRemoveStudent");
     confirmButton.disabled = true;
     confirmButton.textContent = "Removing account…";
 
     try {
-      await manageStudent({ action: "delete", uid: studentToRemove.uid });
+      await signOut(studentProvisioningAuth).catch(() => {});
+      const credential = await signInWithEmailAndPassword(studentProvisioningAuth, studentToRemove.authEmail || studentIdToEmail(studentToRemove.accountId), currentPassword);
+      if (credential.user.uid !== studentToRemove.uid) throw new Error("The password does not match this student account.");
+      const [dismissedSnapshot, presenceSnapshot] = await Promise.all([
+        getDocs(query(collection(db, "dismissedHistory"), where("studentUid", "==", studentToRemove.uid))),
+        getDocs(query(collection(db, "presenceSessions"), where("studentUid", "==", studentToRemove.uid)))
+      ]);
+      await deleteUser(credential.user);
+      const cleanup = writeBatch(db);
+      cleanup.delete(doc(db, "students", studentToRemove.uid));
+      cleanup.delete(doc(db, "studentIds", studentToRemove.accountIdKey || studentToRemove.accountId.toLowerCase()));
+      cleanup.delete(doc(db, "faceRegistrations", studentToRemove.uid));
+      cleanup.delete(doc(db, "presence", studentToRemove.uid));
+      attendance.filter((record) => record.studentUid === studentToRemove.uid).forEach((record) => cleanup.delete(doc(db, "attendance", record.id)));
+      dismissedSnapshot.docs.forEach((record) => cleanup.delete(record.ref));
+      presenceSnapshot.docs.forEach((record) => cleanup.delete(record.ref));
+      await cleanup.commit();
+      await signOut(studentProvisioningAuth).catch(() => {});
 
       if (selectedManagedStudentUid === studentToRemove.uid) selectedManagedStudentUid = undefined;
       resetStudentForm();
@@ -1101,10 +1165,11 @@ function initializeAdmin() {
 
       showDashboardToast("Account Completely Removed", `${studentToRemove.accountId} and all saved student data were removed from Firebase.`);
     } catch (error) {
+      await signOut(studentProvisioningAuth).catch(() => {});
       confirmButton.disabled = false;
       confirmButton.textContent = "Remove account completely";
-      const message = error.code === "functions/permission-denied"
-        ? "Only the administrator can remove student accounts."
+      const message = (error.code === "auth/invalid-credential" || error.code === "auth/wrong-password")
+        ? "The current student password is incorrect."
         : error.message || "An error occurred while removing the account.";
       showDashboardToast("Unable to remove account", message);
     }
