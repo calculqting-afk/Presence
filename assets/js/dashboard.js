@@ -1,4 +1,4 @@
-import { ADMIN_EMAIL, app, auth, db, studentIdToEmail, studentProvisioningAuth } from "./firebase-config.js";
+import { ADMIN_EMAIL, app, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-functions.js";
 import {
@@ -215,7 +215,7 @@ function wireCommonNavigation() {
       sessionStorage.removeItem("presenceDeviceSession");
     } catch {}
     await signOut(auth);
-    window.location.href = "index.html";
+    window.location.href = "../index.html";
   });
   const dateText = new Intl.DateTimeFormat("en", { weekday: "short", month: "short", day: "numeric", year: "numeric" }).format(new Date());
   document.querySelectorAll("[data-current-date]").forEach((element) => { element.textContent = dateText; });
@@ -547,7 +547,7 @@ function initializeStudent() {
     if (!snapshot.exists()) {
       sessionStorage.removeItem("presenceSession");
       await signOut(auth);
-      window.location.replace("index.html");
+      window.location.replace("../index.html");
       return;
     }
     studentProfile = snapshot.data();
@@ -1163,7 +1163,7 @@ async function initialize() {
   currentUser = await waitForUser();
   if (!currentUser || !(await verifyRole(currentUser))) {
     if (currentUser) await signOut(auth);
-    window.location.replace("index.html");
+    window.location.replace("../index.html");
     return;
   }
   wireCommonNavigation();

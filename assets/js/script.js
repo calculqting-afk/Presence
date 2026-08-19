@@ -1,4 +1,4 @@
-import { ADMIN_EMAIL, auth, db, studentIdToEmail } from "./firebase-config.js";
+import { ADMIN_EMAIL, auth, db, studentIdToEmail } from "../../config/firebase-config.js";
 import {
   browserLocalPersistence,
   browserSessionPersistence,
@@ -88,7 +88,7 @@ form.addEventListener("submit", async (event) => {
     }));
     showToast(role === "admin" ? "Admin access verified" : "Welcome to Presence", "Your account was verified successfully.");
     window.setTimeout(() => {
-      window.location.href = role === "admin" ? "admin-dashboard.html" : "student-dashboard.html";
+      window.location.href = role === "admin" ? "pages/admin-dashboard.html" : "pages/student-dashboard.html";
     }, 450);
   } catch (error) {
     const permissionDenied = error.code === "permission-denied"

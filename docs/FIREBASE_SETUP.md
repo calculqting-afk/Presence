@@ -10,7 +10,7 @@ The browser app is configured for the Firebase project `presence-a873f`.
 
 That exact email is the single administrator identity. No `admins/{UID}` document is needed, so deleting and recreating the account with the same email will not break administrator access. Do not enable public account registration.
 
-If the administrator email changes later, update `ADMIN_EMAIL` in `firebase-config.js` and update the email in `firestore.rules`, then redeploy.
+If the administrator email changes later, update `ADMIN_EMAIL` in `config/firebase-config.js` and update the email in `firestore.rules`, then redeploy.
 
 ## Deploy
 

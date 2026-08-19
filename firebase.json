@@ -10,7 +10,7 @@
     "ignore": [
       "firebase.json",
       "firestore.rules",
-      "FIREBASE_SETUP.md",
+      "docs/**",
       ".firebaserc",
       "functions/**",
       ".git/**",
