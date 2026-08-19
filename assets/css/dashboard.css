@@ -45,6 +45,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   display: flex;
   flex-direction: column;
   padding: 32px 20px 24px;
+  overflow: hidden;
   color: white;
   background:
     radial-gradient(circle at 0 100%, rgba(57, 132, 255, .22), transparent 17rem),
@@ -73,7 +74,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .brand-mark span { width: 11px; height: 11px; border: 3px solid white; border-top-color: transparent; border-radius: 50%; }
 .nav-label { margin: 0 12px 12px; color: #7891c0; font-size: .62rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
-.nav-list { display: flex; flex-direction: column; gap: 7px; }
+.nav-list {
+  min-height: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 7px;
+  padding-right: 4px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(150, 180, 230, .45) transparent;
+}
 .nav-button {
   width: 100%;
   min-height: 48px;
@@ -94,8 +105,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .nav-button.active { color: white; background: linear-gradient(110deg, #1763da, #2e82f6); box-shadow: 0 10px 24px rgba(0,0,0,.17); }
 .nav-icon { width: 20px; text-align: center; font-size: 1rem; transition: transform .25s var(--ease-out); }
 .nav-button:hover .nav-icon { transform: scale(1.12); }
-.sidebar-spacer { flex: 1; }
+.sidebar-spacer { display: none; }
 .sidebar-user {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 10px;
