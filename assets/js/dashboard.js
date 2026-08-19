@@ -47,6 +47,7 @@ let mediaStream;
 let presenceHeartbeatTimer;
 let presenceSessionId;
 let activeView;
+let previousView = "dashboard";
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
@@ -73,6 +74,7 @@ function renderView(viewName) {
 
 function openView(viewName) {
   if (!pageCopy[dashboardRole][viewName] || viewName === activeView) return;
+  previousView = activeView || "dashboard";
   renderView(viewName);
   history.pushState({ presenceDashboard: true, view: viewName }, "", window.location.href);
 }
@@ -176,6 +178,7 @@ async function verifyRole(user) {
 function wireCommonNavigation() {
   document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => openView(button.dataset.view)));
   document.querySelectorAll("[data-go-view]").forEach((button) => button.addEventListener("click", () => openView(button.dataset.goView)));
+  document.querySelectorAll("[data-go-back]").forEach((button) => button.addEventListener("click", () => openView(previousView)));
   document.body.insertAdjacentHTML("beforeend", `
     <div class="dashboard-modal-backdrop" id="logoutModal" hidden>
       <section class="dashboard-modal logout-modal" role="dialog" aria-modal="true" aria-labelledby="logoutModalTitle">
@@ -577,6 +580,7 @@ function initializeAdmin() {
   const studentSearch = document.querySelector("#studentSearch");
   const fineForm = document.querySelector("#fineForm");
   const fineStudent = document.querySelector("#fineStudent");
+  const fineStudentSearch = document.querySelector("#fineStudentSearch");
   const fineEvent = document.querySelector("#fineEvent");
   const adminFineList = document.querySelector("#adminFineList");
   const fineSearch = document.querySelector("#fineSearch");
@@ -588,6 +592,7 @@ function initializeAdmin() {
   let selectedRemovalStudent;
   let selectedManagedStudentUid;
   let removalCountdownTimer;
+  let pendingAdminProfilePhoto = "";
 
   const eventSyncNotice = document.querySelector(".notice");
   if (eventSyncNotice) eventSyncNotice.textContent = "Events are saved online and sync automatically to student dashboards, including after refresh.";
@@ -598,13 +603,60 @@ function initializeAdmin() {
   document.querySelector("#eventLocation").closest(".field").insertAdjacentHTML("beforebegin", '<div class="field"><label for="eventType">Event type</label><select id="eventType" required><option value="Assembly">Assembly</option><option value="Meeting">Meeting</option><option value="Seminar">Seminar</option><option value="Workshop">Workshop</option><option value="School Activity">School Activity</option><option value="Ceremony">Ceremony</option><option value="Sports">Sports</option><option value="Other">Other</option></select></div>');
   document.querySelector("#adminProfileEmail").value = currentUser.email || ADMIN_EMAIL;
 
+  async function prepareAdminProfilePhoto(file) {
+    if (!file.type.match(/^image\/(jpeg|png|webp)$/)) throw new Error("Choose a JPG, PNG, or WebP image.");
+    if (file.size > 8 * 1024 * 1024) throw new Error("Choose an image smaller than 8 MB.");
+    const source = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("Unable to read this image."));
+      reader.readAsDataURL(file);
+    });
+    const image = new Image();
+    image.src = source;
+    await image.decode();
+    const side = Math.min(image.naturalWidth, image.naturalHeight);
+    const canvas = document.createElement("canvas");
+    canvas.width = 320;
+    canvas.height = 320;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, 320, 320);
+    context.drawImage(image, (image.naturalWidth - side) / 2, (image.naturalHeight - side) / 2, side, side, 0, 0, 320, 320);
+    const compressed = canvas.toDataURL("image/jpeg", .82);
+    if (compressed.length > 350000) throw new Error("The processed image is still too large. Try another photo.");
+    return compressed;
+  }
+
+  function updateAdminPhotoPreview(photoDataUrl = "") {
+    const image = document.querySelector("#adminProfilePhotoPreviewImage");
+    const initials = document.querySelector("#adminProfilePhotoPreviewInitials");
+    if (photoDataUrl) {
+      image.src = photoDataUrl;
+      image.hidden = false;
+      initials.hidden = true;
+      return;
+    }
+    image.removeAttribute("src");
+    image.hidden = true;
+    initials.hidden = false;
+    initials.textContent = (document.querySelector("#adminDisplayName").value || "School Admin").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part.charAt(0)).join("").toUpperCase() || "AD";
+  }
+
   function renderAdminProfile(profile = {}) {
     const displayName = profile.displayName || "School Admin";
     const initials = displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part.charAt(0)).join("").toUpperCase() || "AD";
     document.querySelector("#adminDisplayName").value = displayName;
     document.querySelector("#adminProfilePhone").value = profile.phone || "";
     document.querySelectorAll("[data-admin-name]").forEach((element) => { element.textContent = displayName; });
-    document.querySelectorAll("[data-admin-initials]").forEach((element) => { element.textContent = initials; });
+    document.querySelectorAll("[data-admin-initials]").forEach((element) => { element.textContent = initials; element.hidden = Boolean(profile.photoDataUrl); });
+    document.querySelectorAll("[data-admin-photo]").forEach((element) => {
+      if (profile.photoDataUrl) element.src = profile.photoDataUrl;
+      else element.removeAttribute("src");
+      element.hidden = !profile.photoDataUrl;
+    });
+    pendingAdminProfilePhoto = profile.photoDataUrl || "";
+    updateAdminPhotoPreview(pendingAdminProfilePhoto);
     updateDashboardGreeting(displayName);
   }
 
@@ -614,6 +666,7 @@ function initializeAdmin() {
       await setDoc(doc(db, "adminProfiles", currentUser.uid), {
         displayName: document.querySelector("#adminDisplayName").value.trim(),
         phone: document.querySelector("#adminProfilePhone").value.trim(),
+        photoDataUrl: pendingAdminProfilePhoto,
         email: currentUser.email,
         updatedAt: serverTimestamp()
       }, { merge: true });
@@ -622,6 +675,24 @@ function initializeAdmin() {
       showDashboardToast("Unable to update profile", error.code === "permission-denied" ? "Publish the latest database rules first." : error.message);
     }
   });
+
+  document.querySelector("#adminProfilePhoto").addEventListener("change", async (event) => {
+    const [file] = event.target.files;
+    if (!file) return;
+    try {
+      pendingAdminProfilePhoto = await prepareAdminProfilePhoto(file);
+      updateAdminPhotoPreview(pendingAdminProfilePhoto);
+    } catch (error) {
+      event.target.value = "";
+      showDashboardToast("Unable to use photo", error.message);
+    }
+  });
+  document.querySelector("#removeAdminProfilePhoto").addEventListener("click", () => {
+    pendingAdminProfilePhoto = "";
+    document.querySelector("#adminProfilePhoto").value = "";
+    updateAdminPhotoPreview();
+  });
+  document.querySelector("#adminDisplayName").addEventListener("input", () => { if (!pendingAdminProfilePhoto) updateAdminPhotoPreview(); });
 
   function renderAdminAttendance() {
     const now = new Date();
@@ -654,7 +725,13 @@ function initializeAdmin() {
   function renderFineOptions() {
     const selectedStudent = fineStudent.value;
     const selectedEvent = fineEvent.value;
-    fineStudent.innerHTML = `<option value="" disabled ${selectedStudent ? "" : "selected"}>Select a student</option>${students.map((student) => `<option value="${escapeHtml(student.uid)}">${escapeHtml([student.lastName, student.firstName].filter(Boolean).join(", "))} · ${escapeHtml(student.accountId)}</option>`).join("")}`;
+    const search = fineStudentSearch.value.trim().toLowerCase();
+    const matchingStudents = students.filter((student) => {
+      const searchable = [student.firstName, student.middleName, student.lastName, student.accountId].filter(Boolean).join(" ").toLowerCase();
+      return !search || searchable.includes(search) || student.uid === selectedStudent;
+    });
+    const emptyOption = matchingStudents.length ? "" : '<option value="" disabled selected>No students found</option>';
+    fineStudent.innerHTML = `<option value="" disabled ${selectedStudent ? "" : "selected"}>Select a student</option>${emptyOption}${matchingStudents.map((student) => `<option value="${escapeHtml(student.uid)}">${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))} · ${escapeHtml(student.accountId)}</option>`).join("")}`;
     fineEvent.innerHTML = `<option value="">General attendance absence</option>${events.map((event) => `<option value="${escapeHtml(event.id)}">${escapeHtml(event.name)}${event.date ? ` · ${escapeHtml(event.date)}` : ""}</option>`).join("")}`;
     fineStudent.value = selectedStudent;
     fineEvent.value = selectedEvent;
@@ -677,6 +754,8 @@ function initializeAdmin() {
 
   function resetFineForm() {
     fineForm.reset();
+    fineStudentSearch.value = "";
+    renderFineOptions();
     document.querySelector("#editingFineId").value = "";
     document.querySelector("#fineFormTitle").textContent = "Assign a fine";
     document.querySelector("#fineSubmitButton").textContent = "Assign fine";
@@ -750,6 +829,7 @@ function initializeAdmin() {
   });
 
   document.querySelector("#cancelFineEdit").addEventListener("click", () => window.setTimeout(resetFineForm));
+  fineStudentSearch.addEventListener("input", renderFineOptions);
   fineSearch.addEventListener("input", renderAdminFines);
   fineStatusFilter.addEventListener("change", renderAdminFines);
 

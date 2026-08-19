@@ -27,13 +27,13 @@
         <button class="nav-button logout-button" data-logout type="button"><span class="nav-icon">↙</span><span>Logout</span></button>
       </nav>
       <div class="sidebar-spacer"></div>
-      <div class="sidebar-user"><span class="mini-avatar" data-admin-initials>AD</span><div><strong data-admin-name>School Admin</strong><small>Full access</small></div></div>
+      <div class="sidebar-user"><span class="mini-avatar"><img data-admin-photo alt="" hidden><span data-admin-initials>AD</span></span><div><strong data-admin-name>School Admin</strong><small>Full access</small></div></div>
     </aside>
 
     <main class="main-area">
       <header class="topbar">
         <div><h1 id="pageTitle">Dashboard</h1><p id="pageSubtitle">School attendance overview</p></div>
-        <div class="topbar-actions"><span class="date-pill" data-current-date></span><span class="avatar">AD</span></div>
+        <div class="topbar-actions"><span class="date-pill" data-current-date></span><button class="topbar-profile" type="button" data-go-view="profile" aria-label="Open administrator profile"><span class="avatar"><img data-admin-photo alt="" hidden><span data-admin-initials>AD</span></span><span class="profile-name" data-admin-name>School Admin</span></button></div>
       </header>
       <div class="content">
         <section class="view-section" data-section="dashboard">
@@ -53,7 +53,7 @@
         <section class="view-section" data-section="create" hidden>
           <div class="section-head"><div><p class="eyebrow">Attendance setup</p><h2>Create Events</h2><p>Create an attendance window for students.</p></div></div>
           <div class="form-layout">
-            <article class="panel"><div class="panel-head"><div><h3 id="eventFormTitle">Event details</h3><p>Attendance opens and closes automatically using this schedule.</p></div></div><form id="eventForm"><input id="editingEventId" type="hidden"><div class="form-grid"><div class="field full"><label for="eventName">Event name</label><input id="eventName" required placeholder="e.g. Science Fair Attendance"></div><div class="field"><label for="eventDate">Date</label><input id="eventDate" type="date" required></div><div class="field"><label for="eventLocation">Location</label><input id="eventLocation" required placeholder="e.g. Activity center"></div><div class="field"><label for="eventTimeIn">Time In — attendance opens</label><input id="eventTimeIn" type="time" required></div><div class="field"><label for="eventTimeOut">Time Out — attendance closes</label><input id="eventTimeOut" type="time" required></div><div class="field full"><label for="eventAudience">Student group</label><select id="eventAudience"><option>All students</option><option>Section 1A</option><option>Section 1B</option><option>Section 2A</option><option>Section 2B</option><option>Section 3A</option><option>Section 3B</option><option>Section 4A</option><option>Section 4B</option></select></div><div class="field full"><label for="eventNotes">Instructions</label><textarea id="eventNotes" placeholder="Optional check-in instructions"></textarea></div></div><div class="form-actions"><button class="outline-button" id="clearEventForm" type="button">Clear</button><button class="primary-button" id="eventSubmitButton" type="submit">Create event</button></div></form></article>
+            <article class="panel"><div class="panel-head"><div><h3 id="eventFormTitle">Event details</h3><p>Attendance opens and closes automatically using this schedule.</p></div></div><form id="eventForm"><input id="editingEventId" type="hidden"><div class="form-grid"><div class="field full"><label for="eventName">Event name</label><input id="eventName" required placeholder="e.g. Science Fair Attendance"></div><div class="field"><label for="eventDate">Date</label><input id="eventDate" type="date" required></div><div class="field"><label for="eventLocation">Location</label><input id="eventLocation" required placeholder="e.g. Activity center"></div><div class="field"><label for="eventTimeIn">Time In — attendance opens</label><input id="eventTimeIn" type="time" required></div><div class="field"><label for="eventTimeOut">Time Out — attendance closes</label><input id="eventTimeOut" type="time" required></div><div class="field full"><label for="eventAudience">Student group</label><select id="eventAudience"><option>All students</option><option>Section 1A</option><option>Section 1B</option><option>Section 2A</option><option>Section 2B</option><option>Section 3A</option><option>Section 3B</option><option>Section 4A</option><option>Section 4B</option></select></div><div class="field full"><label for="eventNotes">Instructions</label><textarea id="eventNotes" placeholder="Optional check-in instructions"></textarea></div></div><div class="form-actions"><button class="outline-button" type="button" data-go-back>← Back</button><button class="outline-button" id="clearEventForm" type="button">Clear</button><button class="primary-button" id="eventSubmitButton" type="submit">Create event</button></div></form></article>
           </div>
         </section>
 
@@ -79,7 +79,7 @@
                 <div class="field"><label for="managedEmail">Email address</label><input id="managedEmail" type="email"></div>
                 <div class="field"><label for="managedPhone">Phone number</label><input id="managedPhone" type="tel"></div>
               </div>
-              <div class="form-actions"><button class="outline-button" id="cancelStudentForm" type="button">Reset form</button><button class="primary-button" id="studentSubmitButton" type="submit">Add student</button></div>
+              <div class="form-actions"><button class="outline-button" type="button" data-go-back>← Back</button><button class="outline-button" id="cancelStudentForm" type="button">Reset form</button><button class="primary-button" id="studentSubmitButton" type="submit">Add student</button></div>
             </form>
           </article>
         </section>
@@ -92,7 +92,7 @@
 
         <section class="view-section" data-section="assign-fine" hidden>
           <div class="section-head"><div><p class="eyebrow">Attendance accountability</p><h2>Assign Fine</h2><p>Record a missed attendance requirement and the community-service hours to complete.</p></div><button class="outline-button" type="button" data-go-view="assigned-fines">View assigned fines</button></div>
-          <article class="panel fine-assignment-panel"><div class="panel-head"><div><h3 id="fineFormTitle">Assign a fine</h3><p>Only administrators can issue or modify fines.</p></div></div><form id="fineForm"><input id="editingFineId" type="hidden"><div class="form-grid"><div class="field full"><label for="fineStudent">Student</label><select id="fineStudent" required><option value="" selected disabled>Select a student</option></select></div><div class="field"><label for="fineEvent">Missed event</label><select id="fineEvent"><option value="">General attendance absence</option></select></div><div class="field"><label for="fineHours">Community service required</label><select id="fineHours" required><option value="30">30 minutes</option><option value="40">40 minutes</option><option value="50">50 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="180">3 hours</option><option value="240">4 hours</option><option value="300">5 hours</option><option value="360">6 hours</option><option value="420">7 hours</option><option value="480">8 hours</option><option value="540">9 hours</option><option value="600">10 hours</option></select></div><div class="field"><label for="fineStatus">Status</label><select id="fineStatus"><option value="Pending">Pending</option><option value="Completed">Completed</option></select></div><div class="field full"><label for="fineReason">Reason</label><textarea id="fineReason" required placeholder="e.g. Did not attend the required assembly"></textarea></div></div><div class="form-actions"><button class="outline-button" id="cancelFineEdit" type="reset">Clear</button><button class="primary-button" id="fineSubmitButton" type="submit">Assign fine</button></div></form></article>
+          <article class="panel fine-assignment-panel"><div class="panel-head"><div><h3 id="fineFormTitle">Assign a fine</h3><p>Only administrators can issue or modify fines.</p></div></div><form id="fineForm"><input id="editingFineId" type="hidden"><div class="form-grid"><div class="field full"><label for="fineStudentSearch">Find student</label><input id="fineStudentSearch" type="search" placeholder="Search by full name or Student ID" autocomplete="off"><small>Search, then choose the student from the list below.</small></div><div class="field full"><label for="fineStudent">Student</label><select id="fineStudent" required><option value="" selected disabled>Select a student</option></select></div><div class="field"><label for="fineEvent">Missed event</label><select id="fineEvent"><option value="">General attendance absence</option></select></div><div class="field"><label for="fineHours">Community service required</label><select id="fineHours" required><option value="30">30 minutes</option><option value="40">40 minutes</option><option value="50">50 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="180">3 hours</option><option value="240">4 hours</option><option value="300">5 hours</option><option value="360">6 hours</option><option value="420">7 hours</option><option value="480">8 hours</option><option value="540">9 hours</option><option value="600">10 hours</option></select></div><div class="field"><label for="fineStatus">Status</label><select id="fineStatus"><option value="Pending">Pending</option><option value="Completed">Completed</option></select></div><div class="field full"><label for="fineReason">Reason</label><textarea id="fineReason" required placeholder="e.g. Did not attend the required assembly"></textarea></div></div><div class="form-actions"><button class="outline-button" type="button" data-go-back>← Back</button><button class="outline-button" id="cancelFineEdit" type="reset">Clear</button><button class="primary-button" id="fineSubmitButton" type="submit">Assign fine</button></div></form></article>
         </section>
 
         <section class="view-section" data-section="assigned-fines" hidden>
@@ -106,11 +106,12 @@
             <div class="panel-head"><div><h3>Profile information</h3><p>Your administrator email remains fixed for account security.</p></div></div>
             <form id="adminProfileForm">
               <div class="form-grid">
-                <div class="field"><label for="adminDisplayName">Display name</label><input id="adminDisplayName" required placeholder="School Admin"></div>
+                <div class="field full profile-photo-field"><label for="adminProfilePhoto">Profile picture</label><div class="profile-photo-control"><span class="profile-photo-preview" id="adminProfilePhotoPreview"><span id="adminProfilePhotoPreviewInitials">AD</span><img id="adminProfilePhotoPreviewImage" alt="Selected administrator profile preview" hidden></span><div><input id="adminProfilePhoto" type="file" accept="image/jpeg,image/png,image/webp"><small>Choose a photo from your device. It will be cropped and resized automatically.</small><button class="link-button" id="removeAdminProfilePhoto" type="button">Remove photo</button></div></div></div>
+                <div class="field"><label for="adminDisplayName">Full name</label><input id="adminDisplayName" required autocomplete="name" placeholder="School Admin"></div>
                 <div class="field"><label for="adminProfileEmail">Administrator email</label><input id="adminProfileEmail" type="email" disabled></div>
                 <div class="field"><label for="adminProfilePhone">Phone number</label><input id="adminProfilePhone" type="tel"></div>
               </div>
-              <div class="form-actions"><button class="primary-button" type="submit">Save profile</button></div>
+              <div class="form-actions"><button class="outline-button" type="button" data-go-back>← Back</button><button class="primary-button" type="submit">Save profile</button></div>
             </form>
           </article>
         </section>
@@ -142,6 +143,6 @@
     </section>
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
-  <script type="module" src="../assets/js/dashboard.js?v=20260819-spark"></script>
+  <script type="module" src="../assets/js/dashboard.js?v=20260819-admin-photo"></script>
 </body>
 </html>
