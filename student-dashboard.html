@@ -85,13 +85,15 @@
       <button class="modal-close" type="button" data-close-student-profile aria-label="Close">×</button>
       <span class="modal-icon">○</span>
       <h2 id="studentProfileModalTitle">Edit profile</h2>
-      <p>Your Student ID and account access cannot be changed here.</p>
+      <p>Update your personal information, Student ID, and section.</p>
       <form id="studentProfileForm">
         <div class="form-grid">
           <div class="field full profile-photo-field"><label for="profilePhoto">Profile photo</label><div class="profile-photo-control"><span class="profile-photo-preview" id="profilePhotoPreview"><span id="profilePhotoPreviewInitials">ST</span><img id="profilePhotoPreviewImage" alt="Selected profile preview" hidden></span><div><input id="profilePhoto" type="file" accept="image/jpeg,image/png,image/webp"><small>Choose a JPG, PNG, or WebP image. It will be resized automatically.</small><button class="link-button" id="removeProfilePhoto" type="button">Remove photo</button></div></div></div>
+          <div class="field"><label for="profileAccountId">Student ID (ID number)</label><input id="profileAccountId" required pattern="[A-Za-z0-9._-]+" title="Use only letters, numbers, periods, underscores, or dashes" placeholder="e.g. 25100-1"></div>
           <div class="field"><label for="profileFirstName">First name</label><input id="profileFirstName" required></div>
           <div class="field"><label for="profileMiddleName">Middle name</label><input id="profileMiddleName"></div>
           <div class="field"><label for="profileLastName">Last name</label><input id="profileLastName" required></div>
+          <div class="field"><label for="profileCourse">Course</label><select id="profileCourse" required><option value="" disabled>Select a course</option><option value="BSInfo Tech">BSInfo Tech</option><option value="BSA">BSA</option><option value="BSFI">BSFI</option><option value="BSMB">BSMB</option></select></div>
           <div class="field"><label for="profileSection">Section</label><select id="profileSection" required><option value="1A">1A</option><option value="1B">1B</option><option value="2A">2A</option><option value="2B">2B</option><option value="3A">3A</option><option value="3B">3B</option><option value="4A">4A</option><option value="4B">4B</option></select></div>
           <div class="field"><label for="profileEmail">Email address</label><input id="profileEmail" type="email"></div>
           <div class="field"><label for="profilePhone">Phone number</label><input id="profilePhone" type="tel"></div>

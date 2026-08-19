@@ -1,5 +1,6 @@
-import { ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "./firebase-config.js";
-import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
+import { ADMIN_EMAIL, app, auth, db, studentIdToEmail, studentProvisioningAuth } from "./firebase-config.js";
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-functions.js";
 import {
   Timestamp,
   addDoc,
@@ -18,6 +19,8 @@ import {
   where,
   writeBatch
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+
+const manageStudent = httpsCallable(getFunctions(app), "manageStudent");
 
 const dashboardRole = document.body.dataset.dashboard;
 const pageCopy = {
@@ -43,6 +46,7 @@ let toastTimer;
 let mediaStream;
 let presenceHeartbeatTimer;
 let presenceSessionId;
+let activeView;
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
@@ -57,12 +61,38 @@ function showDashboardToast(titleText, messageText) {
   toastTimer = setTimeout(() => toast.classList.remove("show"), 4200);
 }
 
-function openView(viewName) {
+function renderView(viewName) {
+  if (!pageCopy[dashboardRole][viewName]) return;
+  activeView = viewName;
   document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === viewName));
   document.querySelectorAll("[data-section]").forEach((section) => { section.hidden = section.dataset.section !== viewName; });
   const copy = pageCopy[dashboardRole][viewName];
   if (copy) [document.querySelector("#pageTitle").textContent, document.querySelector("#pageSubtitle").textContent] = copy;
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function openView(viewName) {
+  if (!pageCopy[dashboardRole][viewName] || viewName === activeView) return;
+  renderView(viewName);
+  history.pushState({ presenceDashboard: true, view: viewName }, "", window.location.href);
+}
+
+function initializeDashboardHistory() {
+  const initialView = history.state?.presenceDashboard && pageCopy[dashboardRole][history.state.view]
+    ? history.state.view
+    : "dashboard";
+  history.replaceState({ presenceDashboard: true, view: initialView, root: true }, "", window.location.href);
+  history.pushState({ presenceDashboard: true, view: initialView }, "", window.location.href);
+  renderView(initialView);
+
+  window.addEventListener("popstate", (event) => {
+    const state = event.state;
+    if (!state?.presenceDashboard || state.root) {
+      history.go(1);
+      return;
+    }
+    renderView(state.view);
+  });
 }
 
 function formatEventDate(value) {
@@ -320,14 +350,16 @@ function initializeStudent() {
     });
     document.querySelectorAll("[data-student-first-name]").forEach((element) => { element.textContent = studentProfile.firstName; });
     const profileVisual = studentProfile.photoDataUrl ? `<img src="${escapeHtml(studentProfile.photoDataUrl)}" alt="${escapeHtml(fullName)} profile photo">` : escapeHtml(initials);
-    container.innerHTML = `<div class="profile-grid"><article class="panel profile-summary"><div class="profile-avatar">${profileVisual}</div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(studentProfile.accountId)}</p><div class="profile-facts"><div class="profile-fact"><span>Course</span><strong>${escapeHtml(studentProfile.course || "Not assigned")}</strong></div><div class="profile-fact"><span>Section</span><strong>${escapeHtml(studentProfile.section)}</strong></div><div class="profile-fact"><span>Account</span><strong>Active</strong></div></div></article><article class="panel"><div class="panel-head"><div><h3>Contact details</h3><p>Your updates appear here immediately.</p></div><button class="primary-button" type="button" id="editStudentProfile">Edit profile</button></div><div class="profile-facts"><div class="profile-fact"><span>Student ID</span><strong>${escapeHtml(studentProfile.accountId)}</strong></div><div class="profile-fact"><span>Email</span><strong>${escapeHtml(studentProfile.email || "Not provided")}</strong></div><div class="profile-fact"><span>Phone</span><strong>${escapeHtml(studentProfile.phone || "Not provided")}</strong></div></div></article></div>`;
+    container.innerHTML = `<div class="profile-grid"><article class="panel profile-summary"><div class="profile-avatar">${profileVisual}</div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(studentProfile.accountId)}</p><p class="profile-course-line" style="margin-top:-4px;color:var(--muted);font-size:.82rem;">Course Registered · <strong>${escapeHtml(studentProfile.course || "Not assigned")}</strong></p><div class="profile-facts"><div class="profile-fact"><span>Course</span><strong>${escapeHtml(studentProfile.course || "Not assigned")}</strong></div><div class="profile-fact"><span>Section</span><strong>${escapeHtml(studentProfile.section)}</strong></div><div class="profile-fact"><span>Account</span><strong>Active</strong></div></div></article><article class="panel"><div class="panel-head"><div><h3>Contact details</h3><p>Your updates appear here immediately.</p></div><button class="primary-button" type="button" id="editStudentProfile">Edit profile</button></div><div class="profile-facts"><div class="profile-fact"><span>Student ID</span><strong>${escapeHtml(studentProfile.accountId)}</strong></div><div class="profile-fact"><span>Course Registered</span><strong>${escapeHtml(studentProfile.course || "Not assigned")}</strong></div><div class="profile-fact"><span>Email</span><strong>${escapeHtml(studentProfile.email || "Not provided")}</strong></div><div class="profile-fact"><span>Phone</span><strong>${escapeHtml(studentProfile.phone || "Not provided")}</strong></div></div></article></div>`;
   }
 
   document.querySelector("#studentProfileContent").addEventListener("click", (event) => {
     if (!event.target.closest("#editStudentProfile") || !studentProfile) return;
+    document.querySelector("#profileAccountId").value = studentProfile.accountId || "";
     document.querySelector("#profileFirstName").value = studentProfile.firstName || "";
     document.querySelector("#profileMiddleName").value = studentProfile.middleName || "";
     document.querySelector("#profileLastName").value = studentProfile.lastName || "";
+    document.querySelector("#profileCourse").value = studentProfile.course || "BSInfo Tech";
     document.querySelector("#profileSection").value = studentProfile.section || "1A";
     document.querySelector("#profileEmail").value = studentProfile.email || "";
     document.querySelector("#profilePhone").value = studentProfile.phone || "";
@@ -340,17 +372,52 @@ function initializeStudent() {
 
   document.querySelector("#studentProfileForm").addEventListener("submit", async (event) => {
     event.preventDefault();
+    const newAccountId = document.querySelector("#profileAccountId").value.trim();
+    if (!/^[A-Za-z0-9._-]+$/.test(newAccountId)) {
+      showDashboardToast("Invalid Student ID", "Use only letters, numbers, periods, underscores, or dashes.");
+      return;
+    }
+    const newKey = newAccountId.toLowerCase();
+    const oldAccountId = studentProfile.accountId;
+    const oldKey = (studentProfile.accountIdKey || oldAccountId || "").toLowerCase();
+
     try {
-      await setDoc(doc(db, "students", currentUser.uid), {
+      if (oldKey !== newKey) {
+        const idSnap = await getDoc(doc(db, "studentIds", newKey));
+        if (idSnap.exists() && idSnap.data().uid !== currentUser.uid) {
+          showDashboardToast("Student ID taken", "This Student ID is already registered by another student.");
+          return;
+        }
+      }
+
+      const updateData = {
+        accountId: newAccountId,
+        accountIdKey: newKey,
         firstName: document.querySelector("#profileFirstName").value.trim(),
         middleName: document.querySelector("#profileMiddleName").value.trim(),
         lastName: document.querySelector("#profileLastName").value.trim(),
+        course: document.querySelector("#profileCourse").value,
         section: document.querySelector("#profileSection").value,
         email: document.querySelector("#profileEmail").value.trim(),
         phone: document.querySelector("#profilePhone").value.trim(),
         photoDataUrl: pendingProfilePhoto,
         updatedAt: serverTimestamp()
-      }, { merge: true });
+      };
+
+      if (oldKey !== newKey) {
+        const batch = writeBatch(db);
+        batch.set(doc(db, "students", currentUser.uid), updateData, { merge: true });
+        if (oldKey) batch.delete(doc(db, "studentIds", oldKey));
+        batch.set(doc(db, "studentIds", newKey), {
+          studentId: newAccountId,
+          uid: currentUser.uid,
+          createdAt: serverTimestamp()
+        });
+        await batch.commit();
+      } else {
+        await setDoc(doc(db, "students", currentUser.uid), updateData, { merge: true });
+      }
+
       closeStudentProfileModal();
       showDashboardToast("Profile updated", "Your changes are now live.");
     } catch (error) {
@@ -610,7 +677,7 @@ function initializeAdmin() {
     const attendedCards = studentAttendance.length
       ? studentAttendance.map((record) => `<article class="attended-event-box"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><span>${escapeHtml(record.eventDate || "Date unavailable")} · ${escapeHtml(record.location || "Location not provided")}</span><span>${escapeHtml(record.timeIn || "")} ${record.timeOut ? `– ${escapeHtml(record.timeOut)}` : ""}</span></article>`).join("")
       : '<div class="empty-state">This student has not attended an event yet.</div>';
-    adminStudentDetail.innerHTML = `<article class="panel admin-student-overview"><button class="modal-close" type="button" data-close-student-detail aria-label="Close student details">×</button><div class="profile-avatar">${avatar}</div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(student.accountId)}</p><span class="badge ${presence.isOnline ? "green" : "gray"}"><i class="presence-dot"></i>${presence.label}</span><small class="presence-profile-time">${escapeHtml(presence.detail)}</small><div class="admin-student-actions"><button class="primary-button" type="button" data-edit-student="${student.uid}">Edit information</button><button class="outline-button" type="button" data-password-student="${student.uid}">Change password</button><button class="small-button danger modal-danger-button" type="button" data-delete-student="${student.uid}">Clear account</button></div></article><article class="panel admin-student-information"><div class="panel-head"><div><h3>Student information</h3><p>Profile details and recorded attendance.</p></div><span class="badge blue">${studentAttendance.length} attended</span></div><div class="student-info-boxes"><div class="student-info-box"><span>Course</span><strong>${escapeHtml(student.course || "Not assigned")}</strong></div><div class="student-info-box"><span>Section</span><strong>${escapeHtml(student.section)}</strong></div><div class="student-info-box"><span>Email address</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div><div class="student-info-box"><span>Phone number</span><strong>${escapeHtml(student.phone || "Not provided")}</strong></div><div class="student-info-box"><span>Live status</span><strong>${presence.label}</strong><small>${escapeHtml(presence.detail)}</small></div><div class="student-info-box"><span>Account access</span><strong>${student.active === false ? "Inactive" : "Active"}</strong></div></div><div class="panel-head"><div><h3>Attended events</h3><p>All attendance records saved for this student.</p></div></div><div class="attended-event-grid">${attendedCards}</div></article>`;
+    adminStudentDetail.innerHTML = `<article class="panel admin-student-overview"><button class="modal-close" type="button" data-close-student-detail aria-label="Close student details">×</button><div class="profile-avatar">${avatar}</div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(student.accountId)}</p><p class="profile-course-line" style="margin-top:-4px;color:var(--muted);font-size:.82rem;">Course Registered · <strong>${escapeHtml(student.course || "Not assigned")}</strong></p><span class="badge ${presence.isOnline ? "green" : "gray"}"><i class="presence-dot"></i>${presence.label}</span><small class="presence-profile-time">${escapeHtml(presence.detail)}</small><div class="admin-student-actions"><button class="primary-button" type="button" data-edit-student="${student.uid}">Edit information</button><button class="outline-button" type="button" data-password-student="${student.uid}">Change password</button><button class="small-button danger modal-danger-button" type="button" data-delete-student="${student.uid}">Clear account</button></div></article><article class="panel admin-student-information"><div class="panel-head"><div><h3>Student information</h3><p>Profile details and recorded attendance.</p></div><span class="badge blue">${studentAttendance.length} attended</span></div><div class="student-info-boxes"><div class="student-info-box"><span>Student ID</span><strong>${escapeHtml(student.accountId)}</strong></div><div class="student-info-box"><span>Course Registered</span><strong>${escapeHtml(student.course || "Not assigned")}</strong></div><div class="student-info-box"><span>Section</span><strong>${escapeHtml(student.section)}</strong></div><div class="student-info-box"><span>Email address</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div><div class="student-info-box"><span>Phone number</span><strong>${escapeHtml(student.phone || "Not provided")}</strong></div><div class="student-info-box"><span>Live status</span><strong>${presence.label}</strong><small>${escapeHtml(presence.detail)}</small></div><div class="student-info-box"><span>Account access</span><strong>${student.active === false ? "Inactive" : "Active"}</strong></div></div><div class="panel-head"><div><h3>Attended events</h3><p>All attendance records saved for this student.</p></div></div><div class="attended-event-grid">${attendedCards}</div></article>`;
     adminStudentDetail.hidden = false;
   }
 
@@ -683,7 +750,7 @@ function initializeAdmin() {
     if (!student) return;
     document.querySelector("#originalStudentId").value = student.uid;
     document.querySelector("#managedStudentId").value = student.accountId;
-    document.querySelector("#managedStudentId").disabled = true;
+    document.querySelector("#managedStudentId").disabled = false;
     document.querySelector("#managedFirstName").value = student.firstName;
     document.querySelector("#managedMiddleName").value = student.middleName || "";
     document.querySelector("#managedLastName").value = student.lastName;
@@ -709,44 +776,38 @@ function initializeAdmin() {
       showDashboardToast("Invalid Student ID", "Use only letters, numbers, periods, underscores, or dashes.");
       return;
     }
-    const studentIdKey = student.accountId.toLowerCase();
     try {
-      const { password, ...profile } = student;
       if (uid) {
-        await setDoc(doc(db, "students", uid), {
+        const studentIdKey = student.accountId.toLowerCase();
+        const { password, ...profile } = student;
+        const existingStudent = students.find((s) => s.uid === uid);
+        const oldKey = (existingStudent?.accountIdKey || existingStudent?.accountId || "").toLowerCase();
+        if (oldKey !== studentIdKey) {
+          const idSnap = await getDoc(doc(db, "studentIds", studentIdKey));
+          if (idSnap.exists() && idSnap.data().uid !== uid) {
+            showDashboardToast("Student ID taken", "This Student ID is already registered by another student.");
+            return;
+          }
+        }
+        const studentBatch = writeBatch(db);
+        studentBatch.set(doc(db, "students", uid), {
           ...profile,
+          accountIdKey: studentIdKey,
           grade: deleteField(),
           adviser: deleteField(),
           updatedAt: serverTimestamp()
         }, { merge: true });
-      } else {
-        const authEmail = studentIdToEmail(student.accountId);
-        let credential;
-        try {
-          credential = await createUserWithEmailAndPassword(studentProvisioningAuth, authEmail, password);
-          await updateProfile(credential.user, { displayName: [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ") });
-          const registration = writeBatch(db);
-          registration.set(doc(db, "students", credential.user.uid), {
-            ...profile,
-            accountIdKey: studentIdKey,
-            uid: credential.user.uid,
-            authEmail,
-            active: true,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          });
-          registration.set(doc(db, "studentIds", studentIdKey), {
+        if (oldKey !== studentIdKey) {
+          if (oldKey) studentBatch.delete(doc(db, "studentIds", oldKey));
+          studentBatch.set(doc(db, "studentIds", studentIdKey), {
             studentId: student.accountId,
-            uid: credential.user.uid,
+            uid,
             createdAt: serverTimestamp()
           });
-          await registration.commit();
-        } catch (error) {
-          if (credential?.user) await deleteUser(credential.user).catch(() => {});
-          throw error;
-        } finally {
-          await signOut(studentProvisioningAuth).catch(() => {});
         }
+        await studentBatch.commit();
+      } else {
+        await manageStudent({ action: "create", student });
       }
       resetStudentForm();
       openView("modify-students");
@@ -754,17 +815,27 @@ function initializeAdmin() {
     } catch (error) {
       console.error("FULL FIREBASE ERROR:", error);
       const messages = {
-        "auth/email-already-in-use": "This Student ID is already registered.",
-        "auth/invalid-email": "The Student ID could not be used as a login.",
-        "auth/weak-password": "The password must contain at least 6 characters.",
-        "permission-denied": "Registration was rejected. Publish the latest database rules, or check whether this Student ID is already registered.",
-        "firestore/permission-denied": "Registration was rejected. Publish the latest database rules, or check whether this Student ID is already registered."
+        "functions/already-exists": "This Student ID is already registered.",
+        "functions/invalid-argument": error.message || "Check the student information and password.",
+        "functions/permission-denied": "Only the administrator can register students.",
+        "functions/unavailable": "Student management is temporarily unavailable. Try again in a moment."
       };
       const message = messages[error.code] || error.message || "The student could not be saved.";
       showDashboardToast("Unable to save student", message);
     }
   });
-  document.querySelector("#cancelStudentForm").addEventListener("click", resetStudentForm);
+  document.querySelector("#cancelStudentForm").addEventListener("click", () => {
+    const editingUid = document.querySelector("#originalStudentId").value;
+    if (editingUid) {
+      const studentToReset = students.find((s) => s.uid === editingUid);
+      if (studentToReset) {
+        openRemoveModal(studentToReset);
+        return;
+      }
+    }
+    resetStudentForm();
+  });
+
   function closePasswordModal() {
     passwordModal.hidden = true;
     selectedPasswordStudent = undefined;
@@ -775,7 +846,6 @@ function initializeAdmin() {
     window.clearInterval(removalCountdownTimer);
     removeStudentModal.hidden = true;
     selectedRemovalStudent = undefined;
-    document.querySelector("#removeStudentPassword").value = "";
     document.querySelector("#removeStudentCountdown").textContent = "Review this action carefully.";
     const confirmButton = document.querySelector("#confirmRemoveStudent");
     confirmButton.disabled = true;
@@ -794,28 +864,27 @@ function initializeAdmin() {
     selectedRemovalStudent = student;
     if (!selectedRemovalStudent) return;
     window.clearInterval(removalCountdownTimer);
-    document.querySelector("#removeStudentMessage").textContent = `${selectedRemovalStudent.firstName} ${selectedRemovalStudent.lastName}'s sign-in account, profile, face status, and attendance history will be permanently cleared.`;
-    document.querySelector("#removeStudentPassword").value = "";
+    document.querySelector("#removeStudentMessage").textContent = `${selectedRemovalStudent.firstName} ${selectedRemovalStudent.lastName} (${selectedRemovalStudent.accountId})'s account and saved records will be completely removed from Firebase and logged out.`;
     removeStudentModal.hidden = false;
     const countdown = document.querySelector("#removeStudentCountdown");
     const confirmButton = document.querySelector("#confirmRemoveStudent");
     let seconds = 5;
-    countdown.textContent = `Clear account unlocks in ${seconds}…`;
+    countdown.textContent = `Account removal confirmation unlocks in ${seconds}s…`;
     confirmButton.disabled = true;
     confirmButton.textContent = `Wait ${seconds} seconds`;
     removalCountdownTimer = window.setInterval(() => {
       seconds -= 1;
       if (seconds > 0) {
-        countdown.textContent = `Clear account unlocks in ${seconds}…`;
+        countdown.textContent = `Account removal confirmation unlocks in ${seconds}s…`;
         confirmButton.textContent = `Wait ${seconds} second${seconds === 1 ? "" : "s"}`;
         return;
       }
       window.clearInterval(removalCountdownTimer);
-      countdown.textContent = "Countdown complete. Enter the password and confirm only if you are certain.";
+      countdown.textContent = "Countdown complete (5s–1s timer finished). Confirm to permanently remove this account from Firebase.";
       confirmButton.disabled = false;
-      confirmButton.textContent = "Clear account";
+      confirmButton.textContent = "Remove account completely";
     }, 1000);
-    document.querySelector("#removeStudentPassword").focus();
+    confirmButton.focus();
   }
 
   studentTableBody.addEventListener("click", (clickEvent) => {
@@ -872,43 +941,26 @@ function initializeAdmin() {
 
   document.querySelector("#confirmRemoveStudent").addEventListener("click", async () => {
     if (!selectedRemovalStudent) return;
-    const currentPassword = document.querySelector("#removeStudentPassword").value;
-    if (currentPassword.length < 6) {
-      showDashboardToast("Student password required", "Enter the student's current password before clearing the account.");
-      document.querySelector("#removeStudentPassword").focus();
-      return;
-    }
     const studentToRemove = selectedRemovalStudent;
     const confirmButton = document.querySelector("#confirmRemoveStudent");
     confirmButton.disabled = true;
-    confirmButton.textContent = "Clearing…";
+    confirmButton.textContent = "Removing account…";
+
     try {
-      await signOut(studentProvisioningAuth).catch(() => {});
-      const credential = await signInWithEmailAndPassword(studentProvisioningAuth, studentToRemove.authEmail || studentIdToEmail(studentToRemove.accountId), currentPassword);
-      if (credential.user.uid !== studentToRemove.uid) throw new Error("The password does not match this student account.");
-      const [dismissedSnapshot, presenceSnapshot] = await Promise.all([
-        getDocs(query(collection(db, "dismissedHistory"), where("studentUid", "==", studentToRemove.uid))),
-        getDocs(query(collection(db, "presenceSessions"), where("studentUid", "==", studentToRemove.uid)))
-      ]);
-      await deleteUser(credential.user);
-      const cleanup = writeBatch(db);
-      cleanup.delete(doc(db, "students", studentToRemove.uid));
-      cleanup.delete(doc(db, "studentIds", studentToRemove.accountIdKey || studentToRemove.accountId.toLowerCase()));
-      cleanup.delete(doc(db, "faceRegistrations", studentToRemove.uid));
-      cleanup.delete(doc(db, "presence", studentToRemove.uid));
-      attendance.filter((record) => record.studentUid === studentToRemove.uid).forEach((record) => cleanup.delete(doc(db, "attendance", record.id)));
-      dismissedSnapshot.docs.forEach((record) => cleanup.delete(record.ref));
-      presenceSnapshot.docs.forEach((record) => cleanup.delete(record.ref));
-      await cleanup.commit();
+      await manageStudent({ action: "delete", uid: studentToRemove.uid });
+
       if (selectedManagedStudentUid === studentToRemove.uid) selectedManagedStudentUid = undefined;
+      resetStudentForm();
       closeRemoveModal();
-      showDashboardToast("Student account cleared", `${studentToRemove.accountId} and its saved records were permanently removed.`);
+
+      showDashboardToast("Account Completely Removed", `${studentToRemove.accountId} and all saved student data were removed from Firebase.`);
     } catch (error) {
-      await signOut(studentProvisioningAuth).catch(() => {});
       confirmButton.disabled = false;
-      confirmButton.textContent = "Clear account";
-      const message = error.code === "auth/invalid-credential" ? "The current student password is incorrect." : error.message;
-      showDashboardToast("Unable to clear student", message);
+      confirmButton.textContent = "Remove account completely";
+      const message = error.code === "functions/permission-denied"
+        ? "Only the administrator can remove student accounts."
+        : error.message || "An error occurred while removing the account.";
+      showDashboardToast("Unable to remove account", message);
     }
   });
 
@@ -971,6 +1023,7 @@ async function initialize() {
   wireCommonNavigation();
   if (dashboardRole === "student") initializeStudent();
   else initializeAdmin();
+  initializeDashboardHistory();
 }
 
 initialize().catch((error) => {

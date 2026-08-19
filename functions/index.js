@@ -64,6 +64,38 @@ async function findUserByEmail(firebaseAuth, email) {
   }
 }
 
+async function deleteQueryResults(firestore, querySnapshot) {
+  const references = querySnapshot.docs.map((snapshot) => snapshot.ref);
+  while (references.length) {
+    const batch = firestore.batch();
+    references.splice(0, 450).forEach((reference) => batch.delete(reference));
+    await batch.commit();
+  }
+}
+
+async function removeStudentData(firestore, uid, accountIdKey = "") {
+  const [attendance, dismissedHistory, presenceSessions, idRegistrations] = await Promise.all([
+    firestore.collection("attendance").where("studentUid", "==", uid).get(),
+    firestore.collection("dismissedHistory").where("studentUid", "==", uid).get(),
+    firestore.collection("presenceSessions").where("studentUid", "==", uid).get(),
+    firestore.collection("studentIds").where("uid", "==", uid).get()
+  ]);
+
+  await Promise.all([
+    deleteQueryResults(firestore, attendance),
+    deleteQueryResults(firestore, dismissedHistory),
+    deleteQueryResults(firestore, presenceSessions),
+    deleteQueryResults(firestore, idRegistrations)
+  ]);
+
+  const batch = firestore.batch();
+  batch.delete(firestore.doc(`students/${uid}`));
+  batch.delete(firestore.doc(`faceRegistrations/${uid}`));
+  batch.delete(firestore.doc(`presence/${uid}`));
+  if (accountIdKey) batch.delete(firestore.doc(`studentIds/${accountIdKey}`));
+  await batch.commit();
+}
+
 exports.manageStudent = onCall(async (request) => {
   try {
     await requireAdmin(request);
@@ -74,18 +106,31 @@ exports.manageStudent = onCall(async (request) => {
 
     if (action === "delete") {
       if (!data.uid) throw new HttpsError("invalid-argument", "Student UID is required.");
-      await firebaseAuth.deleteUser(data.uid);
-      await firestore.doc(`students/${data.uid}`).delete();
+      const studentSnapshot = await firestore.doc(`students/${data.uid}`).get();
+      const accountIdKey = String(studentSnapshot.data()?.accountIdKey || studentSnapshot.data()?.accountId || "").trim().toLowerCase();
+      await removeStudentData(firestore, data.uid, accountIdKey);
+      try {
+        await firebaseAuth.deleteUser(data.uid);
+      } catch (error) {
+        if (error.code !== "auth/user-not-found") throw error;
+      }
       return { ok: true };
     }
 
     validateStudent(data.student || {});
     const student = data.student;
     const authEmail = studentIdToEmail(student.accountId);
+    const accountIdKey = student.accountId.trim().toLowerCase();
 
     if (action === "create") {
       if (!student.password) throw new HttpsError("invalid-argument", "A password is required.");
       const displayName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ");
+      const existingId = await firestore.doc(`studentIds/${accountIdKey}`).get();
+      if (existingId.exists) {
+        const indexedProfile = await firestore.doc(`students/${existingId.data().uid}`).get();
+        if (indexedProfile.exists) throw new HttpsError("already-exists", "This Student ID is already registered.");
+        await firestore.doc(`studentIds/${accountIdKey}`).delete();
+      }
       let user = await findUserByEmail(firebaseAuth, authEmail);
       let createdNow = false;
       if (user) {
@@ -93,6 +138,7 @@ exports.manageStudent = onCall(async (request) => {
         if (existingProfile.exists) {
           throw new HttpsError("already-exists", "This Student ID is already registered.");
         }
+        await removeStudentData(firestore, user.uid);
         user = await firebaseAuth.updateUser(user.uid, { password: student.password, displayName, disabled: false });
       } else {
         user = await firebaseAuth.createUser({ email: authEmail, password: student.password, displayName, disabled: false });
@@ -100,14 +146,22 @@ exports.manageStudent = onCall(async (request) => {
       }
       const { password, ...profile } = student;
       try {
-        await firestore.doc(`students/${user.uid}`).set({
+        const registration = firestore.batch();
+        registration.set(firestore.doc(`students/${user.uid}`), {
           ...profile,
+          accountIdKey,
           uid: user.uid,
           authEmail,
           active: true,
           createdAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp()
         });
+        registration.set(firestore.doc(`studentIds/${accountIdKey}`), {
+          studentId: student.accountId,
+          uid: user.uid,
+          createdAt: FieldValue.serverTimestamp()
+        });
+        await registration.commit();
       } catch (error) {
         if (createdNow) await firebaseAuth.deleteUser(user.uid).catch(() => {});
         throw error;

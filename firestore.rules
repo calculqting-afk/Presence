@@ -26,7 +26,7 @@ service cloud.firestore {
         || (isStudent()
           && request.auth.uid == studentUid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            "firstName", "middleName", "lastName", "section", "email", "phone", "photoDataUrl", "updatedAt"
+            "accountId", "accountIdKey", "firstName", "middleName", "lastName", "course", "section", "email", "phone", "photoDataUrl", "updatedAt"
           ])
           && request.resource.data.firstName is string
           && request.resource.data.lastName is string
@@ -44,11 +44,12 @@ service cloud.firestore {
     // Normalized Student IDs are used as document names. A duplicate write is
     // an update, and updates are denied, so the same ID cannot be registered twice.
     match /studentIds/{studentIdKey} {
-      allow read: if isAdmin();
-      allow create: if isAdmin()
-        && !exists(/databases/$(database)/documents/studentIds/$(studentIdKey));
+      allow read: if signedIn();
+      allow create: if (isAdmin() || signedIn())
+        && !exists(/databases/$(database)/documents/studentIds/$(studentIdKey))
+        && (isAdmin() || request.resource.data.uid == request.auth.uid);
       allow update: if false;
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
     }
 
     match /events/{eventId} {
