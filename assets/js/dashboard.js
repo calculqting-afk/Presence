@@ -127,9 +127,62 @@ function getInitials(firstName = "Student", lastName = "") {
 }
 
 function formatServiceMinutes(minutes) {
-  const value = Number(minutes) || 0;
-  if (value < 60) return `${value} minutes`;
-  return `${value / 60} hour${value === 60 ? "" : "s"}`;
+  const value = Math.max(0, Math.round(Number(minutes) || 0));
+  const hours = Math.floor(value / 60);
+  const remainingMinutes = value % 60;
+  if (!hours) return `${remainingMinutes} min${remainingMinutes === 1 ? "" : "s"}`;
+  if (!remainingMinutes) return `${hours} hour${hours === 1 ? "" : "s"}`;
+  return `${hours} hour${hours === 1 ? "" : "s"} and ${remainingMinutes} min${remainingMinutes === 1 ? "" : "s"}`;
+}
+
+function formatFineDate(value) {
+  const date = value?.toDate?.() || (value ? new Date(value) : null);
+  return date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "Recently";
+}
+
+function formatFineEventDate(value) {
+  const date = value ? new Date(`${value}T00:00:00`) : null;
+  return date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "Not specified";
+}
+
+function formatFineTimestamp(value) {
+  const date = value?.toDate?.() || (value ? new Date(value) : null);
+  return date && !Number.isNaN(date.getTime()) ? date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "Recently";
+}
+
+function getFineHistory(fine) {
+  if (Array.isArray(fine.assignmentHistory) && fine.assignmentHistory.length) return fine.assignmentHistory;
+  return [{ action: "Assigned", addedMinutes: fine.serviceMinutes, newMinutes: fine.serviceMinutes, reason: fine.reason, recordedAt: fine.assignedAt }];
+}
+
+function fineDetailsMarkup(fine, includeAdminActions = false) {
+  const history = getFineHistory(fine);
+  const rows = history.slice().reverse().map((entry) => {
+    const before = Number(entry.previousMinutes);
+    const after = Number(entry.newMinutes) || Number(fine.serviceMinutes);
+    const change = entry.action === "Added" ? `Added ${formatServiceMinutes(entry.addedMinutes)}` : entry.action === "Updated" ? `${formatServiceMinutes(before)} → ${formatServiceMinutes(after)}` : `Assigned ${formatServiceMinutes(after)}`;
+    return `<li><strong>${escapeHtml(entry.action || "Assigned")}</strong><span>${escapeHtml(change)} · ${escapeHtml(formatFineTimestamp(entry.recordedAt))}</span>${entry.reason ? `<small>${escapeHtml(entry.reason)}</small>` : ""}</li>`;
+  }).join("");
+  return `<details class="fine-details"><summary>View attendance and assignment details</summary><div class="fine-details-content"><div class="fine-detail-grid"><div><span>Missed attendance</span><strong>${escapeHtml(fine.eventName || "Attendance absence")}</strong></div><div><span>Event date</span><strong>${escapeHtml(formatFineEventDate(fine.eventDate))}</strong></div></div><h4>Assignment history</h4><ol class="fine-history-list">${rows}</ol>${includeAdminActions ? `<div class="history-card-actions"><button class="outline-button" type="button" data-edit-fine="${escapeHtml(fine.id)}">Modify details</button><button class="small-button danger" type="button" data-delete-fine="${escapeHtml(fine.id)}">Remove</button></div>` : ""}</div></details>`;
+}
+
+function studentFineInfoMarkup(fine, events) {
+  const event = events.find((item) => item.id === fine.eventId);
+  const time = fine.eventTimeIn && fine.eventTimeOut
+    ? `${formatEventTime(fine.eventTimeIn)} – ${formatEventTime(fine.eventTimeOut)}`
+    : event?.timeIn && event?.timeOut ? formatTimeWindow(event) : "Not specified";
+  const location = fine.eventLocation || event?.location || "Not specified";
+  return `<div class="fine-detail-grid"><div><span>Missed attendance</span><strong>${escapeHtml(fine.eventName || "Attendance absence")}</strong></div><div><span>Event date</span><strong>${escapeHtml(formatFineEventDate(fine.eventDate || event?.date))}</strong></div><div><span>Time</span><strong>${escapeHtml(time)}</strong></div><div><span>Location</span><strong>${escapeHtml(location)}</strong></div><div class="fine-detail-full"><span>Reason</span><strong>${escapeHtml(fine.reason || "No reason provided.")}</strong></div></div>`;
+}
+
+function studentFineDetailsMarkup(groupFines, events) {
+  const detailId = `student-fine-details-${groupFines.map((fine) => fine.id).join("-")}`;
+  const entries = groupFines.map((fine, index) => `<li class="fine-attendance-entry"><span class="fine-attendance-number">${index + 1}</span>${studentFineInfoMarkup(fine, events)}</li>`).join("");
+  const extensions = groupFines.flatMap((fine) => getFineHistory(fine)
+    .filter((entry) => entry.action === "Added")
+    .map((entry) => `<li><strong>Added ${escapeHtml(formatServiceMinutes(entry.addedMinutes))}</strong><span>${escapeHtml(formatFineTimestamp(entry.recordedAt))}</span><small>${escapeHtml(entry.reason || "No additional reason provided.")}</small></li>`)).join("");
+  const extensionHistory = extensions ? `<h4>Additional community service</h4><ol class="fine-history-list">${extensions}</ol>` : "";
+  return `<details class="fine-details" data-student-fine-details="${escapeHtml(detailId)}"><summary aria-controls="${escapeHtml(detailId)}">Details</summary><div class="fine-details-content" id="${escapeHtml(detailId)}"><ol class="fine-history-list fine-attendance-details">${entries}</ol>${extensionHistory}</div></details>`;
 }
 
 function getDashboardGreeting() {
@@ -362,7 +415,29 @@ function initializeStudent() {
       container.innerHTML = '<div class="empty-state panel">You have no assigned fines.</div>';
       return;
     }
-    container.innerHTML = fines.map((fine) => `<article class="history-event-card"><div class="history-card-top"><span class="event-type-badge">Community service</span><span class="badge orange">${escapeHtml(formatServiceMinutes(fine.serviceMinutes))}</span></div><h3>${escapeHtml(fine.eventName || "Attendance absence")}</h3><p>${escapeHtml(fine.reason || "No reason provided.")}</p><div class="event-detail-boxes"><div><span>Status</span><strong>${escapeHtml(fine.status || "Pending")}</strong></div><div><span>Assigned</span><strong>${escapeHtml(fine.assignedAt?.toDate?.().toLocaleDateString() || "Recently")}</strong></div></div></article>`).join("");
+    const groupedFines = Array.from(fines.reduce((groups, fine) => {
+      const reasonKey = String(fine.eventName || "Attendance absence").trim().toLowerCase();
+      const group = groups.get(reasonKey) || [];
+      group.push(fine);
+      groups.set(reasonKey, group);
+      return groups;
+    }, new Map()).values());
+    container.innerHTML = groupedFines.map((group) => {
+      const firstFine = group[0];
+      const totalMinutes = group.reduce((total, fine) => total + (Number(fine.serviceMinutes) || 0), 0);
+      const status = group.every((fine) => fine.status === "Completed") ? "Completed" : "Pending";
+      const latestAssigned = group.reduce((latest, fine) => {
+        const latestTime = latest?.assignedAt?.toDate?.()?.getTime?.() || 0;
+        const fineTime = fine.assignedAt?.toDate?.()?.getTime?.() || 0;
+        return fineTime > latestTime ? fine : latest;
+      }, firstFine);
+      const hasServiceExtension = getFineHistory(firstFine).some((entry) => entry.action === "Added");
+      const recordInfo = group.length === 1 && !hasServiceExtension
+        ? `<div class="fine-details fine-details-inline">${studentFineInfoMarkup(firstFine, events)}</div>`
+        : studentFineDetailsMarkup(group, events);
+      const serviceLabel = status === "Completed" ? "Completed" : `${formatServiceMinutes(totalMinutes)} remaining`;
+      return `<article class="history-event-card"><div class="history-card-top"><span class="event-type-badge">Community service</span><span class="badge orange">${escapeHtml(serviceLabel)}</span></div><h3>${escapeHtml(firstFine.eventName || "Attendance absence")}</h3><p>${group.length === 1 ? escapeHtml(firstFine.reason || "No reason provided.") : `${group.length} attendance records combined`}</p><div class="event-detail-boxes"><div><span>Status</span><strong>${escapeHtml(status)}</strong></div><div><span>Assigned</span><strong>${escapeHtml(formatFineDate(latestAssigned.assignedAt))}</strong></div></div>${recordInfo}</article>`;
+    }).join("");
   }
 
   function renderProfile() {
@@ -584,9 +659,17 @@ function initializeAdmin() {
   fineStudentSearch.insertAdjacentHTML("afterend", '<div class="fine-student-search-results" id="fineStudentSearchResults" role="listbox" hidden></div>');
   const fineStudentSearchResults = document.querySelector("#fineStudentSearchResults");
   const fineEvent = document.querySelector("#fineEvent");
+  const addCommunityService = document.querySelector("#addCommunityService");
+  const fineExtensionControls = document.querySelector("#fineExtensionControls");
+  const fineExtensionHours = document.querySelector("#fineExtensionHours");
+  const fineExtensionMinutes = document.querySelector("#fineExtensionMinutes");
+  const fineExtensionReason = document.querySelector("#fineExtensionReason");
+  const fineServiceDurationHelp = document.querySelector("#fineServiceDurationHelp");
   const adminFineList = document.querySelector("#adminFineList");
   const fineSearch = document.querySelector("#fineSearch");
   const fineStatusFilter = document.querySelector("#fineStatusFilter");
+  const fineDateFilter = document.querySelector("#fineDateFilter");
+  const fineSort = document.querySelector("#fineSort");
   const passwordModal = document.querySelector("#passwordModal");
   const removeStudentModal = document.querySelector("#removeStudentModal");
   const adminStudentDetail = document.querySelector("#adminStudentDetail");
@@ -595,6 +678,7 @@ function initializeAdmin() {
   let selectedManagedStudentUid;
   let removalCountdownTimer;
   let pendingAdminProfilePhoto = "";
+  let addingCommunityService = false;
 
   const eventSyncNotice = document.querySelector(".notice");
   if (eventSyncNotice) eventSyncNotice.textContent = "Events are saved online and sync automatically to student dashboards, including after refresh.";
@@ -746,7 +830,8 @@ function initializeAdmin() {
     }
     const emptyOption = matchingStudents.length ? "" : '<option value="" disabled selected>No students found</option>';
     fineStudent.innerHTML = `<option value="" disabled ${selectedStudent ? "" : "selected"}>Select a student</option>${emptyOption}${matchingStudents.map((student) => `<option value="${escapeHtml(student.uid)}">${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))} · ${escapeHtml(student.accountId)}</option>`).join("")}`;
-    fineEvent.innerHTML = `<option value="">General attendance absence</option>${events.map((event) => `<option value="${escapeHtml(event.id)}">${escapeHtml(event.name)}${event.date ? ` · ${escapeHtml(event.date)}` : ""}</option>`).join("")}`;
+    const eventPrompt = events.length ? "Select a missed event" : "No events available";
+    fineEvent.innerHTML = `<option value="" disabled ${selectedEvent ? "" : "selected"}>${eventPrompt}</option>${events.map((event) => `<option value="${escapeHtml(event.id)}">${escapeHtml(event.name)}${event.date ? ` · ${escapeHtml(event.date)}` : ""}</option>`).join("")}`;
     fineStudent.value = selectedStudent;
     fineEvent.value = selectedEvent;
   }
@@ -754,25 +839,49 @@ function initializeAdmin() {
   function renderAdminFines() {
     const search = fineSearch.value.trim().toLowerCase();
     const statusFilter = fineStatusFilter.value;
+    const dateFilter = fineDateFilter.value;
+    const sort = fineSort.value;
     const filteredFines = fines
       .filter((fine) => statusFilter === "all" || (fine.status || "Pending") === statusFilter)
-      .filter((fine) => !search || [fine.studentName, fine.studentId, fine.eventName, fine.reason, fine.status].join(" ").toLowerCase().includes(search))
-      .sort((first, second) => (second.assignedAt?.seconds || 0) - (first.assignedAt?.seconds || 0));
+      .filter((fine) => !search || [fine.studentName, fine.studentId, fine.eventName, fine.reason, fine.status, ...getFineHistory(fine).flatMap((entry) => [entry.action, entry.reason, entry.recordedAt, entry.previousMinutes, entry.newMinutes])].join(" ").toLowerCase().includes(search))
+      .filter((fine) => !dateFilter || [fine.eventDate, fine.assignedAt?.toDate?.().toISOString().slice(0, 10), ...getFineHistory(fine).map((entry) => String(entry.recordedAt || "").slice(0, 10))].includes(dateFilter))
+      .sort((first, second) => {
+        if (sort === "oldest") return (first.assignedAt?.seconds || 0) - (second.assignedAt?.seconds || 0);
+        if (sort === "student") return String(first.studentName || "").localeCompare(String(second.studentName || ""));
+        if (sort === "duration") return Number(second.serviceMinutes || 0) - Number(first.serviceMinutes || 0);
+        return (second.assignedAt?.seconds || 0) - (first.assignedAt?.seconds || 0);
+      });
     document.querySelector("#fineResultCount").textContent = `${filteredFines.length} fine${filteredFines.length === 1 ? "" : "s"} shown`;
     if (!filteredFines.length) {
       adminFineList.innerHTML = `<div class="empty-state">${fines.length ? "No fines match the current search or filter." : "No fines have been assigned."}</div>`;
       return;
     }
-    adminFineList.innerHTML = filteredFines.map((fine) => `<article class="fine-record-card"><div class="history-card-top"><span class="event-type-badge">${escapeHtml(fine.studentId || "Student")}</span><span class="badge orange">${escapeHtml(formatServiceMinutes(fine.serviceMinutes))}</span></div><h3>${escapeHtml(fine.studentName || "Student")}</h3><div class="fine-record-event"><span>Missed attendance</span><strong>${escapeHtml(fine.eventName || "Attendance absence")}</strong></div><p>${escapeHtml(fine.reason || "No reason provided.")}</p><div class="fine-record-meta"><div><span>Status</span><strong class="${fine.status === "Completed" ? "is-completed" : ""}">${escapeHtml(fine.status || "Pending")}</strong></div><div><span>Assigned</span><strong>${escapeHtml(fine.assignedAt?.toDate?.().toLocaleDateString() || "Recently")}</strong></div></div><div class="history-card-actions"><button class="outline-button" type="button" data-edit-fine="${escapeHtml(fine.id)}">Modify</button><button class="small-button danger" type="button" data-delete-fine="${escapeHtml(fine.id)}">Remove</button></div></article>`).join("");
+    adminFineList.innerHTML = filteredFines.map((fine) => {
+      const sameReasonCount = fines.filter((item) => item.studentUid === fine.studentUid && String(item.eventName || "Attendance absence").trim().toLowerCase() === String(fine.eventName || "Attendance absence").trim().toLowerCase()).length;
+      const actions = `<div class="history-card-actions"><button class="outline-button" type="button" data-edit-fine="${escapeHtml(fine.id)}">Modify</button><button class="small-button danger" type="button" data-delete-fine="${escapeHtml(fine.id)}">Remove</button></div>`;
+      const detailArea = sameReasonCount > 1 ? fineDetailsMarkup(fine, true) : actions;
+      return `<article class="fine-record-card"><div class="history-card-top"><span class="event-type-badge">${escapeHtml(fine.studentId || "Student")}</span><span class="badge orange">${escapeHtml(formatServiceMinutes(fine.serviceMinutes))}</span></div><h3>${escapeHtml(fine.studentName || "Student")}</h3><div class="fine-record-event"><span>Missed attendance</span><strong>${escapeHtml(fine.eventName || "Attendance absence")}</strong></div><p>${escapeHtml(fine.reason || "No reason provided.")}</p><div class="fine-record-meta"><div><span>Status</span><strong class="${fine.status === "Completed" ? "is-completed" : ""}">${escapeHtml(fine.status || "Pending")}</strong></div><div><span>Assigned</span><strong>${escapeHtml(formatFineDate(fine.assignedAt))}</strong></div></div>${detailArea}</article>`;
+    }).join("");
   }
 
   function resetFineForm() {
     fineForm.reset();
+    document.querySelector("#fineServiceHours").value = "0";
+    document.querySelector("#fineServiceMinutes").value = "30";
     fineStudentSearch.value = "";
     renderFineOptions();
     document.querySelector("#editingFineId").value = "";
     document.querySelector("#fineFormTitle").textContent = "Assign a fine";
     document.querySelector("#fineSubmitButton").textContent = "Assign fine";
+    addCommunityService.hidden = true;
+    fineExtensionControls.hidden = true;
+    fineExtensionHours.value = "0";
+    fineExtensionMinutes.value = "30";
+    fineExtensionReason.value = "";
+    fineServiceDurationHelp.textContent = "";
+    addingCommunityService = false;
+    fineForm.classList.remove("is-extending-service");
+    addCommunityService.textContent = "Extend community service";
   }
 
   function editFine(fine) {
@@ -782,11 +891,19 @@ function initializeAdmin() {
     fineStudent.value = fine.studentUid || "";
     if (fine.eventId && !events.some((event) => event.id === fine.eventId)) fineEvent.add(new Option(fine.eventName || "Previously selected event", fine.eventId));
     fineEvent.value = fine.eventId || "";
-    document.querySelector("#fineHours").value = String(fine.serviceMinutes || 30);
+    const serviceMinutes = Math.min(600, Math.max(1, Number(fine.serviceMinutes) || 30));
+    document.querySelector("#fineServiceHours").value = String(Math.floor(serviceMinutes / 60));
+    document.querySelector("#fineServiceMinutes").value = String(serviceMinutes % 60);
     document.querySelector("#fineStatus").value = fine.status || "Pending";
     document.querySelector("#fineReason").value = fine.reason || "";
     document.querySelector("#fineFormTitle").textContent = `Modify fine for ${fine.studentId || "student"}`;
     document.querySelector("#fineSubmitButton").textContent = "Save fine changes";
+    addCommunityService.hidden = false;
+    fineExtensionControls.hidden = true;
+    fineServiceDurationHelp.textContent = "Edit the total requirement, or add extra service time below.";
+    addingCommunityService = false;
+    fineForm.classList.remove("is-extending-service");
+    addCommunityService.textContent = "Extend community service";
     fineForm.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -800,30 +917,110 @@ function initializeAdmin() {
     const attendanceEvent = events.find((item) => item.id === fineEvent.value);
     const editingFineId = document.querySelector("#editingFineId").value;
     const editingFine = fines.find((fine) => fine.id === editingFineId);
+    if (!attendanceEvent && !editingFineId) {
+      showDashboardToast("Select a missed event", "Create or select an event before assigning this fine.");
+      return;
+    }
+    const enteredServiceMinutes = addingCommunityService
+      ? Math.min(600, Math.max(1, Number(fineExtensionHours.value) * 60 + Number(fineExtensionMinutes.value)))
+      : Math.min(600, Math.max(1, Number(document.querySelector("#fineServiceHours").value) * 60 + Number(document.querySelector("#fineServiceMinutes").value)));
+    const serviceMinutes = editingFineId && addingCommunityService
+      ? Math.min(600, (Number(editingFine?.serviceMinutes) || 0) + enteredServiceMinutes)
+      : enteredServiceMinutes;
+    if (!addingCommunityService) setFineServiceDuration(enteredServiceMinutes);
     const fineData = {
       studentUid: student.uid,
       studentId: student.accountId,
       studentName: [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" "),
       eventId: attendanceEvent?.id || (editingFine?.eventId === fineEvent.value ? editingFine.eventId : ""),
-      eventName: attendanceEvent?.name || (editingFine?.eventId === fineEvent.value ? editingFine.eventName : "Attendance absence"),
+      eventName: attendanceEvent?.name || (editingFine?.eventId === fineEvent.value ? editingFine.eventName : ""),
       eventDate: attendanceEvent?.date || (editingFine?.eventId === fineEvent.value ? editingFine.eventDate : ""),
-      serviceMinutes: Number(document.querySelector("#fineHours").value),
+      eventTimeIn: attendanceEvent?.timeIn || (editingFine?.eventId === fineEvent.value ? editingFine.eventTimeIn || "" : ""),
+      eventTimeOut: attendanceEvent?.timeOut || (editingFine?.eventId === fineEvent.value ? editingFine.eventTimeOut || "" : ""),
+      eventLocation: attendanceEvent?.location || (editingFine?.eventId === fineEvent.value ? editingFine.eventLocation || "" : ""),
+      serviceMinutes,
       reason: document.querySelector("#fineReason").value.trim(),
       status: document.querySelector("#fineStatus").value
     };
     try {
       if (editingFineId) {
-        await setDoc(doc(db, "fines", editingFineId), { ...fineData, updatedAt: serverTimestamp(), updatedBy: currentUser.uid }, { merge: true });
-        showDashboardToast("Fine updated", `${student.accountId}'s fine was updated.`);
+        const previousMinutes = Number(editingFine?.serviceMinutes) || 0;
+        const historyEntry = addingCommunityService
+          ? { action: "Added", previousMinutes, addedMinutes: enteredServiceMinutes, newMinutes: serviceMinutes, reason: fineExtensionReason.value.trim(), recordedAt: new Date().toISOString() }
+          : { action: "Updated", previousMinutes, newMinutes: serviceMinutes, reason: fineData.reason, recordedAt: new Date().toISOString() };
+        await setDoc(doc(db, "fines", editingFineId), {
+          ...fineData,
+          assignmentHistory: [...getFineHistory(editingFine), historyEntry],
+          updatedAt: serverTimestamp(),
+          updatedBy: currentUser.uid
+        }, { merge: true });
+        showDashboardToast(addingCommunityService ? "Community service added" : "Fine updated", addingCommunityService ? `${formatServiceMinutes(enteredServiceMinutes)} was added to this fine.` : `${student.accountId}'s fine was updated.`);
       } else {
-        await addDoc(collection(db, "fines"), { ...fineData, assignedAt: serverTimestamp(), assignedBy: currentUser.uid });
-        showDashboardToast("Fine assigned", `${student.accountId} was assigned community service.`);
+        await addDoc(collection(db, "fines"), {
+          ...fineData,
+          assignmentHistory: [{ action: "Assigned", addedMinutes: serviceMinutes, newMinutes: serviceMinutes, reason: fineData.reason, recordedAt: new Date().toISOString() }],
+          assignedAt: serverTimestamp(),
+          assignedBy: currentUser.uid
+        });
+        showDashboardToast("Fine assigned", `${student.accountId} was assigned a new community-service requirement.`);
       }
       resetFineForm();
       openView("assigned-fines");
     } catch (error) {
       showDashboardToast("Unable to assign fine", error.code === "permission-denied" ? "Publish the latest database rules, then try again." : error.message);
     }
+  });
+
+  function setFineServiceDuration(totalMinutes) {
+    const normalizedMinutes = Math.min(600, Math.max(1, totalMinutes));
+    document.querySelector("#fineServiceHours").value = String(Math.floor(normalizedMinutes / 60));
+    document.querySelector("#fineServiceMinutes").value = String(normalizedMinutes % 60);
+  }
+
+  function setFineExtensionDuration(totalMinutes) {
+    const normalizedMinutes = Math.min(600, Math.max(1, totalMinutes));
+    fineExtensionHours.value = String(Math.floor(normalizedMinutes / 60));
+    fineExtensionMinutes.value = String(normalizedMinutes % 60);
+  }
+
+  function setCommunityServiceExtension(open) {
+    addingCommunityService = open;
+    fineExtensionControls.hidden = !open;
+    fineForm.classList.toggle("is-extending-service", open);
+    addCommunityService.textContent = open ? "Cancel extension" : "Extend community service";
+    if (open) {
+      setFineExtensionDuration(30);
+      fineExtensionReason.value = "";
+    }
+  }
+
+  addCommunityService.addEventListener("click", () => {
+    if (!document.querySelector("#editingFineId").value) return;
+    setCommunityServiceExtension(!addingCommunityService);
+    fineServiceDurationHelp.textContent = "";
+  });
+
+  document.querySelectorAll("[data-adjust-fine-minutes]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const totalMinutes = Number(document.querySelector("#fineServiceHours").value) * 60 + Number(document.querySelector("#fineServiceMinutes").value);
+      setFineServiceDuration(totalMinutes + Number(button.dataset.adjustFineMinutes));
+    });
+  });
+
+  document.querySelectorAll("#fineServiceHours, #fineServiceMinutes").forEach((input) => {
+    input.addEventListener("change", () => setFineServiceDuration(Number(document.querySelector("#fineServiceHours").value) * 60 + Number(document.querySelector("#fineServiceMinutes").value)));
+  });
+
+  document.querySelectorAll("[data-adjust-extension-minutes]").forEach((button) => {
+    button.addEventListener("click", () => setFineExtensionDuration(Number(fineExtensionHours.value) * 60 + Number(fineExtensionMinutes.value) + Number(button.dataset.adjustExtensionMinutes)));
+  });
+
+  [fineExtensionHours, fineExtensionMinutes].forEach((input) => {
+    input.addEventListener("change", () => setFineExtensionDuration(Number(fineExtensionHours.value) * 60 + Number(fineExtensionMinutes.value)));
+  });
+
+  document.querySelectorAll('[data-view="assign-fine"], [data-go-view="assign-fine"]').forEach((button) => {
+    button.addEventListener("click", resetFineForm);
   });
 
   adminFineList.addEventListener("click", async (event) => {
@@ -854,6 +1051,8 @@ function initializeAdmin() {
   });
   fineSearch.addEventListener("input", renderAdminFines);
   fineStatusFilter.addEventListener("change", renderAdminFines);
+  fineDateFilter.addEventListener("change", renderAdminFines);
+  fineSort.addEventListener("change", renderAdminFines);
 
   function getStudentPresence(uid) {
     const sessions = [...(presenceByUid.get(uid) || [])];

@@ -92,12 +92,56 @@
 
         <section class="view-section" data-section="assign-fine" hidden>
           <div class="section-head"><div><p class="eyebrow">Attendance accountability</p><h2>Assign Fine</h2><p>Record a missed attendance requirement and the community-service hours to complete.</p></div><button class="outline-button" type="button" data-go-view="assigned-fines">View assigned fines</button></div>
-          <article class="panel fine-assignment-panel"><div class="panel-head"><div><h3 id="fineFormTitle">Assign a fine</h3><p>Only administrators can issue or modify fines.</p></div></div><form id="fineForm"><input id="editingFineId" type="hidden"><div class="form-grid"><div class="field full"><label for="fineStudentSearch">Find student</label><input id="fineStudentSearch" type="search" placeholder="Search by full name or Student ID" autocomplete="off"><small>Search, then choose the student from the list below.</small></div><div class="field full"><label for="fineStudent">Student</label><select id="fineStudent" required><option value="" selected disabled>Select a student</option></select></div><div class="field"><label for="fineEvent">Missed event</label><select id="fineEvent"><option value="">General attendance absence</option></select></div><div class="field"><label for="fineHours">Community service required</label><select id="fineHours" required><option value="30">30 minutes</option><option value="40">40 minutes</option><option value="50">50 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="180">3 hours</option><option value="240">4 hours</option><option value="300">5 hours</option><option value="360">6 hours</option><option value="420">7 hours</option><option value="480">8 hours</option><option value="540">9 hours</option><option value="600">10 hours</option></select></div><div class="field"><label for="fineStatus">Status</label><select id="fineStatus"><option value="Pending">Pending</option><option value="Completed">Completed</option></select></div><div class="field full"><label for="fineReason">Reason</label><textarea id="fineReason" required placeholder="e.g. Did not attend the required assembly"></textarea></div></div><div class="form-actions"><button class="outline-button" type="button" data-go-back>← Back</button><button class="outline-button" id="cancelFineEdit" type="reset">Clear</button><button class="primary-button" id="fineSubmitButton" type="submit">Assign fine</button></div></form></article>
+          <article class="panel fine-assignment-panel">
+            <div class="panel-head"><div><h3 id="fineFormTitle">Assign a fine</h3><p>Only administrators can issue or modify fines.</p></div></div>
+            <form id="fineForm">
+              <input id="editingFineId" type="hidden">
+              <div class="form-grid">
+                <div class="field full"><label for="fineStudentSearch">Find student</label><input id="fineStudentSearch" type="search" placeholder="Search by full name or Student ID" autocomplete="off"><small>Search, then choose the student from the list below.</small></div>
+                <div class="field full"><label for="fineStudent">Student</label><select id="fineStudent" required><option value="" selected disabled>Select a student</option></select></div>
+                <div class="field"><label for="fineEvent">Missed event</label><select id="fineEvent" required><option value="" selected disabled>Select a missed event</option></select></div>
+                <div class="field fine-service-field">
+                  <label for="fineServiceHours">Community service required</label>
+                  <div class="duration-stepper">
+                    <input id="fineServiceHours" type="number" min="0" max="10" step="1" value="0" required inputmode="numeric" aria-label="Hours">
+                    <span>hours</span><b>:</b>
+                    <input id="fineServiceMinutes" type="number" min="0" max="59" step="1" value="30" required inputmode="numeric" aria-label="Minutes">
+                    <span>minutes</span>
+                    <div class="duration-stepper-actions">
+                      <button class="duration-stepper-button" type="button" data-adjust-fine-minutes="-1" aria-label="Remove 1 minute">−</button>
+                      <button class="duration-stepper-button" type="button" data-adjust-fine-minutes="1" aria-label="Add 1 minute">+</button>
+                    </div>
+                  </div>
+                  <small id="fineServiceDurationHelp"></small>
+                  <button class="outline-button fine-extension-button" id="addCommunityService" type="button" hidden>Extend community service</button>
+                </div>
+                <div class="field full fine-extension-controls" id="fineExtensionControls" hidden>
+                  <label for="fineExtensionHours">Additional community service</label>
+                  <div class="duration-stepper">
+                    <input id="fineExtensionHours" type="number" min="0" max="10" step="1" value="0" required inputmode="numeric" aria-label="Additional hours">
+                    <span>hours</span><b>:</b>
+                    <input id="fineExtensionMinutes" type="number" min="0" max="59" step="1" value="30" required inputmode="numeric" aria-label="Additional minutes">
+                    <span>minutes</span>
+                    <div class="duration-stepper-actions">
+                      <button class="duration-stepper-button" type="button" data-adjust-extension-minutes="-1" aria-label="Remove 1 additional minute">−</button>
+                      <button class="duration-stepper-button" type="button" data-adjust-extension-minutes="1" aria-label="Add 1 additional minute">+</button>
+                    </div>
+                  </div>
+                  <small>This time will be added to the current community-service requirement when you save.</small>
+                  <label class="fine-extension-reason-label" for="fineExtensionReason">Reason for additional community service</label>
+                  <textarea id="fineExtensionReason" placeholder="Explain why this additional time is required"></textarea>
+                </div>
+                <div class="field"><label for="fineStatus">Status</label><select id="fineStatus"><option value="Pending">Pending</option><option value="Completed">Completed</option></select></div>
+                <div class="field full"><label for="fineReason">Reason</label><textarea id="fineReason" required placeholder="e.g. Did not attend the required assembly"></textarea></div>
+              </div>
+              <div class="form-actions"><button class="outline-button" type="button" data-go-back>← Back</button><button class="outline-button" id="cancelFineEdit" type="reset">Clear</button><button class="primary-button" id="fineSubmitButton" type="submit">Assign fine</button></div>
+            </form>
+          </article>
         </section>
 
         <section class="view-section" data-section="assigned-fines" hidden>
           <div class="section-head"><div><p class="eyebrow">Fine records</p><h2>Assigned Fines</h2><p>Search, filter, modify, and remove student community-service requirements.</p></div><button class="primary-button" type="button" data-go-view="assign-fine">＋ Assign fine</button></div>
-          <article class="panel"><div class="table-toolbar fine-toolbar"><div class="search-wrap"><span class="search-icon">⌕</span><input class="search-input" id="fineSearch" type="search" placeholder="Search student, ID, event, or reason" aria-label="Search fines"></div><div class="fine-filter-row"><select id="fineStatusFilter" aria-label="Filter fines by status"><option value="all">All statuses</option><option value="Pending">Pending</option><option value="Completed">Completed</option></select><span class="count-label" id="fineResultCount">0 fines shown</span></div></div><div class="fine-list-scroll"><div class="fine-record-grid" id="adminFineList"><div class="empty-state">No fines have been assigned.</div></div></div></article>
+          <article class="panel"><div class="table-toolbar fine-toolbar"><div class="search-wrap"><span class="search-icon">⌕</span><input class="search-input" id="fineSearch" type="search" placeholder="Search student, ID, event, reason, or history" aria-label="Search fines"></div><div class="fine-filter-row"><input id="fineDateFilter" type="date" aria-label="Filter fines by date"><select id="fineStatusFilter" aria-label="Filter fines by status"><option value="all">All statuses</option><option value="Pending">Pending</option><option value="Completed">Completed</option></select><select id="fineSort" aria-label="Sort fines"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="student">Student name</option><option value="duration">Longest duration</option></select><span class="count-label" id="fineResultCount">0 fines shown</span></div></div><div class="fine-list-scroll"><div class="fine-record-grid" id="adminFineList"><div class="empty-state">No fines have been assigned.</div></div></div></article>
         </section>
 
         <section class="view-section" data-section="profile" hidden>
