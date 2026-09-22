@@ -19,7 +19,7 @@
         <button class="nav-button active" data-view="dashboard" type="button"><span class="nav-icon">⊞</span><span>Dashboard</span></button>
         <button class="nav-button" data-view="events" type="button"><span class="nav-icon">◇</span><span>Events</span></button>
         <button class="nav-button" data-view="history" type="button"><span class="nav-icon">◷</span><span>Event History</span></button>
-        <button class="nav-button" data-view="fines" type="button"><span class="nav-icon">!</span><span>Fines</span></button>
+        <button class="nav-button" data-view="fines" type="button"><span class="nav-icon">!</span><span>Fines</span><span class="fine-warning-indicator" id="studentFineWarning" role="status" aria-label="Pending community service" hidden>!!</span></button>
         <button class="nav-button" data-view="face" type="button"><span class="nav-icon">◎</span><span>Face Registration</span></button>
         <button class="nav-button" data-view="profile" type="button"><span class="nav-icon">○</span><span>Profile</span></button>
         <button class="nav-button logout-button" data-logout type="button"><span class="nav-icon">↙</span><span>Logout</span></button>
@@ -42,7 +42,7 @@
           </div>
           <div class="stats-grid student-stats">
             <article class="stat-card"><div class="stat-top"><span class="stat-label">Events attended</span><span class="stat-icon">◇</span></div><div class="stat-value" id="eventsAttendedCount">0</div><div class="stat-meta" id="eventsAttendedMeta">No attendance recorded yet</div></article>
-            <article class="stat-card"><div class="stat-top"><span class="stat-label">Absences</span><span class="stat-icon red">−</span></div><div class="stat-value" id="absenceCount">0</div><div class="stat-meta" id="absenceMeta">No missed events</div></article>
+            <button class="stat-card stat-card-button" id="absenceSummaryCard" type="button" aria-label="View absence details"><div class="stat-top"><span class="stat-label">Absences</span><span class="stat-icon red">−</span></div><div class="stat-value" id="absenceCount">0</div><div class="stat-meta" id="absenceMeta">No missed events</div><span class="stat-card-link">View details <span aria-hidden="true">→</span></span></button>
             <article class="stat-card"><div class="stat-top"><span class="stat-label">Days present</span><span class="stat-icon green">✓</span></div><div class="stat-value" id="daysPresentCount">0</div><div class="stat-meta" id="daysPresentMeta">Based on attended events</div></article>
           </div>
           <div class="dashboard-grid single">
@@ -119,6 +119,6 @@
     </section>
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
-  <script type="module" src="../assets/js/dashboard.js?v=20260922-community-service"></script>
+  <script type="module" src="../assets/js/dashboard.js?v=20260922-absence-link"></script>
 </body>
 </html>

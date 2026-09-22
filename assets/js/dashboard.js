@@ -396,6 +396,7 @@ function initializeStudent() {
     document.querySelector("#daysPresentCount").textContent = presentDays;
     document.querySelector("#eventsAttendedMeta").textContent = attendance.length ? `${attendance.length} attendance record${attendance.length === 1 ? "" : "s"}` : "No attendance recorded yet";
     document.querySelector("#absenceMeta").textContent = absences.length ? `${absences.length} closed event${absences.length === 1 ? "" : "s"} missed` : "No missed events";
+    document.querySelector("#absenceSummaryCard").setAttribute("aria-label", absences.length ? `View details for ${absences.length} absence${absences.length === 1 ? "" : "s"}` : "View absence details");
     document.querySelector("#daysPresentMeta").textContent = presentDays ? `${presentDays} unique event day${presentDays === 1 ? "" : "s"}` : "Based on attended events";
     const records = closedEvents.filter((event) => !dismissedIds.has(event.id)).map((event) => ({ event, status: attendedIds.has(event.id) ? "Attended" : "Absent" }));
     const history = document.querySelector("#studentEventHistory");
@@ -411,6 +412,10 @@ function initializeStudent() {
 
   function renderFines() {
     const container = document.querySelector("#studentFineList");
+    const fineWarning = document.querySelector("#studentFineWarning");
+    const hasPendingFine = fines.some((fine) => fine.status !== "Completed");
+    fineWarning.hidden = !hasPendingFine;
+    fineWarning.closest(".nav-button").classList.toggle("has-pending-fines", hasPendingFine);
     if (!fines.length) {
       container.innerHTML = '<div class="empty-state panel">You have no assigned fines.</div>';
       return;
@@ -433,7 +438,9 @@ function initializeStudent() {
       }, firstFine);
       const serviceLabel = status === "Completed" ? "Completed" : `${formatServiceMinutes(totalMinutes)} remaining`;
       const fineIds = group.map((fine) => fine.id).join(",");
-      return `<button class="history-event-card community-service-card" type="button" data-open-community-service="${escapeHtml(fineIds)}" aria-label="View community service details for ${escapeHtml(firstFine.eventName || "attendance absence")}"><div class="history-card-top"><span class="event-type-badge">Community service</span><span class="badge orange">${escapeHtml(serviceLabel)}</span></div><h3>${escapeHtml(firstFine.eventName || "Attendance absence")}</h3><p>${group.length === 1 ? escapeHtml(firstFine.reason || "No reason provided.") : `${group.length} attendance records combined`}</p><div class="event-detail-boxes"><div><span>Status</span><strong>${escapeHtml(status)}</strong></div><div><span>Assigned</span><strong>${escapeHtml(formatFineDate(latestAssigned.assignedAt))}</strong></div></div><span class="community-service-card-action">View service record <span aria-hidden="true">→</span></span></button>`;
+      const needsSettlement = status !== "Completed";
+      const warningBadge = needsSettlement ? '<span class="community-service-warning" role="status"><span aria-hidden="true">!!</span> Needs settlement</span>' : "";
+      return `<button class="history-event-card community-service-card${needsSettlement ? " needs-settlement" : ""}" type="button" data-open-community-service="${escapeHtml(fineIds)}" aria-label="View community service details for ${escapeHtml(firstFine.eventName || "attendance absence")}${needsSettlement ? ", needs settlement" : ""}"><div class="history-card-top"><span class="event-type-badge">Community service</span><span class="community-service-card-statuses">${warningBadge}<span class="badge orange">${escapeHtml(serviceLabel)}</span></span></div><h3>${escapeHtml(firstFine.eventName || "Attendance absence")}</h3><p>${group.length === 1 ? escapeHtml(firstFine.reason || "No reason provided.") : `${group.length} attendance records combined`}</p><div class="event-detail-boxes"><div><span>Status</span><strong>${escapeHtml(status)}</strong></div><div><span>Assigned</span><strong>${escapeHtml(formatFineDate(latestAssigned.assignedAt))}</strong></div></div><span class="community-service-card-action">View service record <span aria-hidden="true">→</span></span></button>`;
     }).join("");
   }
 
@@ -584,6 +591,10 @@ function initializeStudent() {
   document.querySelector("#studentFineList").addEventListener("click", (event) => {
     const button = event.target.closest("[data-open-community-service]");
     if (button) openCommunityServiceModal(button.dataset.openCommunityService, button);
+  });
+  document.querySelector("#absenceSummaryCard").addEventListener("click", () => {
+    const hasPendingFine = fines.some((fine) => fine.status !== "Completed");
+    openView(hasPendingFine ? "fines" : "history");
   });
   document.querySelectorAll("[data-close-community-service]").forEach((button) => button.addEventListener("click", closeCommunityServiceModal));
   communityServiceModal.addEventListener("click", (event) => { if (event.target === communityServiceModal) closeCommunityServiceModal(); });
