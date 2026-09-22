@@ -20,6 +20,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 
 const dashboardRole = document.body.dataset.dashboard;
+const FACE_UPLOAD_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzXA8Gi7akcpT3MS87kOKC-7MCpejazTeK0zLtu-pUNugXL4YBeUan5vVLXhqKTHzsQ_Q/exec";
 const pageCopy = {
   student: {
     dashboard: ["Dashboard", "Your attendance at a glance"],
@@ -86,6 +87,26 @@ function formatNotificationTime(value) {
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+async function uploadFacePhotoToDrive(imageDataUrl, student = {}) {
+  if (!FACE_UPLOAD_WEB_APP_URL) throw new Error("Face-photo storage is not configured.");
+  const idToken = await currentUser.getIdToken();
+  const payload = {
+    idToken,
+    imageDataUrl,
+    studentName: [student.firstName, student.lastName].filter(Boolean).join(" "),
+    studentId: student.accountId || "",
+    section: student.section || ""
+  };
+  // Apps Script web apps do not expose cross-origin response headers. This simple,
+  // opaque POST still delivers the authenticated photo to the private Drive script.
+  await fetch(FACE_UPLOAD_WEB_APP_URL, {
+    method: "POST",
+    mode: "no-cors",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify(payload)
+  });
 }
 
 function wireNotificationCenter() {
@@ -794,10 +815,13 @@ function initializeStudent() {
 
   function captureFacePhoto() {
     const canvas = document.createElement("canvas");
-    canvas.width = cameraPreview.videoWidth || 640;
-    canvas.height = cameraPreview.videoHeight || 480;
+    const sourceWidth = cameraPreview.videoWidth || 640;
+    const sourceHeight = cameraPreview.videoHeight || 480;
+    const scale = Math.min(1, 640 / sourceWidth);
+    canvas.width = Math.round(sourceWidth * scale);
+    canvas.height = Math.round(sourceHeight * scale);
     canvas.getContext("2d").drawImage(cameraPreview, 0, 0, canvas.width, canvas.height);
-    faceCapturePreview.src = canvas.toDataURL("image/jpeg", .88);
+    faceCapturePreview.src = canvas.toDataURL("image/jpeg", .78);
     facePhotoCaptured = true;
     cameraPreview.hidden = true;
     faceCapturePreview.hidden = false;
@@ -835,7 +859,22 @@ function initializeStudent() {
       captureFacePhoto();
       return;
     }
-    await setDoc(doc(db, "faceRegistrations", currentUser.uid), { registered: true, updatedAt: serverTimestamp() }, { merge: true });
+    captureFaceButton.disabled = true;
+    captureFaceButton.textContent = "Saving securely…";
+    try {
+      await uploadFacePhotoToDrive(faceCapturePreview.src, studentProfile);
+    } catch (error) {
+      captureFaceButton.disabled = false;
+      captureFaceButton.textContent = "Register face";
+      showDashboardToast("Photo upload unavailable", "Check your connection, then try registering again.");
+      return;
+    }
+    await setDoc(doc(db, "faceRegistrations", currentUser.uid), {
+      registered: true,
+      storageProvider: "Google Drive",
+      driveUploadRequestedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
     document.querySelector("#faceStatus").textContent = "Registered";
     document.querySelector("#faceStatus").className = "badge green";
     if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
