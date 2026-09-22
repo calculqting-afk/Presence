@@ -1,10 +1,77 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 
 initializeApp();
 const ADMIN_EMAIL = "mikhailovna2007@gmail.com";
+
+function studentMatchesEventAudience(student, audience) {
+  return student.active !== false
+    && (audience === "All students" || audience === `Section ${student.section}`);
+}
+
+async function createReminderNotifications(firestore, events, reminder) {
+  if (events.empty) return 0;
+  const students = await firestore.collection("students").where("active", "==", true).get();
+  const writes = [];
+  events.docs.forEach((eventSnapshot) => {
+    const event = eventSnapshot.data();
+    students.docs.map((studentSnapshot) => studentSnapshot.data())
+      .filter((student) => studentMatchesEventAudience(student, event.audience))
+      .forEach((student) => {
+        const documentId = `event_${eventSnapshot.id}_${student.uid}_${reminder.key}`;
+        writes.push({
+          reference: firestore.doc(`notifications/${documentId}`),
+          data: {
+            recipientUid: student.uid,
+            recipientRole: "",
+            category: "attendance",
+            title: reminder.title,
+            message: `${event.name || "Your event"} ${reminder.message}`,
+            targetView: "events",
+            studentName: [student.firstName, student.lastName].filter(Boolean).join(" "),
+            studentId: student.accountId || "",
+            section: student.section || "",
+            eventId: eventSnapshot.id,
+            reminderType: reminder.key,
+            read: false,
+            createdAt: FieldValue.serverTimestamp()
+          }
+        });
+      });
+  });
+  let created = 0;
+  while (writes.length) {
+    const group = writes.splice(0, 400);
+    await Promise.all(group.map(async ({ reference, data }) => {
+      try {
+        await reference.create(data);
+        created += 1;
+      } catch (error) {
+        if (error.code !== 6 && error.code !== "already-exists") throw error;
+      }
+    }));
+  }
+  return created;
+}
+
+exports.sendEventReminders = onSchedule({ schedule: "every 5 minutes", timeZone: "Asia/Manila" }, async () => {
+  const firestore = getFirestore();
+  const now = new Date();
+  const opensBy = new Date(now.getTime() + 15 * 60 * 1000);
+  const closesBy = new Date(now.getTime() + 10 * 60 * 1000);
+  const [openingEvents, closingEvents] = await Promise.all([
+    firestore.collection("events").where("openAt", ">=", now).where("openAt", "<=", opensBy).get(),
+    firestore.collection("events").where("closeAt", ">=", now).where("closeAt", "<=", closesBy).get()
+  ]);
+  const [openingCreated, closingCreated] = await Promise.all([
+    createReminderNotifications(firestore, openingEvents, { key: "opens", title: "Attendance opens soon", message: "check-in opens in 15 minutes." }),
+    createReminderNotifications(firestore, closingEvents, { key: "closes", title: "Attendance closes soon", message: "check-in closes in 10 minutes." })
+  ]);
+  console.log("Event reminders sent", { openingCreated, closingCreated });
+});
 
 function studentIdToEmail(studentId) {
   const safeId = studentId.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "-");

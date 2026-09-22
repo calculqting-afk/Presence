@@ -282,7 +282,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .event-body h3 { margin: 12px 0 16px; font-size: 1.15rem; line-height: 1.35; }
 .event-description { min-height: 0; margin: 0 0 20px; padding: 16px 18px; color: #4f6078; background: #f5f9ff; border: 1px solid #e1ebf8; border-radius: 12px; font-size: .82rem; line-height: 1.7; white-space: pre-wrap; overflow: visible; overflow-wrap: anywhere; }
 .event-description strong { display: block; margin-bottom: 6px; color: #17335d; font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; }
-.event-meta { display: flex; justify-content: space-between; gap: 12px; color: #718099; font-size: .7rem; line-height: 1.5; }
+.event-meta { display: flex; align-items: center; gap: 10px; color: #718099; font-size: .7rem; line-height: 1.5; }
+.event-check-time { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.event-check-time b { padding: 2px 5px; color: #2167cd; background: var(--blue-soft); border-radius: 4px; font-size: .57rem; letter-spacing: .05em; }
+.event-check-time:nth-child(2) b { color: #a65d1b; background: var(--orange-soft); }
+.event-location { min-width: 0; margin-left: auto; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .event-card-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
 .event-card-actions .primary-button, .event-card-actions .outline-button { min-height: 36px; padding-inline: 13px; }
 .event-card-actions button:disabled { cursor: default; opacity: .72; transform: none; }
