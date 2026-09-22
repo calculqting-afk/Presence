@@ -635,8 +635,83 @@ function initializeStudent() {
 
   const startCameraButton = document.querySelector("#startCamera");
   const captureFaceButton = document.querySelector("#captureFace");
+  const retakeFaceButton = document.querySelector("#retakeFace");
   const cameraPreview = document.querySelector("#cameraPreview");
+  const faceCapturePreview = document.querySelector("#faceCapturePreview");
   const cameraPlaceholder = document.querySelector("#cameraPlaceholder");
+  const faceCameraBox = document.querySelector("#faceCameraBox");
+  const faceRegistrationGuide = document.querySelector("#faceRegistrationGuide");
+  const faceGuidancePanel = document.querySelector("#faceGuidancePanel");
+  const faceGuidanceStep = document.querySelector("#faceGuidanceStep");
+  const faceGuidanceTitle = document.querySelector("#faceGuidanceTitle");
+  const faceGuidanceMessage = document.querySelector("#faceGuidanceMessage");
+  const faceConsentLabel = document.querySelector("#faceConsentLabel");
+  const faceRegistrationConsent = document.querySelector("#faceRegistrationConsent");
+  let faceGuidanceTimers = [];
+  let facePhotoCaptured = false;
+
+  function setFaceGuidance(state, step, title, message) {
+    faceCameraBox.dataset.guidance = state;
+    faceGuidanceStep.textContent = step;
+    faceGuidanceTitle.textContent = title;
+    faceGuidanceMessage.textContent = message;
+  }
+
+  function clearFaceGuidanceTimers() {
+    faceGuidanceTimers.forEach((timer) => window.clearTimeout(timer));
+    faceGuidanceTimers = [];
+  }
+
+  function updateFaceCaptureAvailability() {
+    const isReady = faceCameraBox.dataset.guidance === "ready";
+    captureFaceButton.disabled = !isReady || !faceRegistrationConsent.checked;
+  }
+
+  function beginFaceGuidance() {
+    clearFaceGuidanceTimers();
+    facePhotoCaptured = false;
+    faceCapturePreview.hidden = true;
+    faceRegistrationGuide.hidden = false;
+    faceGuidancePanel.hidden = false;
+    faceConsentLabel.hidden = false;
+    retakeFaceButton.hidden = true;
+    captureFaceButton.textContent = "Capture photo";
+    setFaceGuidance("positioning", "1", "Fit your face in the outline", "Center your full face, look directly at the camera, and use even lighting.");
+    faceGuidanceTimers.push(window.setTimeout(() => {
+      setFaceGuidance("steady", "2", "Hold still…", "Keep your face inside the outline while we prepare your registration photo.");
+    }, 1600));
+    faceGuidanceTimers.push(window.setTimeout(() => {
+      setFaceGuidance("ready", "3", "Steady — ready to capture", "Your face is positioned. Confirm consent, then capture your photo.");
+      updateFaceCaptureAvailability();
+    }, 3600));
+  }
+
+  function retakeFacePhoto() {
+    facePhotoCaptured = false;
+    faceCapturePreview.hidden = true;
+    cameraPreview.hidden = false;
+    faceRegistrationGuide.hidden = false;
+    retakeFaceButton.hidden = true;
+    captureFaceButton.textContent = "Capture photo";
+    setFaceGuidance("ready", "3", "Steady — ready to capture", "Check your position, then capture a new photo.");
+    updateFaceCaptureAvailability();
+  }
+
+  function captureFacePhoto() {
+    const canvas = document.createElement("canvas");
+    canvas.width = cameraPreview.videoWidth || 640;
+    canvas.height = cameraPreview.videoHeight || 480;
+    canvas.getContext("2d").drawImage(cameraPreview, 0, 0, canvas.width, canvas.height);
+    faceCapturePreview.src = canvas.toDataURL("image/jpeg", .88);
+    facePhotoCaptured = true;
+    cameraPreview.hidden = true;
+    faceCapturePreview.hidden = false;
+    faceRegistrationGuide.hidden = true;
+    retakeFaceButton.hidden = false;
+    captureFaceButton.textContent = "Register face";
+    captureFaceButton.disabled = false;
+    setFaceGuidance("review", "4", "Review your photo", "If your face is clear and centered, register it. Otherwise, choose Retake.");
+  }
   startCameraButton.addEventListener("click", async () => {
     try {
       mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
@@ -644,20 +719,40 @@ function initializeStudent() {
       cameraPreview.hidden = false;
       cameraPlaceholder.hidden = true;
       await cameraPreview.play();
-      captureFaceButton.disabled = false;
+      captureFaceButton.disabled = true;
       startCameraButton.disabled = true;
       startCameraButton.textContent = "Camera ready";
+      beginFaceGuidance();
     } catch {
+      clearFaceGuidanceTimers();
+      faceRegistrationGuide.hidden = true;
+      faceGuidancePanel.hidden = true;
+      faceConsentLabel.hidden = true;
+      faceCameraBox.dataset.guidance = "idle";
       showDashboardToast("Camera permission needed", "Allow camera access to continue face registration.");
     }
   });
+  faceRegistrationConsent.addEventListener("change", updateFaceCaptureAvailability);
+  retakeFaceButton.addEventListener("click", retakeFacePhoto);
   captureFaceButton.addEventListener("click", async () => {
+    if (!facePhotoCaptured) {
+      if (!faceRegistrationConsent.checked) return;
+      captureFacePhoto();
+      return;
+    }
     await setDoc(doc(db, "faceRegistrations", currentUser.uid), { registered: true, updatedAt: serverTimestamp() }, { merge: true });
     document.querySelector("#faceStatus").textContent = "Registered";
     document.querySelector("#faceStatus").className = "badge green";
     if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
+    clearFaceGuidanceTimers();
     cameraPreview.hidden = true;
+    faceCapturePreview.hidden = true;
     cameraPlaceholder.hidden = false;
+    faceRegistrationGuide.hidden = true;
+    retakeFaceButton.hidden = true;
+    faceConsentLabel.hidden = true;
+    faceGuidancePanel.hidden = false;
+    setFaceGuidance("complete", "✓", "Face registration complete", "Your registration is ready for future attendance check-ins.");
     captureFaceButton.disabled = true;
     captureFaceButton.textContent = "Face registered";
     showDashboardToast("Face registered", "Registration status was saved successfully.");
