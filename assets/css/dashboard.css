@@ -278,6 +278,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 #studentFineList { align-items: start; }
 .history-event-card, .admin-event-card { min-width: 0; padding: 22px; background: white; border: 1px solid #dfe8f4; border-radius: 16px; box-shadow: 0 9px 28px rgba(36,65,109,.06); transition: border-color .25s ease, box-shadow .3s var(--ease-out), transform .3s var(--ease-out); }
 .history-event-card:hover, .admin-event-card:hover { border-color: #cbdcf1; box-shadow: 0 16px 34px rgba(36,65,109,.1); transform: translateY(-3px); }
+.community-service-card { width: 100%; color: inherit; text-align: left; cursor: pointer; }
+.community-service-card:focus-visible { outline: 3px solid rgba(31, 111, 235, .32); outline-offset: 3px; }
+.community-service-card-action { display: flex; align-items: center; justify-content: space-between; margin-top: 15px; padding-top: 13px; color: var(--blue); border-top: 1px solid #e8eef6; font-size: .72rem; font-weight: 800; }
+.community-service-card-action span { font-size: 1rem; transition: transform .2s ease; }
+.community-service-card:hover .community-service-card-action span { transform: translateX(3px); }
 .history-card-top, .admin-event-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .history-event-card h3, .admin-event-card h3 { margin: 16px 0 8px; font-size: 1rem; line-height: 1.35; }
 .history-event-card > p, .admin-event-card > p { min-height: 46px; margin: 0 0 17px; color: var(--muted); font-size: .74rem; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -516,6 +521,16 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
 #studentProfileModal .dashboard-modal { width: min(720px, 100%); }
+.community-service-modal { width: min(680px, 100%); }
+.community-service-section + .community-service-section { margin-top: 24px; padding-top: 22px; border-top: 1px solid #e8eef6; }
+.community-service-section-heading { margin-bottom: 12px; }
+.community-service-section-heading h3 { margin: 0; color: #203a5f; font-size: .88rem; }
+.community-service-section-heading p { margin: 4px 0 0; color: var(--muted); font-size: .7rem; line-height: 1.5; }
+.community-service-record { padding: 14px; background: #f9fbfe; border: 1px solid #e1eaf5; border-radius: 12px; }
+.community-service-record + .community-service-record { margin-top: 10px; }
+.community-service-record-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 11px; color: #27496e; font-size: .78rem; }
+.community-service-record h4 { margin: 14px 0 8px; color: #52657f; font-size: .68rem; }
+.community-service-empty { padding: 17px; color: var(--muted); background: #f6f9fd; border: 1px dashed #d7e3f1; border-radius: 10px; font-size: .72rem; text-align: center; }
 #studentProfileModal .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 #studentProfileModal .modal-actions {
   position: sticky;

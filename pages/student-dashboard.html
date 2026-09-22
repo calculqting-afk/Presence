@@ -86,6 +86,16 @@
       </div>
     </main>
   </div>
+  <div class="dashboard-modal-backdrop" id="studentCommunityServiceModal" hidden>
+    <section class="dashboard-modal community-service-modal" role="dialog" aria-modal="true" aria-labelledby="studentCommunityServiceModalTitle" aria-describedby="studentCommunityServiceModalDescription">
+      <button class="modal-close" type="button" data-close-community-service aria-label="Close community service details">×</button>
+      <span class="modal-icon">!</span>
+      <h2 id="studentCommunityServiceModalTitle">Community service</h2>
+      <p id="studentCommunityServiceModalDescription">Review your current and past community-service requirements.</p>
+      <div id="studentCommunityServiceModalContent"></div>
+      <div class="modal-actions"><button class="outline-button" type="button" data-close-community-service>← Back to Fines</button></div>
+    </section>
+  </div>
   <div class="dashboard-modal-backdrop" id="studentProfileModal" hidden>
     <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="studentProfileModalTitle">
       <button class="modal-close" type="button" data-close-student-profile aria-label="Close">×</button>
@@ -109,6 +119,6 @@
     </section>
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
-  <script type="module" src="../assets/js/dashboard.js?v=20260819-spark"></script>
+  <script type="module" src="../assets/js/dashboard.js?v=20260922-community-service"></script>
 </body>
 </html>

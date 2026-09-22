@@ -431,12 +431,9 @@ function initializeStudent() {
         const fineTime = fine.assignedAt?.toDate?.()?.getTime?.() || 0;
         return fineTime > latestTime ? fine : latest;
       }, firstFine);
-      const hasServiceExtension = getFineHistory(firstFine).some((entry) => entry.action === "Added");
-      const recordInfo = group.length === 1 && !hasServiceExtension
-        ? `<div class="fine-details fine-details-inline">${studentFineInfoMarkup(firstFine, events)}</div>`
-        : studentFineDetailsMarkup(group, events);
       const serviceLabel = status === "Completed" ? "Completed" : `${formatServiceMinutes(totalMinutes)} remaining`;
-      return `<article class="history-event-card"><div class="history-card-top"><span class="event-type-badge">Community service</span><span class="badge orange">${escapeHtml(serviceLabel)}</span></div><h3>${escapeHtml(firstFine.eventName || "Attendance absence")}</h3><p>${group.length === 1 ? escapeHtml(firstFine.reason || "No reason provided.") : `${group.length} attendance records combined`}</p><div class="event-detail-boxes"><div><span>Status</span><strong>${escapeHtml(status)}</strong></div><div><span>Assigned</span><strong>${escapeHtml(formatFineDate(latestAssigned.assignedAt))}</strong></div></div>${recordInfo}</article>`;
+      const fineIds = group.map((fine) => fine.id).join(",");
+      return `<button class="history-event-card community-service-card" type="button" data-open-community-service="${escapeHtml(fineIds)}" aria-label="View community service details for ${escapeHtml(firstFine.eventName || "attendance absence")}"><div class="history-card-top"><span class="event-type-badge">Community service</span><span class="badge orange">${escapeHtml(serviceLabel)}</span></div><h3>${escapeHtml(firstFine.eventName || "Attendance absence")}</h3><p>${group.length === 1 ? escapeHtml(firstFine.reason || "No reason provided.") : `${group.length} attendance records combined`}</p><div class="event-detail-boxes"><div><span>Status</span><strong>${escapeHtml(status)}</strong></div><div><span>Assigned</span><strong>${escapeHtml(formatFineDate(latestAssigned.assignedAt))}</strong></div></div><span class="community-service-card-action">View service record <span aria-hidden="true">→</span></span></button>`;
     }).join("");
   }
 
@@ -554,6 +551,43 @@ function initializeStudent() {
   document.querySelectorAll("[data-close-student-profile]").forEach((button) => button.addEventListener("click", closeStudentProfileModal));
   studentProfileModal.addEventListener("click", (event) => { if (event.target === studentProfileModal) closeStudentProfileModal(); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !studentProfileModal.hidden) closeStudentProfileModal(); });
+
+  const communityServiceModal = document.querySelector("#studentCommunityServiceModal");
+  const communityServiceModalContent = document.querySelector("#studentCommunityServiceModalContent");
+  let communityServiceTrigger;
+
+  function serviceRecordMarkup(fine) {
+    const serviceStatus = fine.status === "Completed" ? "Completed" : "Pending";
+    const history = getFineHistory(fine).slice().reverse().map((entry) => {
+      const action = entry.action === "Added" ? `Additional service: ${formatServiceMinutes(entry.addedMinutes)}` : entry.action === "Updated" ? "Service requirement updated" : `Assigned: ${formatServiceMinutes(entry.newMinutes || fine.serviceMinutes)}`;
+      return `<li><strong>${escapeHtml(action)}</strong><span>${escapeHtml(formatFineTimestamp(entry.recordedAt))}</span>${entry.reason ? `<small>Reason: ${escapeHtml(entry.reason)}</small>` : ""}</li>`;
+    }).join("");
+    return `<article class="community-service-record"><div class="community-service-record-top"><strong>${escapeHtml(fine.eventName || "Attendance absence")}</strong><span class="badge ${serviceStatus === "Completed" ? "green" : "orange"}">${escapeHtml(serviceStatus)}</span></div><div class="fine-detail-grid"><div><span>Service required</span><strong>${escapeHtml(formatServiceMinutes(fine.serviceMinutes))}</strong></div><div><span>Assigned</span><strong>${escapeHtml(formatFineDate(fine.assignedAt))}</strong></div><div class="fine-detail-full"><span>Reason</span><strong>${escapeHtml(fine.reason || "No reason provided.")}</strong></div></div>${history ? `<h4>Service history</h4><ol class="fine-history-list">${history}</ol>` : ""}</article>`;
+  }
+
+  function openCommunityServiceModal(fineIds, trigger) {
+    const selectedFines = fineIds.split(",").map((id) => fines.find((fine) => fine.id === id)).filter(Boolean);
+    if (!selectedFines.length) return;
+    communityServiceTrigger = trigger;
+    const currentService = selectedFines.filter((fine) => fine.status !== "Completed");
+    const pastService = selectedFines.filter((fine) => fine.status === "Completed");
+    communityServiceModalContent.innerHTML = `<section class="community-service-section"><div class="community-service-section-heading"><h3>Current community service</h3><p>Requirements that still need to be completed.</p></div>${currentService.length ? currentService.map(serviceRecordMarkup).join("") : '<div class="community-service-empty">No current community service for this record.</div>'}</section><section class="community-service-section"><div class="community-service-section-heading"><h3>Past community service</h3><p>Completed requirements, including their recorded reasons.</p></div>${pastService.length ? pastService.map(serviceRecordMarkup).join("") : '<div class="community-service-empty">No past community service for this record yet.</div>'}</section>`;
+    communityServiceModal.hidden = false;
+    communityServiceModal.querySelector("[data-close-community-service]").focus();
+  }
+
+  function closeCommunityServiceModal() {
+    communityServiceModal.hidden = true;
+    communityServiceTrigger?.focus();
+  }
+
+  document.querySelector("#studentFineList").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-open-community-service]");
+    if (button) openCommunityServiceModal(button.dataset.openCommunityService, button);
+  });
+  document.querySelectorAll("[data-close-community-service]").forEach((button) => button.addEventListener("click", closeCommunityServiceModal));
+  communityServiceModal.addEventListener("click", (event) => { if (event.target === communityServiceModal) closeCommunityServiceModal(); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !communityServiceModal.hidden) closeCommunityServiceModal(); });
 
   document.querySelector("#studentEventGrid").addEventListener("click", async (clickEvent) => {
     const button = clickEvent.target.closest("[data-attend-event]");
