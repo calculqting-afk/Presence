@@ -832,6 +832,11 @@ function initializeStudent() {
     setFaceGuidance("review", "4", "Review your photo", "If your face is clear and centered, register it. Otherwise, choose Retake.");
   }
   startCameraButton.addEventListener("click", async () => {
+    if (!faceRegistrationConsent.checked) {
+      showDashboardToast("Consent required", "Please check the consent checkbox before starting the camera.");
+      faceRegistrationConsent.focus();
+      return;
+    }
     try {
       mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
       cameraPreview.srcObject = mediaStream;
@@ -846,7 +851,6 @@ function initializeStudent() {
       clearFaceGuidanceTimers();
       faceRegistrationGuide.hidden = true;
       faceGuidancePanel.hidden = true;
-      faceConsentLabel.hidden = true;
       faceCameraBox.dataset.guidance = "idle";
       showDashboardToast("Camera permission needed", "Allow camera access to continue face registration.");
     }
