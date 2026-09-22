@@ -100,6 +100,20 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /notifications/{notificationId} {
+      allow read, delete: if (isAdmin() && resource.data.recipientRole == "admin")
+        || (isStudent() && resource.data.recipientUid == request.auth.uid);
+      allow update: if isAdmin()
+        || (isStudent()
+          && resource.data.recipientUid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["read", "readAt"]));
+      allow create: if isAdmin()
+        || (isStudent()
+          && request.resource.data.category == "face"
+          && ((request.resource.data.recipientUid == request.auth.uid)
+            || request.resource.data.recipientRole == "admin"));
+    }
+
     match /presence/{studentUid} {
       allow read: if isAdmin()
         || (isStudent() && request.auth.uid == studentUid);

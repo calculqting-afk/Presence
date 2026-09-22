@@ -62,6 +62,101 @@ function showDashboardToast(titleText, messageText) {
   toastTimer = setTimeout(() => toast.classList.remove("show"), 4200);
 }
 
+async function createNotification(notification) {
+  return addDoc(collection(db, "notifications"), {
+    recipientUid: notification.recipientUid || "",
+    recipientRole: notification.recipientRole || "",
+    category: notification.category || "system",
+    title: notification.title,
+    message: notification.message,
+    targetView: notification.targetView || "dashboard",
+    studentName: notification.studentName || "",
+    studentId: notification.studentId || "",
+    section: notification.section || "",
+    read: false,
+    createdAt: serverTimestamp()
+  });
+}
+
+function formatNotificationTime(value) {
+  const date = value?.toDate?.() || (value ? new Date(value) : null);
+  if (!date || Number.isNaN(date.getTime())) return "Just now";
+  const seconds = Math.round((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return "Just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function wireNotificationCenter() {
+  const bell = document.querySelector("#notificationBell");
+  const count = document.querySelector("#notificationCount");
+  const isAdminDashboard = dashboardRole === "admin";
+  document.body.insertAdjacentHTML("beforeend", `<section class="notification-panel" id="notificationPanel" hidden aria-label="Notifications"><div class="notification-panel-head"><div><h2>Notifications</h2><p>Stay up to date with Presence.</p></div><button class="modal-close" id="closeNotifications" type="button" aria-label="Close notifications">×</button></div><div class="notification-tools"><div class="notification-filters"><button class="notification-filter active" type="button" data-notification-filter="all">All</button><button class="notification-filter" type="button" data-notification-filter="unread">Unread</button><button class="notification-filter" type="button" data-notification-filter="attendance">Attendance</button><button class="notification-filter" type="button" data-notification-filter="service">Service</button><button class="notification-filter" type="button" data-notification-filter="face">Face</button><button class="notification-filter" type="button" data-notification-filter="system">System</button></div>${isAdminDashboard ? '<input class="notification-search" id="notificationSearch" type="search" placeholder="Search student, ID, or section">' : ""}</div><div class="notification-actions"><button class="link-button" type="button" id="markNotificationsRead">Mark all as read</button><button class="link-button" type="button" id="clearReadNotifications">Clear read</button></div><div class="notification-list" id="notificationList"><div class="empty-state">No notifications yet.</div></div></section>`);
+  const panel = document.querySelector("#notificationPanel");
+  const list = document.querySelector("#notificationList");
+  const search = document.querySelector("#notificationSearch");
+  let notificationRecords = [];
+  let activeFilter = "all";
+
+  const close = () => { panel.hidden = true; bell.setAttribute("aria-expanded", "false"); };
+  const render = () => {
+    const queryText = search?.value.trim().toLowerCase() || "";
+    const visible = notificationRecords.filter((item) => {
+      const matchesFilter = activeFilter === "all" || (activeFilter === "unread" ? !item.read : item.category === activeFilter);
+      const searchable = `${item.studentName} ${item.studentId} ${item.section} ${item.title} ${item.message}`.toLowerCase();
+      return matchesFilter && (!queryText || searchable.includes(queryText));
+    });
+    list.innerHTML = visible.length ? visible.map((item) => `<button class="notification-item${item.read ? "" : " unread"}" type="button" data-open-notification="${escapeHtml(item.id)}"><span class="notification-icon ${escapeHtml(item.category || "system")}" aria-hidden="true">${item.category === "service" ? "!" : item.category === "attendance" ? "✓" : item.category === "face" ? "◎" : "◇"}</span><span class="notification-copy"><strong>${escapeHtml(item.title || "Presence update")}</strong><small>${escapeHtml(item.message || "")}</small>${item.studentName ? `<em>${escapeHtml(item.studentName)}${item.section ? ` · ${escapeHtml(item.section)}` : ""}</em>` : ""}<time>${escapeHtml(formatNotificationTime(item.createdAt))}</time></span>${item.read ? "" : '<i class="notification-unread-dot" aria-label="Unread"></i>'}</button>`).join("") : '<div class="empty-state">No notifications match this filter.</div>';
+    const unread = notificationRecords.filter((item) => !item.read).length;
+    count.hidden = !unread;
+    count.textContent = unread > 99 ? "99+" : unread;
+  };
+  bell.addEventListener("click", () => {
+    panel.hidden = !panel.hidden;
+    bell.setAttribute("aria-expanded", String(!panel.hidden));
+    if (!panel.hidden) list.querySelector("button")?.focus();
+  });
+  document.querySelector("#closeNotifications").addEventListener("click", close);
+  document.querySelectorAll("[data-notification-filter]").forEach((button) => button.addEventListener("click", () => {
+    activeFilter = button.dataset.notificationFilter;
+    document.querySelectorAll("[data-notification-filter]").forEach((filter) => filter.classList.toggle("active", filter === button));
+    render();
+  }));
+  search?.addEventListener("input", render);
+  list.addEventListener("click", async (event) => {
+    const item = event.target.closest("[data-open-notification]");
+    if (!item) return;
+    const record = notificationRecords.find((notification) => notification.id === item.dataset.openNotification);
+    if (!record) return;
+    if (!record.read) await setDoc(doc(db, "notifications", record.id), { read: true, readAt: serverTimestamp() }, { merge: true });
+    close();
+    openView(record.targetView || "dashboard");
+  });
+  document.querySelector("#markNotificationsRead").addEventListener("click", async () => {
+    const unread = notificationRecords.filter((item) => !item.read);
+    if (!unread.length) return;
+    const batch = writeBatch(db);
+    unread.forEach((item) => batch.set(doc(db, "notifications", item.id), { read: true, readAt: serverTimestamp() }, { merge: true }));
+    await batch.commit();
+  });
+  document.querySelector("#clearReadNotifications").addEventListener("click", async () => {
+    const read = notificationRecords.filter((item) => item.read);
+    if (!read.length) return;
+    const batch = writeBatch(db);
+    read.forEach((item) => batch.delete(doc(db, "notifications", item.id)));
+    await batch.commit();
+  });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !panel.hidden) close(); });
+  const notificationQuery = dashboardRole === "admin"
+    ? query(collection(db, "notifications"), where("recipientRole", "==", "admin"))
+    : query(collection(db, "notifications"), where("recipientUid", "==", currentUser.uid));
+  onSnapshot(notificationQuery, (snapshot) => {
+    notificationRecords = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+    render();
+  });
+}
+
 function renderView(viewName) {
   if (!pageCopy[dashboardRole][viewName]) return;
   activeView = viewName;
@@ -755,6 +850,8 @@ function initializeStudent() {
     setFaceGuidance("complete", "✓", "Face registration complete", "Your registration is ready for future attendance check-ins.");
     captureFaceButton.disabled = true;
     captureFaceButton.textContent = "Face registered";
+    createNotification({ recipientUid: currentUser.uid, category: "face", title: "Face registration confirmed", message: "Your face registration is ready for future attendance check-ins.", targetView: "face" }).catch(() => {});
+    createNotification({ recipientRole: "admin", category: "face", title: "Face registration completed", message: `${[studentProfile?.firstName, studentProfile?.lastName].filter(Boolean).join(" ") || "A student"} completed face registration.`, targetView: "modify-students", studentName: [studentProfile?.firstName, studentProfile?.lastName].filter(Boolean).join(" "), studentId: studentProfile?.accountId || "", section: studentProfile?.section || "" }).catch(() => {});
     showDashboardToast("Face registered", "Registration status was saved successfully.");
   });
 
@@ -1094,6 +1191,8 @@ function initializeAdmin() {
           updatedAt: serverTimestamp(),
           updatedBy: currentUser.uid
         }, { merge: true });
+        createNotification({ recipientUid: student.uid, category: "service", title: addingCommunityService ? "Community service updated" : "Community service requirement updated", message: addingCommunityService ? `${formatServiceMinutes(enteredServiceMinutes)} was added to your ${fineData.eventName || "community service"} requirement.` : `Your service requirement for ${fineData.eventName || "an attendance absence"} was updated.`, targetView: "fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
+        createNotification({ recipientRole: "admin", category: "service", title: "Community service updated", message: `${student.accountId}'s service requirement was updated.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
         showDashboardToast(addingCommunityService ? "Community service added" : "Fine updated", addingCommunityService ? `${formatServiceMinutes(enteredServiceMinutes)} was added to this fine.` : `${student.accountId}'s fine was updated.`);
       } else {
         await addDoc(collection(db, "fines"), {
@@ -1102,6 +1201,8 @@ function initializeAdmin() {
           assignedAt: serverTimestamp(),
           assignedBy: currentUser.uid
         });
+        createNotification({ recipientUid: student.uid, category: "service", title: "Community service assigned", message: `You were assigned ${formatServiceMinutes(serviceMinutes)} of community service for ${fineData.eventName || "an attendance absence"}.`, targetView: "fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
+        createNotification({ recipientRole: "admin", category: "service", title: "Community service assigned", message: `${student.accountId} was assigned a community-service requirement.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
         showDashboardToast("Fine assigned", `${student.accountId} was assigned a new community-service requirement.`);
       }
       resetFineForm();
@@ -1296,8 +1397,15 @@ function initializeAdmin() {
     const id = document.querySelector("#editingEventId").value;
     const record = { name: document.querySelector("#eventName").value.trim(), type: document.querySelector("#eventType").value, date, location: document.querySelector("#eventLocation").value.trim(), timeIn, timeOut, audience: document.querySelector("#eventAudience").value, description: document.querySelector("#eventNotes").value.trim(), openAt: Timestamp.fromDate(new Date(`${date}T${timeIn}`)), closeAt: Timestamp.fromDate(new Date(`${date}T${timeOut}`)), updatedAt: serverTimestamp() };
     try {
-      if (id) await setDoc(doc(db, "events", id), record, { merge: true });
-      else await addDoc(collection(db, "events"), { ...record, createdAt: serverTimestamp(), createdBy: currentUser.uid });
+      if (id) {
+        await setDoc(doc(db, "events", id), record, { merge: true });
+        const recipients = students.filter((student) => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
+        Promise.allSettled(recipients.map((student) => createNotification({ recipientUid: student.uid, category: "system", title: "Event updated", message: `${record.name} was updated. Review the latest event details.`, targetView: "events", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section }))).catch(() => {});
+      } else {
+        await addDoc(collection(db, "events"), { ...record, createdAt: serverTimestamp(), createdBy: currentUser.uid });
+        const recipients = students.filter((student) => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
+        Promise.allSettled(recipients.map((student) => createNotification({ recipientUid: student.uid, category: "system", title: "New event published", message: `${record.name} is scheduled for ${formatEventDate(record.date)}.`, targetView: "events", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section }))).catch(() => {});
+      }
       resetEventForm();
       openView("modify-events");
       showDashboardToast(id ? "Event updated" : "Event created", "The event and attendance window were saved and synced.");
@@ -1674,6 +1782,7 @@ async function initialize() {
     return;
   }
   wireCommonNavigation();
+  wireNotificationCenter();
   updateDashboardGreeting(dashboardRole === "admin" ? "Admin" : "Student");
   if (dashboardRole === "student") initializeStudent();
   else initializeAdmin();
