@@ -119,8 +119,9 @@ service cloud.firestore {
         || (isStudent() && request.auth.uid == studentUid);
       allow create, update: if isStudent()
         && request.auth.uid == studentUid
-        && request.resource.data.keys().hasOnly(["online", "lastSeen", "offlineAt"])
+        && request.resource.data.keys().hasOnly(["online", "status", "lastSeen", "offlineAt"])
         && request.resource.data.online is bool
+        && request.resource.data.status in ["online", "offline", "logged-out"]
         && request.resource.data.lastSeen is timestamp
         && (!("offlineAt" in request.resource.data)
           || request.resource.data.offlineAt is timestamp);
@@ -133,8 +134,9 @@ service cloud.firestore {
       allow create: if isStudent()
         && request.resource.data.studentUid == request.auth.uid
         && request.resource.data.sessionId == sessionId
-        && request.resource.data.keys().hasOnly(["studentUid", "sessionId", "online", "lastSeen", "offlineAt"])
+        && request.resource.data.keys().hasOnly(["studentUid", "sessionId", "online", "status", "lastSeen", "offlineAt"])
         && request.resource.data.online is bool
+        && request.resource.data.status in ["online", "offline", "logged-out"]
         && request.resource.data.lastSeen is timestamp
         && (!("offlineAt" in request.resource.data)
           || request.resource.data.offlineAt is timestamp);
@@ -142,8 +144,9 @@ service cloud.firestore {
         && resource.data.studentUid == request.auth.uid
         && request.resource.data.studentUid == request.auth.uid
         && request.resource.data.sessionId == sessionId
-        && request.resource.data.keys().hasOnly(["studentUid", "sessionId", "online", "lastSeen", "offlineAt"])
+        && request.resource.data.keys().hasOnly(["studentUid", "sessionId", "online", "status", "lastSeen", "offlineAt"])
         && request.resource.data.online is bool
+        && request.resource.data.status in ["online", "offline", "logged-out"]
         && request.resource.data.lastSeen is timestamp
         && (!("offlineAt" in request.resource.data)
           || request.resource.data.offlineAt is timestamp);

@@ -270,6 +270,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .presence-status { font-weight: 800; }
 .presence-status.is-online { color: #168653; }
 .presence-status.is-offline { color: #d33f4c; }
+.presence-status.is-logged-out { color: #68768b; }
 .presence-status .presence-dot { margin-right: 5px; box-shadow: 0 0 0 3px currentColor; opacity: .22; }
 .presence-profile-time { display: block; margin-top: 8px; color: var(--muted); font-size: .68rem; }
 

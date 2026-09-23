@@ -48,6 +48,7 @@ let toastTimer;
 let mediaStream;
 let presenceHeartbeatTimer;
 let presenceSessionId;
+let studentLoggedOut = false;
 let activeView;
 let previousView = "dashboard";
 
@@ -396,9 +397,10 @@ function wireCommonNavigation() {
     if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
     window.clearInterval(presenceHeartbeatTimer);
     if (dashboardRole === "student" && currentUser && presenceSessionId) {
+      studentLoggedOut = true;
       await Promise.allSettled([
-        setDoc(doc(db, "presenceSessions", presenceSessionId), { studentUid: currentUser.uid, sessionId: presenceSessionId, online: false, lastSeen: serverTimestamp(), offlineAt: serverTimestamp() }, { merge: true }),
-        setDoc(doc(db, "presence", currentUser.uid), { online: false, lastSeen: serverTimestamp(), offlineAt: serverTimestamp() }, { merge: true })
+        setDoc(doc(db, "presenceSessions", presenceSessionId), { studentUid: currentUser.uid, sessionId: presenceSessionId, online: false, status: "logged-out", lastSeen: serverTimestamp(), offlineAt: serverTimestamp() }, { merge: true }),
+        setDoc(doc(db, "presence", currentUser.uid), { online: false, status: "logged-out", lastSeen: serverTimestamp(), offlineAt: serverTimestamp() }, { merge: true })
       ]);
     }
     try {
@@ -420,17 +422,20 @@ function initializeStudent() {
   let studentProfile;
   let pendingProfilePhoto = "";
   let presenceWriteErrorShown = false;
+  studentLoggedOut = false;
   const studentProfileModal = document.querySelector("#studentProfileModal");
   let storedPresenceSession = "";
   try { storedPresenceSession = sessionStorage.getItem("presenceDeviceSession") || ""; } catch {}
   presenceSessionId = storedPresenceSession || `${currentUser.uid}_${createDeviceSessionToken()}`;
   try { sessionStorage.setItem("presenceDeviceSession", presenceSessionId); } catch {}
 
-  const updatePresence = async (online = true, silent = false) => {
+  const updatePresence = async (status = "online", silent = false) => {
+    const online = status === "online";
     const statusPayload = {
       online,
+      status,
       lastSeen: serverTimestamp(),
-      ...(online ? {} : { offlineAt: serverTimestamp() })
+      offlineAt: online ? deleteField() : serverTimestamp()
     };
     try {
       await setDoc(doc(db, "presenceSessions", presenceSessionId), {
@@ -451,10 +456,12 @@ function initializeStudent() {
       }
     }
   };
-  updatePresence(true);
-  presenceHeartbeatTimer = window.setInterval(() => updatePresence(true), 60000);
-  window.addEventListener("focus", () => updatePresence(true));
-  window.addEventListener("pagehide", () => updatePresence(false, true));
+  updatePresence("online");
+  presenceHeartbeatTimer = window.setInterval(() => updatePresence("online"), 60000);
+  window.addEventListener("focus", () => updatePresence("online"));
+  window.addEventListener("pagehide", () => {
+    if (!studentLoggedOut) updatePresence("offline", true);
+  });
 
   function updatePhotoPreview(photoDataUrl = "") {
     const image = document.querySelector("#profilePhotoPreviewImage");
@@ -1424,7 +1431,8 @@ function initializeAdmin() {
       ? `Last active ${new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(inactiveTimestamp)}`
       : "No activity recorded";
     const deviceText = activeSessions.length > 1 ? `Active on ${activeSessions.length} devices` : "Active now";
-    return { isOnline, label: isOnline ? "Online" : "Offline", detail: isOnline ? deviceText : inactiveText };
+    const isLoggedOut = !isOnline && latestSession?.status === "logged-out";
+    return { isOnline, status: isOnline ? "online" : isLoggedOut ? "logged-out" : "offline", label: isOnline ? "Online" : isLoggedOut ? "Logged out" : "Offline", detail: isOnline ? deviceText : inactiveText };
   }
 
   function setPresenceSessions(snapshot) {
@@ -1494,7 +1502,7 @@ function initializeAdmin() {
       const avatar = student.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student.firstName, student.lastName));
       const presence = getStudentPresence(student.uid);
       const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
-      return `<tr><td><div class="student-cell"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))}</strong><small>${escapeHtml(student.accountId)}</small></div></div></td><td><strong>${escapeHtml(student.course || "Not assigned")}</strong><br><small>Section ${escapeHtml(student.section)}</small></td><td><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span><small class="presence-time presence-status ${presence.isOnline ? "is-online" : "is-offline"}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</small></td><td>${escapeHtml(student.email || "Not provided")}</td><td><div class="table-actions"><button class="small-button" type="button" data-view-student="${student.uid}">Profile</button>${hasFaceRegistration ? `<button class="small-button danger" type="button" data-reset-face="${student.uid}">Reset face</button>` : ""}<button class="small-button" type="button" data-password-student="${student.uid}">Password</button><button class="small-button danger" type="button" data-delete-student="${student.uid}">Clear account</button></div></td></tr>`;
+      return `<tr><td><div class="student-cell"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))}</strong><small>${escapeHtml(student.accountId)}</small></div></div></td><td><strong>${escapeHtml(student.course || "Not assigned")}</strong><br><small>Section ${escapeHtml(student.section)}</small></td><td><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span><small class="presence-time presence-status is-${presence.status}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</small></td><td>${escapeHtml(student.email || "Not provided")}</td><td><div class="table-actions"><button class="small-button" type="button" data-view-student="${student.uid}">Profile</button>${hasFaceRegistration ? `<button class="small-button danger" type="button" data-reset-face="${student.uid}">Reset face</button>` : ""}<button class="small-button" type="button" data-password-student="${student.uid}">Password</button><button class="small-button danger" type="button" data-delete-student="${student.uid}">Clear account</button></div></td></tr>`;
     }).join("");
     renderSelectedStudent();
     renderAdminAttendance();
