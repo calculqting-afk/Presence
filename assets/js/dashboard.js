@@ -807,6 +807,25 @@ function initializeStudent() {
     captureFaceButton.textContent = "Face registered";
   }
 
+  function unlockFaceRegistration() {
+    faceAlreadyRegistered = false;
+    facePhotoCaptured = false;
+    clearFaceGuidanceTimers();
+    cameraPreview.hidden = true;
+    faceCapturePreview.hidden = true;
+    cameraPlaceholder.hidden = false;
+    faceRegistrationGuide.hidden = true;
+    faceGuidancePanel.hidden = true;
+    faceConsentLabel.hidden = false;
+    faceRegistrationConsent.checked = false;
+    retakeFaceButton.hidden = true;
+    startCameraButton.disabled = false;
+    startCameraButton.textContent = "Start camera";
+    captureFaceButton.disabled = true;
+    captureFaceButton.textContent = "Capture photo";
+    faceCameraBox.dataset.guidance = "idle";
+  }
+
   function setFaceGuidance(state, step, title, message) {
     faceCameraBox.dataset.guidance = state;
     faceGuidanceStep.textContent = step;
@@ -950,7 +969,7 @@ function initializeStudent() {
       document.querySelector("#faceStatus").className = "badge green";
       lockFaceRegistration();
     } else {
-      faceAlreadyRegistered = false;
+      unlockFaceRegistration();
     }
   });
   window.setInterval(renderEvents, 15000);
@@ -969,6 +988,17 @@ function initializeAdmin() {
   const eventTableBody = document.querySelector("#eventTableBody");
   const studentTableBody = document.querySelector("#studentTableBody");
   const studentSearch = document.querySelector("#studentSearch");
+  const studentCourseFilter = document.querySelector("#studentCourseFilter");
+  const studentSectionFilter = document.querySelector("#studentSectionFilter");
+  const studentFaceFilter = document.querySelector("#studentFaceFilter");
+  const studentAccountFilter = document.querySelector("#studentAccountFilter");
+  const studentAttendanceFilter = document.querySelector("#studentAttendanceFilter");
+  const studentFineFilter = document.querySelector("#studentFineFilter");
+  const studentSort = document.querySelector("#studentSort");
+  const studentPagination = document.querySelector("#studentPagination");
+  const studentPageInfo = document.querySelector("#studentPageInfo");
+  const previousStudentPage = document.querySelector("#previousStudentPage");
+  const nextStudentPage = document.querySelector("#nextStudentPage");
   const fineForm = document.querySelector("#fineForm");
   const fineStudent = document.querySelector("#fineStudent");
   const fineStudentSearch = document.querySelector("#fineStudentSearch");
@@ -997,11 +1027,13 @@ function initializeAdmin() {
   let removalCountdownTimer;
   let pendingAdminProfilePhoto = "";
   let addingCommunityService = false;
+  const studentPageSize = 20;
+  let studentPage = 1;
 
   const eventSyncNotice = document.querySelector(".notice");
   if (eventSyncNotice) eventSyncNotice.textContent = "Events are saved online and sync automatically to student dashboards, including after refresh.";
   studentTableBody.closest("table").querySelectorAll("th")[1].textContent = "Course / Section";
-  studentTableBody.closest("table").querySelectorAll("th")[2].textContent = "Live status";
+  studentTableBody.closest("table").querySelectorAll("th")[2].textContent = "Face / live status";
   document.querySelector('label[for="eventNotes"]').textContent = "Description";
   document.querySelector("#eventNotes").placeholder = "Write a clear announcement or event description";
   document.querySelector("#eventLocation").closest(".field").insertAdjacentHTML("beforebegin", '<div class="field"><label for="eventType">Event type</label><select id="eventType" required><option value="Assembly">Assembly</option><option value="Meeting">Meeting</option><option value="Seminar">Seminar</option><option value="Workshop">Workshop</option><option value="School Activity">School Activity</option><option value="Ceremony">Ceremony</option><option value="Sports">Sports</option><option value="Other">Other</option></select></div>');
@@ -1409,16 +1441,56 @@ function initializeAdmin() {
 
   function renderStudents() {
     const search = studentSearch.value.trim().toLowerCase();
-    const filtered = students.filter((student) => Object.values(student).join(" ").toLowerCase().includes(search));
+    const updateFilterOptions = (select, label, values) => {
+      const currentValue = select.value;
+      select.innerHTML = `<option value="all">All ${label}</option>${values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`;
+      select.value = values.includes(currentValue) ? currentValue : "all";
+    };
+    updateFilterOptions(studentCourseFilter, "courses", [...new Set(students.map((student) => student.course).filter(Boolean))].sort());
+    updateFilterOptions(studentSectionFilter, "sections", [...new Set(students.map((student) => student.section).filter(Boolean))].sort());
+
+    const localDate = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const presentToday = new Set(attendance.filter((record) => record.eventDate === localDate).map((record) => record.studentUid));
+    const pendingService = new Set(fines.filter((fine) => fine.status !== "Completed").map((fine) => fine.studentUid));
+    const activityTime = (uid) => {
+      const sessions = [...(presenceByUid.get(uid) || [])];
+      const legacy = legacyPresenceByUid.get(uid);
+      if (legacy) sessions.push(legacy);
+      return Math.max(0, ...sessions.map((session) => session.offlineAt?.toMillis?.() || session.lastSeen?.toMillis?.() || 0));
+    };
+    const filtered = students.filter((student) => {
+      const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
+      const matchesSearch = !search || [student.firstName, student.middleName, student.lastName, student.accountId, student.email, student.course, student.section].join(" ").toLowerCase().includes(search);
+      const matchesCourse = studentCourseFilter.value === "all" || student.course === studentCourseFilter.value;
+      const matchesSection = studentSectionFilter.value === "all" || student.section === studentSectionFilter.value;
+      const matchesFace = studentFaceFilter.value === "all" || (studentFaceFilter.value === "registered" ? hasFaceRegistration : !hasFaceRegistration);
+      const matchesAccount = studentAccountFilter.value === "all" || (studentAccountFilter.value === "active" ? student.active !== false : student.active === false);
+      const matchesAttendance = studentAttendanceFilter.value === "all" || (studentAttendanceFilter.value === "present" ? presentToday.has(student.uid) : !presentToday.has(student.uid));
+      const matchesFine = studentFineFilter.value === "all" || (studentFineFilter.value === "pending" ? pendingService.has(student.uid) : !pendingService.has(student.uid));
+      return matchesSearch && matchesCourse && matchesSection && matchesFace && matchesAccount && matchesAttendance && matchesFine;
+    }).sort((first, second) => {
+      if (studentSort.value === "id") return String(first.accountId || "").localeCompare(String(second.accountId || ""), undefined, { numeric: true });
+      if (studentSort.value === "newest") return (second.createdAt?.toMillis?.() || 0) - (first.createdAt?.toMillis?.() || 0);
+      if (studentSort.value === "activity") return activityTime(second.uid) - activityTime(first.uid);
+      return [first.lastName, first.firstName, first.middleName].filter(Boolean).join(" ").localeCompare([second.lastName, second.firstName, second.middleName].filter(Boolean).join(" "));
+    });
     document.querySelector("#registeredCount").textContent = students.length;
-    document.querySelector("#studentResultCount").textContent = `${filtered.length} student${filtered.length === 1 ? "" : "s"} shown`;
+    const totalPages = Math.max(1, Math.ceil(filtered.length / studentPageSize));
+    studentPage = Math.min(studentPage, totalPages);
+    const firstResult = filtered.length ? (studentPage - 1) * studentPageSize + 1 : 0;
+    const visibleStudents = filtered.slice(firstResult - 1, firstResult - 1 + studentPageSize);
+    document.querySelector("#studentResultCount").textContent = `${filtered.length} matching student${filtered.length === 1 ? "" : "s"}`;
+    studentPagination.hidden = filtered.length <= studentPageSize;
+    studentPageInfo.textContent = filtered.length ? `Showing ${firstResult}–${firstResult + visibleStudents.length - 1} of ${filtered.length}` : "No matching students";
+    previousStudentPage.disabled = studentPage <= 1;
+    nextStudentPage.disabled = studentPage >= totalPages;
     if (!filtered.length) {
-      studentTableBody.innerHTML = `<tr><td colspan="5"><div class="empty-state">${students.length ? "No students match your search." : "No students have been registered yet."}</div></td></tr>`;
+      studentTableBody.innerHTML = `<tr><td colspan="5"><div class="empty-state">${students.length ? "No students match the selected filters." : "No students have been registered yet."}</div></td></tr>`;
       renderSelectedStudent();
       renderAdminAttendance();
       return;
     }
-    studentTableBody.innerHTML = filtered.map((student) => {
+    studentTableBody.innerHTML = visibleStudents.map((student) => {
       const avatar = student.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student.firstName, student.lastName));
       const presence = getStudentPresence(student.uid);
       const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
@@ -1867,7 +1939,33 @@ function initializeAdmin() {
     if (!removeStudentModal.hidden) closeRemoveModal();
     if (!resetFaceModal.hidden) closeResetFaceModal();
   });
-  studentSearch.addEventListener("input", renderStudents);
+  const resetStudentDirectoryPage = () => {
+    studentPage = 1;
+    renderStudents();
+  };
+  studentSearch.addEventListener("input", resetStudentDirectoryPage);
+  [studentCourseFilter, studentSectionFilter, studentFaceFilter, studentAccountFilter, studentAttendanceFilter, studentFineFilter, studentSort]
+    .forEach((filter) => filter.addEventListener("change", resetStudentDirectoryPage));
+  document.querySelector("#clearStudentFilters").addEventListener("click", () => {
+    studentSearch.value = "";
+    studentCourseFilter.value = "all";
+    studentSectionFilter.value = "all";
+    studentFaceFilter.value = "all";
+    studentAccountFilter.value = "all";
+    studentAttendanceFilter.value = "all";
+    studentFineFilter.value = "all";
+    studentSort.value = "name";
+    resetStudentDirectoryPage();
+  });
+  previousStudentPage.addEventListener("click", () => {
+    if (studentPage <= 1) return;
+    studentPage -= 1;
+    renderStudents();
+  });
+  nextStudentPage.addEventListener("click", () => {
+    studentPage += 1;
+    renderStudents();
+  });
   document.querySelector("#refreshStudentStatus").addEventListener("click", async (event) => {
     const button = event.currentTarget;
     const originalText = button.textContent;
