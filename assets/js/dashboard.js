@@ -8,6 +8,7 @@ import {
   deleteField,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   getDocsFromServer,
   onSnapshot,
@@ -107,6 +108,27 @@ async function uploadFacePhotoToDrive(imageDataUrl, student = {}) {
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify(payload)
   });
+}
+
+async function resetFacePhotoInDrive(studentUid) {
+  if (!FACE_UPLOAD_WEB_APP_URL) throw new Error("Face-photo storage is not configured.");
+  const idToken = await currentUser.getIdToken();
+  await fetch(FACE_UPLOAD_WEB_APP_URL, {
+    method: "POST",
+    mode: "no-cors",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ action: "reset", idToken, studentUid })
+  });
+}
+
+async function waitForFaceRegistration(studentUid, shouldExist, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const snapshot = await getDocFromServer(doc(db, "faceRegistrations", studentUid));
+    if (snapshot.exists() === shouldExist) return snapshot;
+    await new Promise((resolve) => window.setTimeout(resolve, 800));
+  }
+  return null;
 }
 
 function wireNotificationCenter() {
@@ -765,6 +787,25 @@ function initializeStudent() {
   const faceRegistrationConsent = document.querySelector("#faceRegistrationConsent");
   let faceGuidanceTimers = [];
   let facePhotoCaptured = false;
+  let faceAlreadyRegistered = false;
+
+  function lockFaceRegistration() {
+    faceAlreadyRegistered = true;
+    clearFaceGuidanceTimers();
+    if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
+    cameraPreview.hidden = true;
+    faceCapturePreview.hidden = true;
+    cameraPlaceholder.hidden = false;
+    faceRegistrationGuide.hidden = true;
+    faceConsentLabel.hidden = true;
+    retakeFaceButton.hidden = true;
+    faceGuidancePanel.hidden = false;
+    setFaceGuidance("complete", "✓", "Face registration already complete", "To replace your photo, ask your administrator to reset your face registration.");
+    startCameraButton.disabled = true;
+    startCameraButton.textContent = "Face registered";
+    captureFaceButton.disabled = true;
+    captureFaceButton.textContent = "Face registered";
+  }
 
   function setFaceGuidance(state, step, title, message) {
     faceCameraBox.dataset.guidance = state;
@@ -832,6 +873,7 @@ function initializeStudent() {
     setFaceGuidance("review", "4", "Review your photo", "If your face is clear and centered, register it. Otherwise, choose Retake.");
   }
   startCameraButton.addEventListener("click", async () => {
+    if (faceAlreadyRegistered) return;
     if (!faceRegistrationConsent.checked) {
       showDashboardToast("Consent required", "Please check the consent checkbox before starting the camera.");
       faceRegistrationConsent.focus();
@@ -873,26 +915,16 @@ function initializeStudent() {
       showDashboardToast("Photo upload unavailable", "Check your connection, then try registering again.");
       return;
     }
-    await setDoc(doc(db, "faceRegistrations", currentUser.uid), {
-      registered: true,
-      storageProvider: "Google Drive",
-      driveUploadRequestedAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    }, { merge: true });
+    const registration = await waitForFaceRegistration(currentUser.uid, true);
+    if (!registration) {
+      captureFaceButton.disabled = false;
+      captureFaceButton.textContent = "Register face";
+      showDashboardToast("Registration not confirmed", "The Drive upload did not finish. Please try again or contact your administrator.");
+      return;
+    }
     document.querySelector("#faceStatus").textContent = "Registered";
     document.querySelector("#faceStatus").className = "badge green";
-    if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
-    clearFaceGuidanceTimers();
-    cameraPreview.hidden = true;
-    faceCapturePreview.hidden = true;
-    cameraPlaceholder.hidden = false;
-    faceRegistrationGuide.hidden = true;
-    retakeFaceButton.hidden = true;
-    faceConsentLabel.hidden = true;
-    faceGuidancePanel.hidden = false;
-    setFaceGuidance("complete", "✓", "Face registration complete", "Your registration is ready for future attendance check-ins.");
-    captureFaceButton.disabled = true;
-    captureFaceButton.textContent = "Face registered";
+    lockFaceRegistration();
     createNotification({ recipientUid: currentUser.uid, category: "face", title: "Face registration confirmed", message: "Your face registration is ready for future attendance check-ins.", targetView: "face" }).catch(() => {});
     createNotification({ recipientRole: "admin", category: "face", title: "Face registration completed", message: `${[studentProfile?.firstName, studentProfile?.lastName].filter(Boolean).join(" ") || "A student"} completed face registration.`, targetView: "modify-students", studentName: [studentProfile?.firstName, studentProfile?.lastName].filter(Boolean).join(" "), studentId: studentProfile?.accountId || "", section: studentProfile?.section || "" }).catch(() => {});
     showDashboardToast("Face registered", "Registration status was saved successfully.");
@@ -916,6 +948,9 @@ function initializeStudent() {
     if (snapshot.data()?.registered) {
       document.querySelector("#faceStatus").textContent = "Registered";
       document.querySelector("#faceStatus").className = "badge green";
+      lockFaceRegistration();
+    } else {
+      faceAlreadyRegistered = false;
     }
   });
   window.setInterval(renderEvents, 15000);
@@ -926,6 +961,7 @@ function initializeAdmin() {
   let students = [];
   let attendance = [];
   let fines = [];
+  let faceRegistrationsByUid = new Map();
   let presenceByUid = new Map();
   let legacyPresenceByUid = new Map();
   const eventForm = document.querySelector("#eventForm");
@@ -952,9 +988,11 @@ function initializeAdmin() {
   const fineSort = document.querySelector("#fineSort");
   const passwordModal = document.querySelector("#passwordModal");
   const removeStudentModal = document.querySelector("#removeStudentModal");
+  const resetFaceModal = document.querySelector("#resetFaceModal");
   const adminStudentDetail = document.querySelector("#adminStudentDetail");
   let selectedPasswordStudent;
   let selectedRemovalStudent;
+  let selectedFaceResetStudent;
   let selectedManagedStudentUid;
   let removalCountdownTimer;
   let pendingAdminProfilePhoto = "";
@@ -1383,7 +1421,8 @@ function initializeAdmin() {
     studentTableBody.innerHTML = filtered.map((student) => {
       const avatar = student.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student.firstName, student.lastName));
       const presence = getStudentPresence(student.uid);
-      return `<tr><td><div class="student-cell"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))}</strong><small>${escapeHtml(student.accountId)}</small></div></div></td><td><strong>${escapeHtml(student.course || "Not assigned")}</strong><br><small>Section ${escapeHtml(student.section)}</small></td><td><span class="badge ${presence.isOnline ? "green" : "gray"}"><i class="presence-dot"></i>${presence.label}</span><small class="presence-time">${escapeHtml(presence.detail)}</small></td><td>${escapeHtml(student.email || "Not provided")}</td><td><div class="table-actions"><button class="small-button" type="button" data-view-student="${student.uid}">Profile</button><button class="small-button" type="button" data-password-student="${student.uid}">Password</button><button class="small-button danger" type="button" data-delete-student="${student.uid}">Clear account</button></div></td></tr>`;
+      const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
+      return `<tr><td><div class="student-cell"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))}</strong><small>${escapeHtml(student.accountId)}</small></div></div></td><td><strong>${escapeHtml(student.course || "Not assigned")}</strong><br><small>Section ${escapeHtml(student.section)}</small></td><td><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span><small class="presence-time">${escapeHtml(presence.label)}</small></td><td>${escapeHtml(student.email || "Not provided")}</td><td><div class="table-actions"><button class="small-button" type="button" data-view-student="${student.uid}">Profile</button>${hasFaceRegistration ? `<button class="small-button danger" type="button" data-reset-face="${student.uid}">Reset face</button>` : ""}<button class="small-button" type="button" data-password-student="${student.uid}">Password</button><button class="small-button danger" type="button" data-delete-student="${student.uid}">Clear account</button></div></td></tr>`;
     }).join("");
     renderSelectedStudent();
     renderAdminAttendance();
@@ -1405,8 +1444,24 @@ function initializeAdmin() {
     const attendedCards = studentAttendance.length
       ? studentAttendance.map((record) => `<article class="attended-event-box"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><span>${escapeHtml(record.eventDate || "Date unavailable")} · ${escapeHtml(record.location || "Location not provided")}</span><span>${escapeHtml(record.timeIn || "")} ${record.timeOut ? `– ${escapeHtml(record.timeOut)}` : ""}</span></article>`).join("")
       : '<div class="empty-state">This student has not attended an event yet.</div>';
-    adminStudentDetail.innerHTML = `<article class="panel admin-student-overview"><button class="modal-close" type="button" data-close-student-detail aria-label="Close student details">×</button><div class="profile-avatar">${avatar}</div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(student.accountId)}</p><p class="profile-course-line" style="margin-top:-4px;color:var(--muted);font-size:.82rem;">Course Registered · <strong>${escapeHtml(student.course || "Not assigned")}</strong></p><span class="badge ${presence.isOnline ? "green" : "gray"}"><i class="presence-dot"></i>${presence.label}</span><small class="presence-profile-time">${escapeHtml(presence.detail)}</small><div class="admin-student-actions"><button class="primary-button" type="button" data-edit-student="${student.uid}">Edit information</button><button class="outline-button" type="button" data-password-student="${student.uid}">Change password</button><button class="small-button danger modal-danger-button" type="button" data-delete-student="${student.uid}">Clear account</button></div></article><article class="panel admin-student-information"><div class="panel-head"><div><h3>Student information</h3><p>Profile details and recorded attendance.</p></div><span class="badge blue">${studentAttendance.length} attended</span></div><div class="student-info-boxes"><div class="student-info-box"><span>Student ID</span><strong>${escapeHtml(student.accountId)}</strong></div><div class="student-info-box"><span>Course Registered</span><strong>${escapeHtml(student.course || "Not assigned")}</strong></div><div class="student-info-box"><span>Section</span><strong>${escapeHtml(student.section)}</strong></div><div class="student-info-box"><span>Email address</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div><div class="student-info-box"><span>Phone number</span><strong>${escapeHtml(student.phone || "Not provided")}</strong></div><div class="student-info-box"><span>Live status</span><strong>${presence.label}</strong><small>${escapeHtml(presence.detail)}</small></div><div class="student-info-box"><span>Account access</span><strong>${student.active === false ? "Inactive" : "Active"}</strong></div></div><div class="panel-head"><div><h3>Attended events</h3><p>All attendance records saved for this student.</p></div></div><div class="attended-event-grid">${attendedCards}</div></article>`;
+    const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
+    adminStudentDetail.innerHTML = `<article class="panel admin-student-overview"><button class="modal-close" type="button" data-close-student-detail aria-label="Close student details">×</button><div class="profile-avatar">${avatar}</div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(student.accountId)}</p><p class="profile-course-line" style="margin-top:-4px;color:var(--muted);font-size:.82rem;">Course Registered · <strong>${escapeHtml(student.course || "Not assigned")}</strong></p><span class="badge ${presence.isOnline ? "green" : "gray"}"><i class="presence-dot"></i>${presence.label}</span><small class="presence-profile-time">${escapeHtml(presence.detail)}</small><div class="admin-student-actions"><button class="primary-button" type="button" data-edit-student="${student.uid}">Edit information</button>${hasFaceRegistration ? `<button class="outline-button" type="button" data-reset-face="${student.uid}">Reset face registration</button>` : ""}<button class="outline-button" type="button" data-password-student="${student.uid}">Change password</button><button class="small-button danger modal-danger-button" type="button" data-delete-student="${student.uid}">Clear account</button></div></article><article class="panel admin-student-information"><div class="panel-head"><div><h3>Student information</h3><p>Profile details and recorded attendance.</p></div><span class="badge blue">${studentAttendance.length} attended</span></div><div class="student-info-boxes"><div class="student-info-box"><span>Student ID</span><strong>${escapeHtml(student.accountId)}</strong></div><div class="student-info-box"><span>Course Registered</span><strong>${escapeHtml(student.course || "Not assigned")}</strong></div><div class="student-info-box"><span>Section</span><strong>${escapeHtml(student.section)}</strong></div><div class="student-info-box"><span>Face registration</span><strong>${hasFaceRegistration ? "Registered" : "Not registered"}</strong></div><div class="student-info-box"><span>Email address</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div><div class="student-info-box"><span>Phone number</span><strong>${escapeHtml(student.phone || "Not provided")}</strong></div><div class="student-info-box"><span>Live status</span><strong>${presence.label}</strong><small>${escapeHtml(presence.detail)}</small></div><div class="student-info-box"><span>Account access</span><strong>${student.active === false ? "Inactive" : "Active"}</strong></div></div><div class="panel-head"><div><h3>Attended events</h3><p>All attendance records saved for this student.</p></div></div><div class="attended-event-grid">${attendedCards}</div></article>`;
     adminStudentDetail.hidden = false;
+  }
+
+  async function resetStudentFaceRegistration(student) {
+    if (!student || !faceRegistrationsByUid.get(student.uid)?.registered) return false;
+    try {
+      await resetFacePhotoInDrive(student.uid);
+      const registration = await waitForFaceRegistration(student.uid, false);
+      if (!registration) throw new Error("Drive did not confirm removal. The student remains registered.");
+      await createNotification({ recipientUid: student.uid, category: "face", title: "Face registration reset", message: "Your administrator reset your face registration. You may now register one new photo.", targetView: "face", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section });
+      showDashboardToast("Face registration reset", `${student.accountId} can now register one new photo.`);
+      return true;
+    } catch (error) {
+      showDashboardToast("Unable to reset face", error.message || "Try again after checking the Drive upload service.");
+      return false;
+    }
   }
 
   function resetEventForm() {
@@ -1630,6 +1685,11 @@ function initializeAdmin() {
     confirmButton.textContent = "Wait 5 seconds";
   }
 
+  function closeResetFaceModal() {
+    resetFaceModal.hidden = true;
+    selectedFaceResetStudent = undefined;
+  }
+
   function openPasswordModal(student) {
     selectedPasswordStudent = student;
     if (!selectedPasswordStudent) return;
@@ -1666,16 +1726,27 @@ function initializeAdmin() {
     document.querySelector("#removeStudentPassword").focus();
   }
 
+  function openResetFaceModal(student) {
+    if (!student || !faceRegistrationsByUid.get(student.uid)?.registered) return;
+    selectedFaceResetStudent = student;
+    const studentName = [student.firstName, student.lastName].filter(Boolean).join(" ") || "this student";
+    document.querySelector("#resetFaceMessage").textContent = `Reset ${studentName}'s face registration? Their current face photo will be moved to Drive Trash, and they will be allowed to register one new photo.`;
+    resetFaceModal.hidden = false;
+    document.querySelector("#confirmResetFace").focus();
+  }
+
   studentTableBody.addEventListener("click", (clickEvent) => {
     const view = clickEvent.target.closest("[data-view-student]");
     const passwordButton = clickEvent.target.closest("[data-password-student]");
     const remove = clickEvent.target.closest("[data-delete-student]");
+    const resetFace = clickEvent.target.closest("[data-reset-face]");
     if (view) {
       selectedManagedStudentUid = view.dataset.viewStudent;
       renderSelectedStudent();
       adminStudentDetail.scrollIntoView({ behavior: "smooth", block: "start" });
     }
     if (passwordButton) openPasswordModal(students.find((student) => student.uid === passwordButton.dataset.passwordStudent));
+    if (resetFace) openResetFaceModal(students.find((student) => student.uid === resetFace.dataset.resetFace));
     if (remove) openRemoveModal(students.find((student) => student.uid === remove.dataset.deleteStudent));
   });
 
@@ -1684,12 +1755,14 @@ function initializeAdmin() {
     const edit = clickEvent.target.closest("[data-edit-student]");
     const passwordButton = clickEvent.target.closest("[data-password-student]");
     const remove = clickEvent.target.closest("[data-delete-student]");
+    const resetFace = clickEvent.target.closest("[data-reset-face]");
     if (close) {
       selectedManagedStudentUid = undefined;
       renderSelectedStudent();
     }
     if (edit) editStudent(edit.dataset.editStudent);
     if (passwordButton) openPasswordModal(students.find((student) => student.uid === passwordButton.dataset.passwordStudent));
+    if (resetFace) openResetFaceModal(students.find((student) => student.uid === resetFace.dataset.resetFace));
     if (remove) openRemoveModal(students.find((student) => student.uid === remove.dataset.deleteStudent));
   });
 
@@ -1767,14 +1840,32 @@ function initializeAdmin() {
     }
   });
 
+  document.querySelector("#confirmResetFace").addEventListener("click", async () => {
+    if (!selectedFaceResetStudent) return;
+    const studentToReset = selectedFaceResetStudent;
+    const confirmButton = document.querySelector("#confirmResetFace");
+    confirmButton.disabled = true;
+    confirmButton.textContent = "Resetting…";
+    const resetComplete = await resetStudentFaceRegistration(studentToReset);
+    if (resetComplete) {
+      closeResetFaceModal();
+    } else {
+      confirmButton.disabled = false;
+      confirmButton.textContent = "Reset face registration";
+    }
+  });
+
   document.querySelectorAll("[data-close-password]").forEach((button) => button.addEventListener("click", closePasswordModal));
   document.querySelectorAll("[data-close-remove]").forEach((button) => button.addEventListener("click", closeRemoveModal));
+  document.querySelectorAll("[data-close-reset-face]").forEach((button) => button.addEventListener("click", closeResetFaceModal));
   passwordModal.addEventListener("click", (event) => { if (event.target === passwordModal) closePasswordModal(); });
   removeStudentModal.addEventListener("click", (event) => { if (event.target === removeStudentModal) closeRemoveModal(); });
+  resetFaceModal.addEventListener("click", (event) => { if (event.target === resetFaceModal) closeResetFaceModal(); });
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     if (!passwordModal.hidden) closePasswordModal();
     if (!removeStudentModal.hidden) closeRemoveModal();
+    if (!resetFaceModal.hidden) closeResetFaceModal();
   });
   studentSearch.addEventListener("input", renderStudents);
   document.querySelector("#refreshStudentStatus").addEventListener("click", async (event) => {
@@ -1811,6 +1902,7 @@ function initializeAdmin() {
   onSnapshot(collection(db, "presence"), (snapshot) => { legacyPresenceByUid = new Map(snapshot.docs.map((item) => [item.id, item.data()])); renderStudents(); });
   onSnapshot(collection(db, "attendance"), (snapshot) => { attendance = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderAdminAttendance(); renderSelectedStudent(); });
   onSnapshot(collection(db, "fines"), (snapshot) => { fines = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderAdminFines(); });
+  onSnapshot(collection(db, "faceRegistrations"), (snapshot) => { faceRegistrationsByUid = new Map(snapshot.docs.map((item) => [item.id, item.data()])); renderStudents(); });
   onSnapshot(doc(db, "adminProfiles", currentUser.uid), (snapshot) => { renderAdminProfile(snapshot.data()); });
   window.setInterval(() => { renderAdminEvents(); renderStudents(); }, 15000);
   resetStudentForm();

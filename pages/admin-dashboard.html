@@ -186,7 +186,16 @@
       <div class="modal-actions"><button class="outline-button" type="button" data-close-remove>Cancel</button><button class="small-button danger modal-danger-button" id="confirmRemoveStudent" type="button" disabled>Wait 5 seconds</button></div>
     </section>
   </div>
+  <div class="dashboard-modal-backdrop" id="resetFaceModal" hidden>
+    <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="resetFaceTitle" aria-describedby="resetFaceMessage">
+      <button class="modal-close" type="button" data-close-reset-face aria-label="Close">×</button>
+      <span class="modal-icon danger">!</span>
+      <h2 id="resetFaceTitle">Reset face registration?</h2>
+      <p id="resetFaceMessage">This removes the student's current face photo from Drive and allows them to register one new photo.</p>
+      <div class="modal-actions"><button class="outline-button" type="button" data-close-reset-face>Cancel</button><button class="small-button danger modal-danger-button" id="confirmResetFace" type="button">Reset face registration</button></div>
+    </section>
+  </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
-  <script type="module" src="../assets/js/dashboard.js?v=20260819-admin-photo"></script>
+  <script type="module" src="../assets/js/dashboard.js?v=20260923-drive-file-sync"></script>
 </body>
 </html>
