@@ -267,6 +267,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .badge.gray { color: #6e7b90; background: #edf1f6; }
 .presence-dot { width: 7px; height: 7px; display: inline-block; margin-right: 6px; background: currentColor; border-radius: 50%; box-shadow: 0 0 0 3px rgba(31,111,235,.08); }
 .presence-time { display: block; margin-top: 6px; color: var(--muted); font-size: .63rem; line-height: 1.35; white-space: nowrap; }
+.presence-status { font-weight: 800; }
+.presence-status.is-online { color: #168653; }
+.presence-status.is-offline { color: #d33f4c; }
+.presence-status .presence-dot { margin-right: 5px; box-shadow: 0 0 0 3px currentColor; opacity: .22; }
 .presence-profile-time { display: block; margin-top: 8px; color: var(--muted); font-size: .68rem; }
 
 .event-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
