@@ -1,7 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
-import { getAnalytics, isSupported } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-analytics.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 
 export const firebaseConfig = {
   apiKey: "AIzaSyCiHNnPQzPvGZLupVtYZ5uNNDPgdSK3m5I",
@@ -15,14 +14,20 @@ export const firebaseConfig = {
   
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});
 const studentProvisioningApp = initializeApp(firebaseConfig, "student-provisioning");
 export const studentProvisioningAuth = getAuth(studentProvisioningApp);
 export const ADMIN_EMAIL = "mikhailovna2007@gmail.com";
 
-isSupported().then((supported) => {
-  if (supported) getAnalytics(app);
-}).catch(() => {});
+window.addEventListener("load", () => {
+  import("https://www.gstatic.com/firebasejs/12.16.0/firebase-analytics.js")
+    .then(async ({ getAnalytics, isSupported }) => {
+      if (await isSupported()) getAnalytics(app);
+    })
+    .catch(() => {});
+}, { once: true });
 
 export function studentIdToEmail(studentId) {
   const safeId = studentId.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "-");
