@@ -56,6 +56,39 @@ function escapeHtml(value = "") {
   return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
 }
 
+function formatBirthday(value) {
+  if (!value) return "Not provided";
+  const birthday = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(birthday.getTime())) return "Not provided";
+  return birthday.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+}
+
+class FineModalController {
+  constructor({ modal, content, title, description, closeSelector }) {
+    this.modal = modal;
+    this.content = content;
+    this.title = title;
+    this.description = description;
+    this.trigger = null;
+    document.querySelectorAll(closeSelector).forEach((button) => button.addEventListener("click", () => this.close()));
+    modal.addEventListener("click", (event) => { if (event.target === modal) this.close(); });
+  }
+
+  open({ title, description, markup, trigger }) {
+    this.trigger = trigger;
+    this.title.textContent = title;
+    this.description.textContent = description;
+    this.content.innerHTML = markup;
+    this.modal.hidden = false;
+    this.modal.querySelector("[data-close-community-service], [data-close-admin-fines]")?.focus();
+  }
+
+  close() {
+    this.modal.hidden = true;
+    this.trigger?.focus();
+  }
+}
+
 function showDashboardToast(titleText, messageText) {
   const toast = document.querySelector("#dashboardToast");
   clearTimeout(toastTimer);
@@ -583,9 +616,9 @@ function initializeStudent() {
       }, firstFine);
       const serviceLabel = status === "Completed" ? "Completed" : `${formatServiceMinutes(totalMinutes)} remaining`;
       const fineIds = group.map((fine) => fine.id).join(",");
-      const needsSettlement = status !== "Completed";
-      const warningBadge = needsSettlement ? '<span class="community-service-warning" role="status"><span aria-hidden="true">!!</span> Needs settlement</span>' : "";
-      return `<button class="history-event-card community-service-card${needsSettlement ? " needs-settlement" : ""}" type="button" data-open-community-service="${escapeHtml(fineIds)}" aria-label="View community service details for ${escapeHtml(firstFine.eventName || "attendance absence")}${needsSettlement ? ", needs settlement" : ""}"><div class="history-card-top"><span class="event-type-badge">Community service</span><span class="community-service-card-statuses">${warningBadge}<span class="badge orange">${escapeHtml(serviceLabel)}</span></span></div><h3>${escapeHtml(firstFine.eventName || "Attendance absence")}</h3><p>${group.length === 1 ? escapeHtml(firstFine.reason || "No reason provided.") : `${group.length} attendance records combined`}</p><div class="event-detail-boxes"><div><span>Status</span><strong>${escapeHtml(status)}</strong></div><div><span>Assigned</span><strong>${escapeHtml(formatFineDate(latestAssigned.assignedAt))}</strong></div></div><span class="community-service-card-action">View service record <span aria-hidden="true">→</span></span></button>`;
+      const needsReview = status !== "Completed";
+      const warningBadge = needsReview ? '<span class="community-service-warning" role="status"><span aria-hidden="true">!!</span> Needs review</span>' : "";
+      return `<button class="history-event-card community-service-card${needsReview ? " needs-settlement" : ""}" type="button" data-open-community-service="${escapeHtml(fineIds)}" aria-label="View attendance-fine details for ${escapeHtml(firstFine.eventName || "attendance absence")}${needsReview ? ", needs review" : ""}"><div class="history-card-top"><span class="event-type-badge">Attendance fine</span><span class="community-service-card-statuses">${warningBadge}<span class="badge orange">${escapeHtml(serviceLabel)}</span></span></div><h3>${escapeHtml(firstFine.eventName || "Attendance absence")}</h3><p>${group.length === 1 ? escapeHtml(firstFine.reason || "No reason provided.") : `${group.length} attendance records combined`}</p><div class="event-detail-boxes"><div><span>Status</span><strong>${escapeHtml(status)}</strong></div><div><span>Assigned</span><strong>${escapeHtml(formatFineDate(latestAssigned.assignedAt))}</strong></div></div><span class="community-service-card-action">View attendance-fine record <span aria-hidden="true">→</span></span></button>`;
     }).join("");
   }
 
@@ -608,7 +641,8 @@ function initializeStudent() {
     document.querySelectorAll("[data-student-first-name]").forEach((element) => { element.textContent = studentProfile.firstName; });
     updateDashboardGreeting(studentProfile.firstName || "Student");
     const profileVisual = studentProfile.photoDataUrl ? `<img src="${escapeHtml(studentProfile.photoDataUrl)}" alt="${escapeHtml(fullName)} profile photo">` : escapeHtml(initials);
-    container.innerHTML = `<div class="profile-grid"><article class="panel profile-summary"><div class="profile-avatar">${profileVisual}</div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(studentProfile.accountId)}</p><p class="profile-course-line" style="margin-top:-4px;color:var(--muted);font-size:.82rem;">Course Registered · <strong>${escapeHtml(studentProfile.course || "Not assigned")}</strong></p><div class="profile-facts"><div class="profile-fact"><span>Course</span><strong>${escapeHtml(studentProfile.course || "Not assigned")}</strong></div><div class="profile-fact"><span>Section</span><strong>${escapeHtml(studentProfile.section)}</strong></div><div class="profile-fact"><span>Account</span><strong>Active</strong></div></div></article><article class="panel"><div class="panel-head"><div><h3>Contact details</h3><p>Your updates appear here immediately.</p></div><button class="primary-button" type="button" id="editStudentProfile">Edit profile</button></div><div class="profile-facts"><div class="profile-fact"><span>Student ID</span><strong>${escapeHtml(studentProfile.accountId)}</strong></div><div class="profile-fact"><span>Course Registered</span><strong>${escapeHtml(studentProfile.course || "Not assigned")}</strong></div><div class="profile-fact"><span>Email</span><strong>${escapeHtml(studentProfile.email || "Not provided")}</strong></div><div class="profile-fact"><span>Phone</span><strong>${escapeHtml(studentProfile.phone || "Not provided")}</strong></div></div></article></div>`;
+    const fineCount = fines.length;
+    container.innerHTML = `<div class="profile-grid"><article class="panel profile-summary"><div class="profile-avatar">${profileVisual}</div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(studentProfile.accountId)}</p><p class="profile-course-line" style="margin-top:-4px;color:var(--muted);font-size:.82rem;">Course Registered · <strong>${escapeHtml(studentProfile.course || "Not assigned")}</strong></p><div class="profile-facts"><div class="profile-fact"><span>Birthday</span><strong>${escapeHtml(formatBirthday(studentProfile.birthday))}</strong></div><div class="profile-fact"><span>Course</span><strong>${escapeHtml(studentProfile.course || "Not assigned")}</strong></div><div class="profile-fact"><span>Section</span><strong>${escapeHtml(studentProfile.section)}</strong></div><div class="profile-fact"><span>Account</span><strong>Active</strong></div></div></article><article class="panel"><div class="panel-head"><div><h3>Contact details</h3><p>Your updates appear here immediately.</p></div><button class="primary-button" type="button" id="editStudentProfile">Edit profile</button></div><div class="profile-facts"><div class="profile-fact"><span>Student ID</span><strong>${escapeHtml(studentProfile.accountId)}</strong></div><div class="profile-fact"><span>Course Registered</span><strong>${escapeHtml(studentProfile.course || "Not assigned")}</strong></div><div class="profile-fact"><span>Email</span><strong>${escapeHtml(studentProfile.email || "Not provided")}</strong></div><div class="profile-fact"><span>Phone</span><strong>${escapeHtml(studentProfile.phone || "Not provided")}</strong></div></div><div class="modal-actions"><button class="outline-button" type="button" id="checkStudentFines">Check attendance fines${fineCount ? ` (${fineCount})` : ""}</button></div></article></div>`;
   }
 
   document.querySelector("#studentProfileContent").addEventListener("click", (event) => {
@@ -617,6 +651,7 @@ function initializeStudent() {
     document.querySelector("#profileFirstName").value = studentProfile.firstName || "";
     document.querySelector("#profileMiddleName").value = studentProfile.middleName || "";
     document.querySelector("#profileLastName").value = studentProfile.lastName || "";
+    document.querySelector("#profileBirthday").value = studentProfile.birthday || "";
     document.querySelector("#profileCourse").value = studentProfile.course || "BSInfo Tech";
     document.querySelector("#profileSection").value = studentProfile.section || "1A";
     document.querySelector("#profileEmail").value = studentProfile.email || "";
@@ -654,6 +689,7 @@ function initializeStudent() {
         firstName: document.querySelector("#profileFirstName").value.trim(),
         middleName: document.querySelector("#profileMiddleName").value.trim(),
         lastName: document.querySelector("#profileLastName").value.trim(),
+        birthday: document.querySelector("#profileBirthday").value,
         course: document.querySelector("#profileCourse").value,
         section: document.querySelector("#profileSection").value,
         email: document.querySelector("#profileEmail").value.trim(),
@@ -706,7 +742,7 @@ function initializeStudent() {
 
   const communityServiceModal = document.querySelector("#studentCommunityServiceModal");
   const communityServiceModalContent = document.querySelector("#studentCommunityServiceModalContent");
-  let communityServiceTrigger;
+  const communityServiceModalController = new FineModalController({ modal: communityServiceModal, content: communityServiceModalContent, title: document.querySelector("#studentCommunityServiceModalTitle"), description: document.querySelector("#studentCommunityServiceModalDescription"), closeSelector: "[data-close-community-service]" });
 
   function serviceRecordMarkup(fine) {
     const serviceStatus = fine.status === "Completed" ? "Completed" : "Pending";
@@ -720,29 +756,33 @@ function initializeStudent() {
   function openCommunityServiceModal(fineIds, trigger) {
     const selectedFines = fineIds.split(",").map((id) => fines.find((fine) => fine.id === id)).filter(Boolean);
     if (!selectedFines.length) return;
-    communityServiceTrigger = trigger;
     const currentService = selectedFines.filter((fine) => fine.status !== "Completed");
     const pastService = selectedFines.filter((fine) => fine.status === "Completed");
-    communityServiceModalContent.innerHTML = `<section class="community-service-section"><div class="community-service-section-heading"><h3>Current community service</h3><p>Requirements that still need to be completed.</p></div>${currentService.length ? currentService.map(serviceRecordMarkup).join("") : '<div class="community-service-empty">No current community service for this record.</div>'}</section><section class="community-service-section"><div class="community-service-section-heading"><h3>Past community service</h3><p>Completed requirements, including their recorded reasons.</p></div>${pastService.length ? pastService.map(serviceRecordMarkup).join("") : '<div class="community-service-empty">No past community service for this record yet.</div>'}</section>`;
-    communityServiceModal.hidden = false;
-    communityServiceModal.querySelector("[data-close-community-service]").focus();
+    communityServiceModalController.open({ title: "Attendance fine details", description: "Review the attendance-fine records for this event.", markup: `<section class="community-service-section"><div class="community-service-section-heading"><h3>Current records</h3><p>Records that still need attention.</p></div>${currentService.length ? currentService.map(serviceRecordMarkup).join("") : '<div class="community-service-empty">No current attendance-fine records for this event.</div>'}</section><section class="community-service-section"><div class="community-service-section-heading"><h3>Reviewed records</h3><p>Completed attendance-fine records and their notes.</p></div>${pastService.length ? pastService.map(serviceRecordMarkup).join("") : '<div class="community-service-empty">No reviewed attendance-fine records for this event yet.</div>'}</section>`, trigger });
+  }
+
+  function openAllStudentFinesModal(trigger) {
+    const currentRecords = fines.filter((fine) => fine.status !== "Completed");
+    const reviewedRecords = fines.filter((fine) => fine.status === "Completed");
+    communityServiceModalController.open({ title: "Your attendance fines", description: "Review all attendance-fine records assigned to your profile.", markup: `<section class="community-service-section"><div class="community-service-section-heading"><h3>Current records</h3><p>Attendance-fine records that still need attention.</p></div>${currentRecords.length ? currentRecords.map(serviceRecordMarkup).join("") : '<div class="community-service-empty">No current attendance fines recorded.</div>'}</section><section class="community-service-section"><div class="community-service-section-heading"><h3>Reviewed records</h3><p>Attendance-fine records marked as completed.</p></div>${reviewedRecords.length ? reviewedRecords.map(serviceRecordMarkup).join("") : '<div class="community-service-empty">No reviewed attendance fines recorded.</div>'}</section>`, trigger });
   }
 
   function closeCommunityServiceModal() {
-    communityServiceModal.hidden = true;
-    communityServiceTrigger?.focus();
+    communityServiceModalController.close();
   }
 
   document.querySelector("#studentFineList").addEventListener("click", (event) => {
     const button = event.target.closest("[data-open-community-service]");
     if (button) openCommunityServiceModal(button.dataset.openCommunityService, button);
   });
+  document.querySelector("#studentProfileContent").addEventListener("click", (event) => {
+    const button = event.target.closest("#checkStudentFines");
+    if (button) openAllStudentFinesModal(button);
+  });
   document.querySelector("#absenceSummaryCard").addEventListener("click", () => {
     const hasPendingFine = fines.some((fine) => fine.status !== "Completed");
     openView(hasPendingFine ? "fines" : "history");
   });
-  document.querySelectorAll("[data-close-community-service]").forEach((button) => button.addEventListener("click", closeCommunityServiceModal));
-  communityServiceModal.addEventListener("click", (event) => { if (event.target === communityServiceModal) closeCommunityServiceModal(); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !communityServiceModal.hidden) closeCommunityServiceModal(); });
 
   document.querySelector("#studentEventGrid").addEventListener("click", async (clickEvent) => {
@@ -969,7 +1009,7 @@ function initializeStudent() {
   onSnapshot(query(collection(db, "events"), orderBy("openAt", "asc")), (snapshot) => { events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderEvents(); });
   onSnapshot(query(collection(db, "attendance"), where("studentUid", "==", currentUser.uid)), (snapshot) => { attendance = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderEvents(); });
   onSnapshot(query(collection(db, "dismissedHistory"), where("studentUid", "==", currentUser.uid)), (snapshot) => { dismissedIds = new Set(snapshot.docs.map((item) => item.data().eventId)); renderEvents(); });
-  onSnapshot(query(collection(db, "fines"), where("studentUid", "==", currentUser.uid)), (snapshot) => { fines = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderFines(); });
+  onSnapshot(query(collection(db, "fines"), where("studentUid", "==", currentUser.uid)), (snapshot) => { fines = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderFines(); renderProfile(); });
   onSnapshot(doc(db, "faceRegistrations", currentUser.uid), (snapshot) => {
     if (snapshot.data()?.registered) {
       document.querySelector("#faceStatus").textContent = "Registered";
@@ -987,6 +1027,7 @@ function initializeAdmin() {
   let students = [];
   let attendance = [];
   let fines = [];
+  let selectedFineStudentUid = "";
   let faceRegistrationsByUid = new Map();
   let presenceByUid = new Map();
   let legacyPresenceByUid = new Map();
@@ -1011,6 +1052,7 @@ function initializeAdmin() {
   const fineStudentSearch = document.querySelector("#fineStudentSearch");
   fineStudentSearch.insertAdjacentHTML("afterend", '<div class="fine-student-search-results" id="fineStudentSearchResults" role="listbox" hidden></div>');
   const fineStudentSearchResults = document.querySelector("#fineStudentSearchResults");
+  const adminFineModalController = new FineModalController({ modal: document.querySelector("#adminFineModal"), content: document.querySelector("#adminFineModalContent"), title: document.querySelector("#adminFineModalTitle"), description: document.querySelector("#adminFineModalDescription"), closeSelector: "[data-close-admin-fines]" });
   const fineEvent = document.querySelector("#fineEvent");
   const addCommunityService = document.querySelector("#addCommunityService");
   const fineExtensionControls = document.querySelector("#fineExtensionControls");
@@ -1090,6 +1132,7 @@ function initializeAdmin() {
     const displayName = profile.displayName || "School Admin";
     const initials = displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part.charAt(0)).join("").toUpperCase() || "AD";
     document.querySelector("#adminDisplayName").value = displayName;
+    document.querySelector("#adminProfileBirthday").value = profile.birthday || "";
     document.querySelector("#adminProfilePhone").value = profile.phone || "";
     document.querySelectorAll("[data-admin-name]").forEach((element) => { element.textContent = displayName; });
     document.querySelectorAll("[data-admin-initials]").forEach((element) => { element.textContent = initials; element.hidden = Boolean(profile.photoDataUrl); });
@@ -1108,6 +1151,7 @@ function initializeAdmin() {
     try {
       await setDoc(doc(db, "adminProfiles", currentUser.uid), {
         displayName: document.querySelector("#adminDisplayName").value.trim(),
+        birthday: document.querySelector("#adminProfileBirthday").value,
         phone: document.querySelector("#adminProfilePhone").value.trim(),
         photoDataUrl: pendingAdminProfilePhoto,
         email: currentUser.email,
@@ -1526,7 +1570,25 @@ function initializeAdmin() {
       : '<div class="empty-state">This student has not attended an event yet.</div>';
     const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
     adminStudentDetail.innerHTML = `<article class="panel admin-student-overview"><button class="modal-close" type="button" data-close-student-detail aria-label="Close student details">×</button><div class="profile-avatar">${avatar}</div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(student.accountId)}</p><p class="profile-course-line" style="margin-top:-4px;color:var(--muted);font-size:.82rem;">Course Registered · <strong>${escapeHtml(student.course || "Not assigned")}</strong></p><span class="badge ${presence.isOnline ? "green" : "gray"}"><i class="presence-dot"></i>${presence.label}</span><small class="presence-profile-time">${escapeHtml(presence.detail)}</small><div class="admin-student-actions"><button class="primary-button" type="button" data-edit-student="${student.uid}">Edit information</button>${hasFaceRegistration ? `<button class="outline-button" type="button" data-reset-face="${student.uid}">Reset face registration</button>` : ""}<button class="outline-button" type="button" data-password-student="${student.uid}">Change password</button><button class="small-button danger modal-danger-button" type="button" data-delete-student="${student.uid}">Clear account</button></div></article><article class="panel admin-student-information"><div class="panel-head"><div><h3>Student information</h3><p>Profile details and recorded attendance.</p></div><span class="badge blue">${studentAttendance.length} attended</span></div><div class="student-info-boxes"><div class="student-info-box"><span>Student ID</span><strong>${escapeHtml(student.accountId)}</strong></div><div class="student-info-box"><span>Course Registered</span><strong>${escapeHtml(student.course || "Not assigned")}</strong></div><div class="student-info-box"><span>Section</span><strong>${escapeHtml(student.section)}</strong></div><div class="student-info-box"><span>Face registration</span><strong>${hasFaceRegistration ? "Registered" : "Not registered"}</strong></div><div class="student-info-box"><span>Email address</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div><div class="student-info-box"><span>Phone number</span><strong>${escapeHtml(student.phone || "Not provided")}</strong></div><div class="student-info-box"><span>Live status</span><strong>${presence.label}</strong><small>${escapeHtml(presence.detail)}</small></div><div class="student-info-box"><span>Account access</span><strong>${student.active === false ? "Inactive" : "Active"}</strong></div></div><div class="panel-head"><div><h3>Attended events</h3><p>All attendance records saved for this student.</p></div></div><div class="attended-event-grid">${attendedCards}</div></article>`;
+    const fineCount = fines.filter((fine) => fine.studentUid === student.uid).length;
+    adminStudentDetail.querySelector(".admin-student-actions")?.insertAdjacentHTML("afterbegin", `<button class="outline-button" type="button" data-check-student-fines="${escapeHtml(student.uid)}">Check attendance fines${fineCount ? ` (${fineCount})` : ""}</button>`);
+    adminStudentDetail.querySelector(".student-info-boxes")?.insertAdjacentHTML("afterbegin", `<div class="student-info-box"><span>Birthday</span><strong>${escapeHtml(formatBirthday(student.birthday))}</strong></div>`);
     adminStudentDetail.hidden = false;
+  }
+
+  function fineRecordModalMarkup(fine) {
+    const status = fine.status === "Completed" ? "Completed" : "Needs review";
+    return `<article class="community-service-record"><div class="community-service-record-top"><strong>${escapeHtml(fine.eventName || "Attendance absence")}</strong><span class="badge ${fine.status === "Completed" ? "green" : "orange"}">${escapeHtml(status)}</span></div><div class="fine-detail-grid"><div><span>Attendance date</span><strong>${escapeHtml(fine.eventDate || "Not recorded")}</strong></div><div><span>Recorded</span><strong>${escapeHtml(formatFineDate(fine.assignedAt))}</strong></div><div class="fine-detail-full"><span>Reason</span><strong>${escapeHtml(fine.reason || "No reason provided.")}</strong></div></div></article>`;
+  }
+
+  function openAdminFineModal(student, trigger) {
+    if (!student) return;
+    selectedFineStudentUid = student.uid;
+    const studentFines = fines.filter((fine) => fine.studentUid === student.uid);
+    const currentRecords = studentFines.filter((fine) => fine.status !== "Completed");
+    const reviewedRecords = studentFines.filter((fine) => fine.status === "Completed");
+    const studentName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ") || "Student";
+    adminFineModalController.open({ title: `${studentName}'s attendance fines`, description: "Review attendance-fine records, then use Manage fines to update them.", markup: `<section class="community-service-section"><div class="community-service-section-heading"><h3>Current records</h3><p>Records that still need attention.</p></div>${currentRecords.length ? currentRecords.map(fineRecordModalMarkup).join("") : '<div class="community-service-empty">No current attendance fines recorded.</div>'}</section><section class="community-service-section"><div class="community-service-section-heading"><h3>Reviewed records</h3><p>Records marked as completed.</p></div>${reviewedRecords.length ? reviewedRecords.map(fineRecordModalMarkup).join("") : '<div class="community-service-empty">No reviewed attendance fines recorded.</div>'}</section>`, trigger });
   }
 
   async function resetStudentFaceRegistration(student) {
@@ -1623,6 +1685,7 @@ function initializeAdmin() {
     document.querySelector("#managedStudentId").disabled = false;
     document.querySelector("#managedFirstName").value = student.firstName;
     document.querySelector("#managedMiddleName").value = student.middleName || "";
+    document.querySelector("#managedBirthday").value = student.birthday || "";
     document.querySelector("#managedLastName").value = student.lastName;
     document.querySelector("#managedSection").value = student.section;
     document.querySelector("#managedCourse").value = student.course || "";
@@ -1641,7 +1704,7 @@ function initializeAdmin() {
   studentForm.addEventListener("submit", async (submitEvent) => {
     submitEvent.preventDefault();
     const uid = document.querySelector("#originalStudentId").value;
-    const student = { accountId: document.querySelector("#managedStudentId").value.trim(), firstName: document.querySelector("#managedFirstName").value.trim(), middleName: document.querySelector("#managedMiddleName").value.trim(), lastName: document.querySelector("#managedLastName").value.trim(), course: document.querySelector("#managedCourse").value, section: document.querySelector("#managedSection").value, password: document.querySelector("#managedPassword").value, email: document.querySelector("#managedEmail").value.trim(), phone: document.querySelector("#managedPhone").value.trim() };
+    const student = { accountId: document.querySelector("#managedStudentId").value.trim(), firstName: document.querySelector("#managedFirstName").value.trim(), middleName: document.querySelector("#managedMiddleName").value.trim(), lastName: document.querySelector("#managedLastName").value.trim(), birthday: document.querySelector("#managedBirthday").value, course: document.querySelector("#managedCourse").value, section: document.querySelector("#managedSection").value, password: document.querySelector("#managedPassword").value, email: document.querySelector("#managedEmail").value.trim(), phone: document.querySelector("#managedPhone").value.trim() };
     if (!/^[A-Za-z0-9._-]+$/.test(student.accountId)) {
       showDashboardToast("Invalid Student ID", "Use only letters, numbers, periods, underscores, or dashes.");
       return;
@@ -1836,15 +1899,27 @@ function initializeAdmin() {
     const passwordButton = clickEvent.target.closest("[data-password-student]");
     const remove = clickEvent.target.closest("[data-delete-student]");
     const resetFace = clickEvent.target.closest("[data-reset-face]");
+    const checkFines = clickEvent.target.closest("[data-check-student-fines]");
     if (close) {
       selectedManagedStudentUid = undefined;
       renderSelectedStudent();
     }
     if (edit) editStudent(edit.dataset.editStudent);
+    if (checkFines) openAdminFineModal(students.find((student) => student.uid === checkFines.dataset.checkStudentFines), checkFines);
     if (passwordButton) openPasswordModal(students.find((student) => student.uid === passwordButton.dataset.passwordStudent));
     if (resetFace) openResetFaceModal(students.find((student) => student.uid === resetFace.dataset.resetFace));
     if (remove) openRemoveModal(students.find((student) => student.uid === remove.dataset.deleteStudent));
   });
+
+  document.querySelector("#manageStudentFines").addEventListener("click", () => {
+    const student = students.find((item) => item.uid === selectedFineStudentUid);
+    if (!student) return;
+    fineSearch.value = [student.firstName, student.middleName, student.lastName, student.accountId].filter(Boolean).join(" ");
+    adminFineModalController.close();
+    openView("assigned-fines");
+    renderAdminFines();
+  });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !document.querySelector("#adminFineModal").hidden) adminFineModalController.close(); });
 
   document.querySelector("#passwordChangeForm").addEventListener("submit", async (submitEvent) => {
     submitEvent.preventDefault();
@@ -2007,7 +2082,7 @@ function initializeAdmin() {
   onSnapshot(collection(db, "presenceSessions"), (snapshot) => { setPresenceSessions(snapshot); renderStudents(); });
   onSnapshot(collection(db, "presence"), (snapshot) => { legacyPresenceByUid = new Map(snapshot.docs.map((item) => [item.id, item.data()])); renderStudents(); });
   onSnapshot(collection(db, "attendance"), (snapshot) => { attendance = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderAdminAttendance(); renderSelectedStudent(); });
-  onSnapshot(collection(db, "fines"), (snapshot) => { fines = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderAdminFines(); });
+  onSnapshot(collection(db, "fines"), (snapshot) => { fines = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderAdminFines(); renderSelectedStudent(); });
   onSnapshot(collection(db, "faceRegistrations"), (snapshot) => { faceRegistrationsByUid = new Map(snapshot.docs.map((item) => [item.id, item.data()])); renderStudents(); });
   onSnapshot(doc(db, "adminProfiles", currentUser.uid), (snapshot) => { renderAdminProfile(snapshot.data()); });
   window.setInterval(() => { renderAdminEvents(); renderStudents(); }, 15000);

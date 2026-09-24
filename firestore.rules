@@ -26,7 +26,7 @@ service cloud.firestore {
         || (isStudent()
           && request.auth.uid == studentUid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            "accountId", "accountIdKey", "firstName", "middleName", "lastName", "course", "section", "email", "phone", "photoDataUrl", "updatedAt"
+            "accountId", "accountIdKey", "firstName", "middleName", "lastName", "birthday", "course", "section", "email", "phone", "photoDataUrl", "updatedAt"
           ])
           && request.resource.data.firstName is string
           && request.resource.data.lastName is string

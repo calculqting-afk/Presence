@@ -72,6 +72,7 @@
                 <div class="field"><label for="managedLastName">Last name</label><input id="managedLastName" required></div>
                 <div class="field"><label for="managedFirstName">First name</label><input id="managedFirstName" required></div>
                 <div class="field"><label for="managedMiddleName">Middle name</label><input id="managedMiddleName"></div>
+                <div class="field"><label for="managedBirthday">Birthday</label><input id="managedBirthday" type="date"></div>
                 <div class="field"><label for="managedStudentId">Student ID number</label><input id="managedStudentId" required pattern="[A-Za-z0-9._-]+" title="Use only letters, numbers, periods, underscores, or dashes" placeholder="e.g. 25100-1"></div>
                 <div class="field"><label for="managedSection">Section</label><select id="managedSection" required><option value="" selected disabled>Select a section</option><option value="1A">1A</option><option value="1B">1B</option><option value="2A">2A</option><option value="2B">2B</option><option value="3A">3A</option><option value="3B">3B</option><option value="4A">4A</option><option value="4B">4B</option></select></div>
                 <div class="field"><label for="managedCourse">Course</label><select id="managedCourse" required><option value="" selected disabled>Select a course</option><option value="BSInfo Tech">BSInfo Tech</option><option value="BSA">BSA</option><option value="BSFI">BSFI</option><option value="BSMB">BSMB</option></select></div>
@@ -152,6 +153,7 @@
               <div class="form-grid">
                 <div class="field full profile-photo-field"><label for="adminProfilePhoto">Profile picture</label><div class="profile-photo-control"><span class="profile-photo-preview" id="adminProfilePhotoPreview"><span id="adminProfilePhotoPreviewInitials">AD</span><img id="adminProfilePhotoPreviewImage" alt="Selected administrator profile preview" hidden></span><div><input id="adminProfilePhoto" type="file" accept="image/jpeg,image/png,image/webp"><small>Choose a photo from your device. It will be cropped and resized automatically.</small><button class="link-button" id="removeAdminProfilePhoto" type="button">Remove photo</button></div></div></div>
                 <div class="field"><label for="adminDisplayName">Full name</label><input id="adminDisplayName" required autocomplete="name" placeholder="School Admin"></div>
+                <div class="field"><label for="adminProfileBirthday">Birthday</label><input id="adminProfileBirthday" type="date"></div>
                 <div class="field"><label for="adminProfileEmail">Administrator email</label><input id="adminProfileEmail" type="email" disabled></div>
                 <div class="field"><label for="adminProfilePhone">Phone number</label><input id="adminProfilePhone" type="tel"></div>
               </div>
@@ -195,7 +197,17 @@
       <div class="modal-actions"><button class="outline-button" type="button" data-close-reset-face>Cancel</button><button class="small-button danger modal-danger-button" id="confirmResetFace" type="button">Reset face registration</button></div>
     </section>
   </div>
+  <div class="dashboard-modal-backdrop" id="adminFineModal" hidden>
+    <section class="dashboard-modal community-service-modal" role="dialog" aria-modal="true" aria-labelledby="adminFineModalTitle" aria-describedby="adminFineModalDescription">
+      <button class="modal-close" type="button" data-close-admin-fines aria-label="Close attendance fines">×</button>
+      <span class="modal-icon">!</span>
+      <h2 id="adminFineModalTitle">Attendance fines</h2>
+      <p id="adminFineModalDescription">Review this student's attendance-fine records.</p>
+      <div id="adminFineModalContent"></div>
+      <div class="modal-actions"><button class="outline-button" type="button" data-close-admin-fines>Close</button><button class="primary-button" type="button" id="manageStudentFines">Manage fines</button></div>
+    </section>
+  </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
-  <script type="module" src="../assets/js/dashboard.js?v=20260923-logout-live-status"></script>
+  <script type="module" src="../assets/js/dashboard.js?v=20260924-attendance-fines-profile"></script>
 </body>
 </html>
