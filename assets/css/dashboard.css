@@ -412,6 +412,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .student-info-box span { margin-bottom: 6px; color: var(--muted); font-size: .66rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .student-info-box strong { color: #17335d; font-size: .82rem; line-height: 1.45; overflow-wrap: anywhere; }
 .student-info-box small { display: block; margin-top: 5px; color: var(--muted); font-size: .66rem; line-height: 1.4; }
+.student-mobile-cards { display: none; }
 .attended-event-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .attended-event-box { min-width: 0; padding: 16px; background: white; border: 1px solid #dce7f5; border-radius: 12px; box-shadow: 0 7px 20px rgba(36,65,109,.05); }
 .attended-event-box strong, .attended-event-box span { display: block; }
@@ -699,10 +700,14 @@ body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
 }
 
 @media (max-width: 580px) {
-  .topbar h1 { font-size: 1.08rem; }
-  .topbar p { font-size: .68rem; }
+  .topbar { height: auto; min-height: 112px; align-items: flex-start; gap: 8px; padding: 12px 18px; }
+  .topbar > div:first-child { min-width: 0; flex: 1; }
+  .topbar h1 { overflow-wrap: anywhere; font-size: .98rem; line-height: 1.25; }
+  .topbar p { overflow-wrap: anywhere; font-size: .64rem; line-height: 1.35; }
+  .topbar-actions { min-width: 0; flex: 0 0 auto; gap: 6px; padding-top: 4px; }
   .avatar { width: 34px; height: 34px; }
-  .profile-name { max-width: 120px; font-size: .7rem; }
+  .topbar-profile { align-items: flex-start; gap: 6px; padding: 2px; }
+  .profile-name { max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: normal; font-size: .56rem; line-height: 1.2; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 11px; }
   .stats-grid.student-stats { grid-template-columns: 1fr; }
   .stat-card { padding: 16px; }
@@ -727,6 +732,23 @@ body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
   .history-row { grid-template-columns: 70px 1fr; }
   .history-row .badge { grid-column: 2; width: fit-content; }
   .table-toolbar { align-items: flex-start; flex-direction: column; }
+  .table-wrap { display: none; }
+  .student-mobile-cards { display: grid; gap: 12px; }
+  .student-mobile-card { display: grid; gap: 14px; padding: 15px; background: #fafdff; border: 1px solid #dce7f5; border-radius: 13px; }
+  .student-mobile-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+  .student-mobile-card-head h3, .student-mobile-card-head p { margin: 0; overflow-wrap: anywhere; }
+  .student-mobile-card-head h3 { color: #17335d; font-size: .8rem; line-height: 1.35; }
+  .student-mobile-card-head p { margin-top: 3px; color: var(--muted); font-size: .67rem; }
+  .student-mobile-card-head .badge { max-width: 83px; min-height: 24px; padding-inline: 7px; justify-content: center; font-size: .55rem; line-height: 1.2; text-align: center; }
+  .student-mobile-card-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .student-mobile-card-details > div { min-width: 0; padding: 10px; background: white; border: 1px solid #e3ebf6; border-radius: 9px; }
+  .student-mobile-card-details span, .student-mobile-card-details strong { display: block; overflow-wrap: anywhere; }
+  .student-mobile-card-details span { margin-bottom: 4px; color: var(--muted); font-size: .56rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+  .student-mobile-card-details strong { color: #304663; font-size: .66rem; line-height: 1.4; }
+  .student-mobile-card-details .student-mobile-card-email { grid-column: 1 / -1; }
+  .student-mobile-card .outline-button { width: 100%; }
+  .mobile-sticky-actions { position: sticky; z-index: 3; top: 112px; width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 10px 0; background: var(--bg); }
+  .mobile-sticky-actions button { width: 100%; min-width: 0; padding-inline: 8px; font-size: .66rem; white-space: nowrap; }
   .student-filter-row select { flex: 1 1 155px; }
   .student-pagination { align-items: flex-start; flex-direction: column; }
   .section-head { align-items: flex-start; flex-direction: column; }

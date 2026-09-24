@@ -1035,6 +1035,7 @@ function initializeAdmin() {
   const studentForm = document.querySelector("#studentForm");
   const eventTableBody = document.querySelector("#eventTableBody");
   const studentTableBody = document.querySelector("#studentTableBody");
+  const studentMobileCards = document.querySelector("#studentMobileCards");
   const studentSearch = document.querySelector("#studentSearch");
   const studentCourseFilter = document.querySelector("#studentCourseFilter");
   const studentSectionFilter = document.querySelector("#studentSectionFilter");
@@ -1537,7 +1538,9 @@ function initializeAdmin() {
     previousStudentPage.disabled = studentPage <= 1;
     nextStudentPage.disabled = studentPage >= totalPages;
     if (!filtered.length) {
-      studentTableBody.innerHTML = `<tr><td colspan="5"><div class="empty-state">${students.length ? "No students match the selected filters." : "No students have been registered yet."}</div></td></tr>`;
+      const emptyMessage = students.length ? "No students match the selected filters." : "No students have been registered yet.";
+      studentTableBody.innerHTML = `<tr><td colspan="5"><div class="empty-state">${emptyMessage}</div></td></tr>`;
+      studentMobileCards.innerHTML = `<div class="empty-state">${emptyMessage}</div>`;
       renderSelectedStudent();
       renderAdminAttendance();
       return;
@@ -1547,6 +1550,13 @@ function initializeAdmin() {
       const presence = getStudentPresence(student.uid);
       const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
       return `<tr><td><div class="student-cell"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))}</strong><small>${escapeHtml(student.accountId)}</small></div></div></td><td><strong>${escapeHtml(student.course || "Not assigned")}</strong><br><small>Section ${escapeHtml(student.section)}</small></td><td><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span><small class="presence-time presence-status is-${presence.status}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</small></td><td>${escapeHtml(student.email || "Not provided")}</td><td><div class="table-actions"><button class="small-button" type="button" data-view-student="${student.uid}">Profile</button>${hasFaceRegistration ? `<button class="small-button danger" type="button" data-reset-face="${student.uid}">Reset face</button>` : ""}<button class="small-button" type="button" data-password-student="${student.uid}">Password</button><button class="small-button danger" type="button" data-delete-student="${student.uid}">Clear account</button></div></td></tr>`;
+    }).join("");
+    studentMobileCards.innerHTML = visibleStudents.map((student) => {
+      const fullName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ");
+      const avatar = student.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student.firstName, student.lastName));
+      const presence = getStudentPresence(student.uid);
+      const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
+      return `<article class="student-mobile-card"><div class="student-mobile-card-head"><span class="mini-avatar">${avatar}</span><div><h3>${escapeHtml(fullName)}</h3><p>${escapeHtml(student.accountId)}</p></div><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span></div><div class="student-mobile-card-details"><div><span>Course / Section</span><strong>${escapeHtml(student.course || "Not assigned")} · ${escapeHtml(student.section || "Not assigned")}</strong></div><div><span>Live status</span><strong class="presence-status is-${presence.status}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</strong></div><div class="student-mobile-card-email"><span>Email</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div></div><button class="outline-button" type="button" data-view-student="${escapeHtml(student.uid)}">View profile</button></article>`;
     }).join("");
     renderSelectedStudent();
     renderAdminAttendance();
@@ -1891,6 +1901,14 @@ function initializeAdmin() {
     if (passwordButton) openPasswordModal(students.find((student) => student.uid === passwordButton.dataset.passwordStudent));
     if (resetFace) openResetFaceModal(students.find((student) => student.uid === resetFace.dataset.resetFace));
     if (remove) openRemoveModal(students.find((student) => student.uid === remove.dataset.deleteStudent));
+  });
+
+  studentMobileCards.addEventListener("click", (clickEvent) => {
+    const view = clickEvent.target.closest("[data-view-student]");
+    if (!view) return;
+    selectedManagedStudentUid = view.dataset.viewStudent;
+    renderSelectedStudent();
+    adminStudentDetail.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
   adminStudentDetail.addEventListener("click", (clickEvent) => {
