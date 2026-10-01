@@ -851,6 +851,12 @@ function initializeStudent() {
     const button = clickEvent.target.closest("[data-attend-event]");
     if (!button) return;
     const selectedEvent = events.find((event) => event.id === button.dataset.attendEvent);
+    if (!faceRegistrationLoaded) return showDashboardToast("Checking face registration", "Please wait a moment, then try checking in again.");
+    if (!faceAlreadyRegistered) {
+      showGeofenceError("Face registration required", "You must complete Face Registration before you can take attendance. The Face Registration page is now open.");
+      openView("face");
+      return;
+    }
     if (!selectedEvent || getEventStatus(selectedEvent) !== "open") return showDashboardToast("Attendance unavailable", "Attendance is allowed only between Time In and Time Out.");
     button.disabled = true;
     try {
@@ -929,6 +935,7 @@ function initializeStudent() {
   let faceGuidanceTimers = [];
   let facePhotoCaptured = false;
   let faceAlreadyRegistered = false;
+  let faceRegistrationLoaded = false;
 
   function lockFaceRegistration() {
     faceAlreadyRegistered = true;
@@ -1105,6 +1112,7 @@ function initializeStudent() {
   onSnapshot(query(collection(db, "dismissedHistory"), where("studentUid", "==", currentUser.uid)), (snapshot) => { dismissedIds = new Set(snapshot.docs.map((item) => item.data().eventId)); scheduleEventRender(); });
   onSnapshot(query(collection(db, "fines"), where("studentUid", "==", currentUser.uid)), (snapshot) => { fines = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderFines(); renderProfile(); });
   onSnapshot(doc(db, "faceRegistrations", currentUser.uid), (snapshot) => {
+    faceRegistrationLoaded = true;
     if (snapshot.data()?.registered) {
       document.querySelector("#faceStatus").textContent = "Registered";
       document.querySelector("#faceStatus").className = "badge green";

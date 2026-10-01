@@ -67,6 +67,8 @@ service cloud.firestore {
       allow create: if isStudent()
         && request.resource.data.studentUid == request.auth.uid
         && attendanceId == request.auth.uid + "_" + request.resource.data.eventId
+        && exists(/databases/$(database)/documents/faceRegistrations/$(request.auth.uid))
+        && get(/databases/$(database)/documents/faceRegistrations/$(request.auth.uid)).data.registered == true
         && exists(/databases/$(database)/documents/events/$(request.resource.data.eventId))
         && request.time >= get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.openAt
         && request.time <= get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.closeAt
