@@ -406,6 +406,13 @@ function wireCommonNavigation() {
   document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => openView(button.dataset.view)));
   document.querySelectorAll("[data-go-view]").forEach((button) => button.addEventListener("click", () => openView(button.dataset.goView)));
   document.querySelectorAll("[data-go-back]").forEach((button) => button.addEventListener("click", () => openView(previousView)));
+  document.querySelectorAll("[data-dashboard-home]").forEach((brand) => brand.addEventListener("click", (event) => {
+    event.preventDefault();
+    document.querySelectorAll(".dashboard-modal-backdrop:not([hidden])").forEach((modal) => { modal.hidden = true; });
+    document.querySelector("#notificationPanel")?.setAttribute("hidden", "");
+    document.querySelector("#notificationBell")?.setAttribute("aria-expanded", "false");
+    openView("dashboard");
+  }));
   document.body.insertAdjacentHTML("beforeend", `
     <div class="dashboard-modal-backdrop" id="logoutModal" hidden>
       <section class="dashboard-modal logout-modal" role="dialog" aria-modal="true" aria-labelledby="logoutModalTitle">
@@ -1835,7 +1842,7 @@ function initializeAdmin() {
 
   function fineRecordModalMarkup(fine) {
     const status = fine.status === "Completed" ? "Completed" : "Needs review";
-    return `<article class="community-service-record"><div class="community-service-record-top"><strong>${escapeHtml(fine.eventName || "Attendance absence")}</strong><span class="badge ${fine.status === "Completed" ? "green" : "orange"}">${escapeHtml(status)}</span></div><div class="fine-detail-grid"><div><span>Attendance date</span><strong>${escapeHtml(fine.eventDate || "Not recorded")}</strong></div><div><span>Recorded</span><strong>${escapeHtml(formatFineDate(fine.assignedAt))}</strong></div><div class="fine-detail-full"><span>Reason</span><strong>${escapeHtml(fine.reason || "No reason provided.")}</strong></div></div></article>`;
+    return `<article class="community-service-record"><div class="community-service-record-top"><strong>${escapeHtml(fine.eventName || "Attendance absence")}</strong><span class="badge ${fine.status === "Completed" ? "green" : "orange"}">${escapeHtml(status)}</span></div><div class="fine-detail-grid"><div><span>Attendance date</span><strong>${escapeHtml(fine.eventDate || "Not recorded")}</strong></div><div><span>Service required</span><strong>${escapeHtml(formatServiceMinutes(fine.serviceMinutes))}</strong></div><div><span>Recorded</span><strong>${escapeHtml(formatFineDate(fine.assignedAt))}</strong></div><div class="fine-detail-full"><span>Reason</span><strong>${escapeHtml(fine.reason || "No reason provided.")}</strong></div></div></article>`;
   }
 
   function openAdminFineModal(student, trigger) {
