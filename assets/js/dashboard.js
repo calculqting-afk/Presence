@@ -1,6 +1,5 @@
 import { ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js";
 import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
-import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-functions.js";
 import {
   Timestamp,
   addDoc,
@@ -814,11 +813,29 @@ function initializeStudent() {
   });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !communityServiceModal.hidden) closeCommunityServiceModal(); });
 
+  document.body.insertAdjacentHTML("beforeend", `<div class="dashboard-modal-backdrop" id="geofenceErrorModal" hidden><section class="dashboard-modal" role="alertdialog" aria-modal="true" aria-labelledby="geofenceErrorTitle" aria-describedby="geofenceErrorMessage"><button class="modal-close" type="button" data-close-geofence-error aria-label="Close">×</button><span class="modal-icon danger">!</span><h2 id="geofenceErrorTitle">Attendance unavailable</h2><p id="geofenceErrorMessage"></p><div class="modal-actions"><button class="primary-button" type="button" data-close-geofence-error>Okay</button></div></section></div>`);
+  const geofenceErrorModal = document.querySelector("#geofenceErrorModal");
+  const closeGeofenceError = () => { geofenceErrorModal.hidden = true; };
+  document.querySelectorAll("[data-close-geofence-error]").forEach((element) => element.addEventListener("click", closeGeofenceError));
+  geofenceErrorModal.addEventListener("click", (event) => { if (event.target === geofenceErrorModal) closeGeofenceError(); });
+  function showGeofenceError(title, message) {
+    document.querySelector("#geofenceErrorTitle").textContent = title;
+    document.querySelector("#geofenceErrorMessage").textContent = message;
+    geofenceErrorModal.hidden = false;
+  }
+
   function getCurrentCheckInLocation() {
-    if (!navigator.geolocation) return Promise.reject(new Error("This browser does not support location services."));
+    if (!navigator.geolocation) {
+      const locationError = new Error("This browser does not support location services.");
+      locationError.geofenceIssue = "location";
+      return Promise.reject(locationError);
+    }
     return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, (error) => {
       const messages = { 1: "Location permission is required for this attendance area.", 2: "Your location could not be determined. Try moving outdoors and try again.", 3: "Location request timed out. Please try again." };
-      reject(new Error(messages[error.code] || "Unable to get your location."));
+      const locationError = new Error(messages[error.code] || "Unable to get your location.");
+      locationError.geofenceIssue = "location";
+      locationError.locationErrorCode = error.code;
+      reject(locationError);
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }));
   }
   function distanceInMeters(latitudeA, longitudeA, latitudeB, longitudeB) {
@@ -835,22 +852,56 @@ function initializeStudent() {
     if (!button) return;
     const selectedEvent = events.find((event) => event.id === button.dataset.attendEvent);
     if (!selectedEvent || getEventStatus(selectedEvent) !== "open") return showDashboardToast("Attendance unavailable", "Attendance is allowed only between Time In and Time Out.");
+    button.disabled = true;
     try {
       let checkInLocation;
       if (selectedEvent.geofence?.enabled) {
         const area = selectedEvent.geofence;
-        if (!Number.isFinite(area.latitude) || !Number.isFinite(area.longitude) || !Number.isFinite(area.radiusMeters)) throw new Error("This event's attendance area is incomplete. Please contact your administrator.");
+        if (!Number.isFinite(area.latitude) || !Number.isFinite(area.longitude) || !Number.isFinite(area.radiusMeters)) {
+          const configurationError = new Error("This event's attendance area is incomplete. Please contact your administrator.");
+          configurationError.geofenceIssue = "configuration";
+          throw configurationError;
+        }
         showDashboardToast("Checking your location", "Allow location access to confirm you are in the attendance area.");
         const position = await getCurrentCheckInLocation();
         const { latitude, longitude, accuracy } = position.coords;
         const distance = distanceInMeters(latitude, longitude, area.latitude, area.longitude);
-        if (distance > area.radiusMeters) throw new Error(`You are about ${Math.round(distance)} m from the allowed attendance area. Move closer and try again.`);
+        if (distance > area.radiusMeters) {
+          const rangeError = new Error(`You are about ${Math.round(distance)} m from the allowed attendance area.`);
+          rangeError.geofenceIssue = "outside";
+          rangeError.distanceMeters = Math.round(distance);
+          rangeError.radiusMeters = Math.round(area.radiusMeters);
+          throw rangeError;
+        }
         checkInLocation = { latitude, longitude, accuracy: Math.round(accuracy), distanceMeters: Math.round(distance) };
       }
-      await httpsCallable(getFunctions(), "checkInWithGeofence")({ eventId: selectedEvent.id, checkInLocation });
+      await setDoc(doc(db, "attendance", `${currentUser.uid}_${selectedEvent.id}`), {
+        studentUid: currentUser.uid,
+        studentId: studentProfile.accountId,
+        eventId: selectedEvent.id,
+        eventName: selectedEvent.name,
+        eventType: selectedEvent.type || "School Event",
+        eventDescription: selectedEvent.description || selectedEvent.notes || "",
+        eventDate: selectedEvent.date,
+        timeIn: selectedEvent.timeIn,
+        timeOut: selectedEvent.timeOut,
+        location: selectedEvent.location,
+        audience: selectedEvent.audience || "All students",
+        ...(checkInLocation ? { checkInLocation } : {}),
+        attendedAt: serverTimestamp()
+      });
       showDashboardToast("Attendance recorded", "Your attendance was saved successfully.");
     } catch (error) {
-      showDashboardToast("Attendance rejected", ["permission-denied", "functions/permission-denied"].includes(error.code) ? "Attendance is unavailable or you are outside the allowed area." : error.message);
+      if (error.geofenceIssue === "outside") {
+        showGeofenceError("You are outside the attendance area", `You are approximately ${error.distanceMeters} meters from the event location. You must be within ${error.radiusMeters} meters to check in, so attendance cannot be recorded yet.`);
+      } else if (error.geofenceIssue === "location") {
+        showGeofenceError("Allow location for Presence", "Your device location may be on, but this browser has not allowed this site to use it. Click the site controls icon to the left of the address bar, set Location to Allow, then reload this page and try again.");
+      } else if (error.geofenceIssue === "configuration") {
+        showGeofenceError("Attendance area needs setup", error.message);
+      } else {
+        showDashboardToast("Attendance rejected", error.code === "permission-denied" ? "The attendance window is not open, or your account cannot check in to this event." : error.message);
+      }
+      button.disabled = false;
     }
   });
 
