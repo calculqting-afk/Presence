@@ -64,17 +64,9 @@ service cloud.firestore {
     match /attendance/{attendanceId} {
       allow read: if isAdmin()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
-      allow create: if isStudent()
-        && request.resource.data.studentUid == request.auth.uid
-        && attendanceId == request.auth.uid + "_" + request.resource.data.eventId
-        && exists(/databases/$(database)/documents/events/$(request.resource.data.eventId))
-        && request.time >= get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.openAt
-        && request.time <= get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.closeAt
-        && request.resource.data.keys().hasOnly([
-          "studentUid", "studentId", "eventId", "eventName", "eventDate",
-          "eventType", "eventDescription", "timeIn", "timeOut", "location",
-          "audience", "attendedAt"
-        ]);
+      // Attendance is created only by checkInWithGeofence. The callable function
+      // checks the time window, audience, and geofence server-side.
+      allow create: if false;
       allow update, delete: if isAdmin();
     }
 

@@ -12,6 +12,69 @@ function studentMatchesEventAudience(student, audience) {
     && (audience === "All students" || audience === `Section ${student.section}`);
 }
 
+function distanceInMeters(latitudeA, longitudeA, latitudeB, longitudeB) {
+  const radians = (value) => value * Math.PI / 180;
+  const earthRadius = 6371000;
+  const latitudeDelta = radians(latitudeB - latitudeA);
+  const longitudeDelta = radians(longitudeB - longitudeA);
+  const a = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(radians(latitudeA)) * Math.cos(radians(latitudeB)) * Math.sin(longitudeDelta / 2) ** 2;
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+exports.checkInWithGeofence = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in before checking in.");
+  const { eventId, checkInLocation } = request.data || {};
+  if (typeof eventId !== "string" || !eventId) throw new HttpsError("invalid-argument", "An event is required.");
+
+  const firestore = getFirestore();
+  const [studentSnapshot, eventSnapshot] = await Promise.all([
+    firestore.doc(`students/${request.auth.uid}`).get(),
+    firestore.doc(`events/${eventId}`).get()
+  ]);
+  if (!studentSnapshot.exists || studentSnapshot.data().active !== true) throw new HttpsError("permission-denied", "Only active students can check in.");
+  if (!eventSnapshot.exists) throw new HttpsError("not-found", "This event no longer exists.");
+
+  const student = studentSnapshot.data();
+  const event = eventSnapshot.data();
+  const now = Date.now();
+  if (!event.openAt?.toMillis || !event.closeAt?.toMillis || now < event.openAt.toMillis() || now > event.closeAt.toMillis()) throw new HttpsError("permission-denied", "The attendance window is not open.");
+  if (!studentMatchesEventAudience(student, event.audience || "All students")) throw new HttpsError("permission-denied", "This event is not assigned to your section.");
+
+  let verifiedLocation;
+  if (event.geofence?.enabled) {
+    const area = event.geofence;
+    const latitude = Number(checkInLocation?.latitude);
+    const longitude = Number(checkInLocation?.longitude);
+    const radiusMeters = Number(area.radiusMeters);
+    if (![latitude, longitude, Number(area.latitude), Number(area.longitude), radiusMeters].every(Number.isFinite)) throw new HttpsError("invalid-argument", "A valid location is required for this event.");
+    const distanceMeters = distanceInMeters(latitude, longitude, Number(area.latitude), Number(area.longitude));
+    if (distanceMeters > radiusMeters) throw new HttpsError("permission-denied", "You are outside the allowed attendance area.");
+    verifiedLocation = { latitude, longitude, accuracy: Math.round(Number(checkInLocation.accuracy) || 0), distanceMeters: Math.round(distanceMeters) };
+  }
+
+  const attendanceReference = firestore.doc(`attendance/${request.auth.uid}_${eventId}`);
+  await firestore.runTransaction(async (transaction) => {
+    if ((await transaction.get(attendanceReference)).exists) throw new HttpsError("already-exists", "Attendance has already been recorded for this event.");
+    transaction.set(attendanceReference, {
+      studentUid: request.auth.uid,
+      studentId: student.accountId || "",
+      eventId,
+      eventName: event.name || "Attendance event",
+      eventType: event.type || "School Event",
+      eventDescription: event.description || event.notes || "",
+      eventDate: event.date || "",
+      timeIn: event.timeIn || "",
+      timeOut: event.timeOut || "",
+      location: event.location || "",
+      audience: event.audience || "All students",
+      ...(verifiedLocation ? { checkInLocation: verifiedLocation } : {}),
+      attendedAt: FieldValue.serverTimestamp()
+    });
+  });
+  return { ok: true };
+});
+
 async function createReminderNotifications(firestore, events, reminder) {
   if (events.empty) return 0;
   const students = await firestore.collection("students").where("active", "==", true).get();

@@ -1,5 +1,6 @@
 import { ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js";
 import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-functions.js";
 import {
   Timestamp,
   addDoc,
@@ -39,6 +40,7 @@ const pageCopy = {
     "modify-events": ["Modify Events", "Edit schedules or remove events"],
     "assign-fine": ["Assign Fine", "Create or update community-service requirements"],
     "assigned-fines": ["Assigned Fines", "Search and manage student fine records"],
+    geofence: ["Geofence Locations", "Set attendance areas for each event"],
     profile: ["Profile", "Update your administrator information"]
   }
 };
@@ -812,29 +814,43 @@ function initializeStudent() {
   });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !communityServiceModal.hidden) closeCommunityServiceModal(); });
 
+  function getCurrentCheckInLocation() {
+    if (!navigator.geolocation) return Promise.reject(new Error("This browser does not support location services."));
+    return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, (error) => {
+      const messages = { 1: "Location permission is required for this attendance area.", 2: "Your location could not be determined. Try moving outdoors and try again.", 3: "Location request timed out. Please try again." };
+      reject(new Error(messages[error.code] || "Unable to get your location."));
+    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }));
+  }
+  function distanceInMeters(latitudeA, longitudeA, latitudeB, longitudeB) {
+    const radians = (value) => value * Math.PI / 180;
+    const earthRadius = 6371000;
+    const deltaLatitude = radians(latitudeB - latitudeA);
+    const deltaLongitude = radians(longitudeB - longitudeA);
+    const a = Math.sin(deltaLatitude / 2) ** 2 + Math.cos(radians(latitudeA)) * Math.cos(radians(latitudeB)) * Math.sin(deltaLongitude / 2) ** 2;
+    return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
   document.querySelector("#studentEventGrid").addEventListener("click", async (clickEvent) => {
     const button = clickEvent.target.closest("[data-attend-event]");
     if (!button) return;
     const selectedEvent = events.find((event) => event.id === button.dataset.attendEvent);
     if (!selectedEvent || getEventStatus(selectedEvent) !== "open") return showDashboardToast("Attendance unavailable", "Attendance is allowed only between Time In and Time Out.");
     try {
-      await setDoc(doc(db, "attendance", `${currentUser.uid}_${selectedEvent.id}`), {
-        studentUid: currentUser.uid,
-        studentId: studentProfile.accountId,
-        eventId: selectedEvent.id,
-        eventName: selectedEvent.name,
-        eventType: selectedEvent.type || "School Event",
-        eventDescription: selectedEvent.description || selectedEvent.notes || "",
-        eventDate: selectedEvent.date,
-        timeIn: selectedEvent.timeIn,
-        timeOut: selectedEvent.timeOut,
-        location: selectedEvent.location,
-        audience: selectedEvent.audience || "All students",
-        attendedAt: serverTimestamp()
-      });
+      let checkInLocation;
+      if (selectedEvent.geofence?.enabled) {
+        const area = selectedEvent.geofence;
+        if (!Number.isFinite(area.latitude) || !Number.isFinite(area.longitude) || !Number.isFinite(area.radiusMeters)) throw new Error("This event's attendance area is incomplete. Please contact your administrator.");
+        showDashboardToast("Checking your location", "Allow location access to confirm you are in the attendance area.");
+        const position = await getCurrentCheckInLocation();
+        const { latitude, longitude, accuracy } = position.coords;
+        const distance = distanceInMeters(latitude, longitude, area.latitude, area.longitude);
+        if (distance > area.radiusMeters) throw new Error(`You are about ${Math.round(distance)} m from the allowed attendance area. Move closer and try again.`);
+        checkInLocation = { latitude, longitude, accuracy: Math.round(accuracy), distanceMeters: Math.round(distance) };
+      }
+      await httpsCallable(getFunctions(), "checkInWithGeofence")({ eventId: selectedEvent.id, checkInLocation });
       showDashboardToast("Attendance recorded", "Your attendance was saved successfully.");
     } catch (error) {
-      showDashboardToast("Attendance rejected", error.code === "permission-denied" ? "The attendance window is not open." : error.message);
+      showDashboardToast("Attendance rejected", ["permission-denied", "functions/permission-denied"].includes(error.code) ? "Attendance is unavailable or you are outside the allowed area." : error.message);
     }
   });
 
@@ -1136,7 +1152,104 @@ function initializeAdmin() {
   document.querySelector('label[for="eventNotes"]').textContent = "Description";
   document.querySelector("#eventNotes").placeholder = "Write a clear announcement or event description";
   document.querySelector("#eventLocation").closest(".field").insertAdjacentHTML("beforebegin", '<div class="field"><label for="eventType">Event type</label><select id="eventType" required><option value="Assembly">Assembly</option><option value="Meeting">Meeting</option><option value="Seminar">Seminar</option><option value="Workshop">Workshop</option><option value="School Activity">School Activity</option><option value="Ceremony">Ceremony</option><option value="Sports">Sports</option><option value="Other">Other</option></select></div>');
+  document.querySelector("#eventNotes").closest(".field").insertAdjacentHTML("beforebegin", `<fieldset class="geofence-editor field full"><legend>Attendance area</legend><label class="geofence-toggle"><input id="eventGeofenceEnabled" type="checkbox"> <span>Require location to check in</span></label><p>Choose the center of the allowed attendance area and set its radius.</p><div class="map-search-row"><input id="eventGeofenceSearch" type="search" placeholder="Search an address or place"><button id="eventGeofenceSearchButton" class="outline-button" type="button">Search</button></div><div id="eventGeofenceMap" class="geofence-map" aria-label="Event attendance area map"></div><div class="geofence-fields"><div class="field"><label for="eventGeofenceRadius">Allowed radius (meters)</label><input id="eventGeofenceRadius" type="number" min="25" max="5000" step="5" value="100"></div><div class="field"><label for="eventGeofenceAddress">Selected address</label><input id="eventGeofenceAddress" type="text" readonly placeholder="Click the map or search for a place"></div><div class="field"><label for="eventGeofenceLatitude">Latitude</label><input id="eventGeofenceLatitude" type="number" step="any" readonly></div><div class="field"><label for="eventGeofenceLongitude">Longitude</label><input id="eventGeofenceLongitude" type="number" step="any" readonly></div></div><small class="geofence-help">Click anywhere on the map to set the pin. A student must allow location access and be inside this circle to check in.</small></fieldset>`);
+  document.querySelector(".content").insertAdjacentHTML("beforeend", `<section class="view-section" data-section="geofence" hidden><div class="section-head"><div><p class="eyebrow">Attendance setup</p><h2>Geofence Locations</h2><p>Select an event and update the area where students may check in.</p></div></div><article class="panel geofence-manager-panel"><div class="field"><label for="geofenceEventSelect">Event</label><select id="geofenceEventSelect"><option value="">Select an event</option></select></div><div id="geofenceManagerContent" hidden><div class="geofence-manager-head"><div><strong id="geofenceManagerEventName"></strong><small id="geofenceManagerEventDetails"></small></div><label class="geofence-toggle"><input id="managerGeofenceEnabled" type="checkbox"> <span>Require location to check in</span></label></div><div class="map-search-row"><input id="managerGeofenceSearch" type="search" placeholder="Search an address or place"><button id="managerGeofenceSearchButton" class="outline-button" type="button">Search</button></div><div id="managerGeofenceMap" class="geofence-map" aria-label="Selected event attendance area map"></div><div class="geofence-fields"><div class="field"><label for="managerGeofenceRadius">Allowed radius (meters)</label><input id="managerGeofenceRadius" type="number" min="25" max="5000" step="5" value="100"></div><div class="field"><label for="managerGeofenceAddress">Selected address</label><input id="managerGeofenceAddress" type="text" readonly></div><div class="field"><label for="managerGeofenceLatitude">Latitude</label><input id="managerGeofenceLatitude" type="number" step="any" readonly></div><div class="field"><label for="managerGeofenceLongitude">Longitude</label><input id="managerGeofenceLongitude" type="number" step="any" readonly></div></div><div class="form-actions"><button id="geofenceEditEvent" class="outline-button" type="button">Edit full event</button><button id="saveManagerGeofence" class="primary-button" type="button">Save attendance area</button></div></div><div id="geofenceManagerEmpty" class="empty-state">Select an event to view or change its attendance area.</div></article></section>`);
   document.querySelector("#adminProfileEmail").value = currentUser.email || ADMIN_EMAIL;
+
+  function makeGeofenceEditor(prefix) {
+    const enabled = document.querySelector(`#${prefix}GeofenceEnabled`);
+    const search = document.querySelector(`#${prefix}GeofenceSearch`);
+    const searchButton = document.querySelector(`#${prefix}GeofenceSearchButton`);
+    const radius = document.querySelector(`#${prefix}GeofenceRadius`);
+    const address = document.querySelector(`#${prefix}GeofenceAddress`);
+    const latitude = document.querySelector(`#${prefix}GeofenceLatitude`);
+    const longitude = document.querySelector(`#${prefix}GeofenceLongitude`);
+    const mapElement = document.querySelector(`#${prefix}GeofenceMap`);
+    let map;
+    let marker;
+    let circle;
+    const hasMap = () => typeof window.L !== "undefined";
+    const currentRadius = () => Math.max(25, Math.min(5000, Number(radius.value) || 100));
+    const refreshCircle = () => {
+      if (!map || !marker) return;
+      if (circle) circle.setRadius(currentRadius());
+      else circle = window.L.circle(marker.getLatLng(), { radius: currentRadius(), color: "#1f6feb", fillColor: "#1f6feb", fillOpacity: .14 }).addTo(map);
+    };
+    const ensureMap = () => {
+      if (map || !hasMap()) return map;
+      map = window.L.map(mapElement, { scrollWheelZoom: false }).setView([14.5995, 120.9842], 5);
+      window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map);
+      map.on("click", ({ latlng }) => place(latlng.lat, latlng.lng));
+      return map;
+    };
+    const place = (lat, lng, label = "") => {
+      const activeMap = ensureMap();
+      latitude.value = Number(lat).toFixed(6);
+      longitude.value = Number(lng).toFixed(6);
+      if (label) address.value = label;
+      if (!activeMap) return;
+      const point = [Number(lat), Number(lng)];
+      if (marker) marker.setLatLng(point); else marker = window.L.marker(point, { draggable: true }).addTo(activeMap);
+      marker.on("dragend", () => place(marker.getLatLng().lat, marker.getLatLng().lng));
+      if (circle) circle.setLatLng(point);
+      refreshCircle();
+      activeMap.setView(point, Math.max(activeMap.getZoom(), 17));
+    };
+    const searchPlace = async () => {
+      const queryText = search.value.trim();
+      if (!queryText) return;
+      searchButton.disabled = true;
+      try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(queryText)}`, { headers: { Accept: "application/json" } });
+        const [result] = await response.json();
+        if (!result) throw new Error("No matching place found.");
+        place(result.lat, result.lon, result.display_name);
+      } catch (error) {
+        showDashboardToast("Location search unavailable", error.message || "Try clicking the map to set the area.");
+      } finally { searchButton.disabled = false; }
+    };
+    radius.addEventListener("input", refreshCircle);
+    searchButton.addEventListener("click", searchPlace);
+    search.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); searchPlace(); } });
+    return {
+      ensureMap,
+      invalidate() { ensureMap()?.invalidateSize(); },
+      clear() { enabled.checked = false; radius.value = 100; address.value = ""; latitude.value = ""; longitude.value = ""; if (marker && map) map.removeLayer(marker); if (circle && map) map.removeLayer(circle); marker = undefined; circle = undefined; },
+      set(geofence = {}) { this.clear(); enabled.checked = Boolean(geofence.enabled); radius.value = geofence.radiusMeters || 100; address.value = geofence.address || ""; if (Number.isFinite(geofence.latitude) && Number.isFinite(geofence.longitude)) place(geofence.latitude, geofence.longitude, geofence.address || ""); },
+      value() { return { enabled: enabled.checked, latitude: Number(latitude.value), longitude: Number(longitude.value), radiusMeters: currentRadius(), address: address.value.trim() }; }
+    };
+  }
+
+  const eventGeofenceEditor = makeGeofenceEditor("event");
+  const managerGeofenceEditor = makeGeofenceEditor("manager");
+  const geofenceEventSelect = document.querySelector("#geofenceEventSelect");
+  const geofenceManagerContent = document.querySelector("#geofenceManagerContent");
+  const geofenceManagerEmpty = document.querySelector("#geofenceManagerEmpty");
+  function renderGeofenceEventOptions(selectedId = geofenceEventSelect.value) {
+    geofenceEventSelect.innerHTML = `<option value="">Select an event</option>${events.map((event) => `<option value="${escapeHtml(event.id)}">${escapeHtml(event.name)} · ${escapeHtml(event.date || "No date")}</option>`).join("")}`;
+    geofenceEventSelect.value = events.some((event) => event.id === selectedId) ? selectedId : "";
+  }
+  function loadGeofenceManager(eventId = geofenceEventSelect.value) {
+    const selectedEvent = events.find((event) => event.id === eventId);
+    geofenceManagerContent.hidden = !selectedEvent;
+    geofenceManagerEmpty.hidden = Boolean(selectedEvent);
+    if (!selectedEvent) return;
+    geofenceEventSelect.value = selectedEvent.id;
+    document.querySelector("#geofenceManagerEventName").textContent = selectedEvent.name;
+    document.querySelector("#geofenceManagerEventDetails").textContent = `${selectedEvent.date || "No date"} · ${selectedEvent.location || "Location not set"}`;
+    managerGeofenceEditor.set(selectedEvent.geofence || {});
+    window.setTimeout(() => managerGeofenceEditor.invalidate(), 0);
+  }
+  geofenceEventSelect.addEventListener("change", () => loadGeofenceManager());
+  document.querySelector("#saveManagerGeofence").addEventListener("click", async () => {
+    const selectedEvent = events.find((event) => event.id === geofenceEventSelect.value);
+    if (!selectedEvent) return;
+    const geofence = managerGeofenceEditor.value();
+    if (geofence.enabled && (!Number.isFinite(geofence.latitude) || !Number.isFinite(geofence.longitude))) return showDashboardToast("Choose an attendance area", "Click the map or search for the event location before saving.");
+    try { await setDoc(doc(db, "events", selectedEvent.id), { geofence, updatedAt: serverTimestamp() }, { merge: true }); showDashboardToast("Attendance area saved", `${selectedEvent.name} now uses the updated location rule.`); } catch (error) { showDashboardToast("Unable to save area", error.message); }
+  });
+  document.querySelector("#geofenceEditEvent").addEventListener("click", () => { const id = geofenceEventSelect.value; if (id) editEvent(id); });
+  window.addEventListener("presence:viewchange", ({ detail }) => { if (detail.viewName === "create") window.setTimeout(() => eventGeofenceEditor.invalidate(), 0); if (detail.viewName === "geofence") window.setTimeout(() => managerGeofenceEditor.invalidate(), 0); });
 
   async function prepareAdminProfilePhoto(file) {
     if (!file.type.match(/^image\/(jpeg|png|webp)$/)) throw new Error("Choose a JPG, PNG, or WebP image.");
@@ -1256,7 +1369,7 @@ function initializeAdmin() {
       return;
     }
     timeline.innerHTML = events.slice(0, 5).map((event) => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${eventStatusBadge(getEventStatus(event))}</div>`).join("");
-    eventTableBody.innerHTML = events.map((event) => `<article class="admin-event-card"><div class="admin-event-card-top"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span>${eventStatusBadge(getEventStatus(event))}</div><h3>${escapeHtml(event.name)}</h3><p>${escapeHtml(event.description || event.notes || "No description provided.")}</p><div class="event-detail-boxes"><div><span>Date</span><strong>${escapeHtml(formatEventDate(event.date))}</strong></div><div><span>Time</span><strong>${escapeHtml(formatTimeWindow(event))}</strong></div><div><span>Location</span><strong>${escapeHtml(event.location)}</strong></div><div><span>Audience</span><strong>${escapeHtml(event.audience || "All students")}</strong></div></div><div class="admin-event-card-actions"><button class="outline-button" type="button" data-edit-event="${event.id}">Edit event</button><button class="small-button danger modal-danger-button" type="button" data-delete-event="${event.id}">Remove</button></div></article>`).join("");
+    eventTableBody.innerHTML = events.map((event) => `<article class="admin-event-card"><div class="admin-event-card-top"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span>${eventStatusBadge(getEventStatus(event))}</div><h3>${escapeHtml(event.name)}</h3><p>${escapeHtml(event.description || event.notes || "No description provided.")}</p><div class="event-detail-boxes"><div><span>Date</span><strong>${escapeHtml(formatEventDate(event.date))}</strong></div><div><span>Time</span><strong>${escapeHtml(formatTimeWindow(event))}</strong></div><div><span>Location</span><strong>${escapeHtml(event.location)}</strong></div><div><span>Attendance area</span><strong>${event.geofence?.enabled ? `${escapeHtml(String(event.geofence.radiusMeters || 100))} m required` : "Not required"}</strong></div></div><div class="admin-event-card-actions"><button class="outline-button" type="button" data-manage-geofence="${event.id}">Attendance area</button><button class="outline-button" type="button" data-edit-event="${event.id}">Edit event</button><button class="small-button danger modal-danger-button" type="button" data-delete-event="${event.id}">Remove</button></div></article>`).join("");
   }
 
   function renderFineOptions() {
@@ -1685,6 +1798,7 @@ function initializeAdmin() {
 
   function resetEventForm() {
     eventForm.reset();
+    eventGeofenceEditor.clear();
     document.querySelector("#editingEventId").value = "";
     document.querySelector("#eventFormTitle").textContent = "Event details";
     document.querySelector("#eventSubmitButton").textContent = "Create event";
@@ -1701,6 +1815,7 @@ function initializeAdmin() {
     document.querySelector("#eventTimeOut").value = event.timeOut;
     document.querySelector("#eventAudience").value = event.audience;
     document.querySelector("#eventNotes").value = event.description || event.notes || "";
+    eventGeofenceEditor.set(event.geofence || {});
     document.querySelector("#eventFormTitle").textContent = "Modify event";
     document.querySelector("#eventSubmitButton").textContent = "Save changes";
     openView("create");
@@ -1712,7 +1827,10 @@ function initializeAdmin() {
     const date = document.querySelector("#eventDate").value;
     if (timeOut <= timeIn) return showDashboardToast("Invalid attendance window", "Time Out must be later than Time In.");
     const id = document.querySelector("#editingEventId").value;
-    const record = { name: document.querySelector("#eventName").value.trim(), type: document.querySelector("#eventType").value, date, location: document.querySelector("#eventLocation").value.trim(), timeIn, timeOut, audience: document.querySelector("#eventAudience").value, description: document.querySelector("#eventNotes").value.trim(), openAt: Timestamp.fromDate(new Date(`${date}T${timeIn}`)), closeAt: Timestamp.fromDate(new Date(`${date}T${timeOut}`)), updatedAt: serverTimestamp() };
+    const requestedGeofence = eventGeofenceEditor.value();
+    if (requestedGeofence.enabled && (!Number.isFinite(requestedGeofence.latitude) || !Number.isFinite(requestedGeofence.longitude))) return showDashboardToast("Choose an attendance area", "Click the map or search for the event location before saving.");
+    const geofence = requestedGeofence.enabled ? requestedGeofence : { enabled: false };
+    const record = { name: document.querySelector("#eventName").value.trim(), type: document.querySelector("#eventType").value, date, location: document.querySelector("#eventLocation").value.trim(), timeIn, timeOut, audience: document.querySelector("#eventAudience").value, description: document.querySelector("#eventNotes").value.trim(), geofence, openAt: Timestamp.fromDate(new Date(`${date}T${timeIn}`)), closeAt: Timestamp.fromDate(new Date(`${date}T${timeOut}`)), updatedAt: serverTimestamp() };
     try {
       if (id) {
         await setDoc(doc(db, "events", id), record, { merge: true });
@@ -1732,8 +1850,14 @@ function initializeAdmin() {
   });
   document.querySelector("#clearEventForm").addEventListener("click", resetEventForm);
   eventTableBody.addEventListener("click", async (clickEvent) => {
+    const manageGeofence = clickEvent.target.closest("[data-manage-geofence]");
     const edit = clickEvent.target.closest("[data-edit-event]");
     const remove = clickEvent.target.closest("[data-delete-event]");
+    if (manageGeofence) {
+      renderGeofenceEventOptions(manageGeofence.dataset.manageGeofence);
+      openView("geofence");
+      loadGeofenceManager(manageGeofence.dataset.manageGeofence);
+    }
     if (edit) editEvent(edit.dataset.editEvent);
     if (remove) {
       await deleteDoc(doc(db, "events", remove.dataset.deleteEvent));
@@ -2171,12 +2295,15 @@ function initializeAdmin() {
     }
     if (viewName === "modify-students") scheduleStudentsRender();
     if (viewName === "modify-events") renderAdminEvents();
+    if (viewName === "geofence") { renderGeofenceEventOptions(); loadGeofenceManager(); }
     if (viewName === "assign-fine") renderFineOptions();
     if (viewName === "assigned-fines") renderAdminFines();
   });
   onSnapshot(query(collection(db, "events"), orderBy("openAt", "asc")), (snapshot) => {
     events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     if (["dashboard", "modify-events"].includes(activeView)) renderAdminEvents();
+    renderGeofenceEventOptions();
+    if (activeView === "geofence") loadGeofenceManager();
     if (activeView === "assign-fine") renderFineOptions();
     scheduleAdminEventStatusRefresh();
   });

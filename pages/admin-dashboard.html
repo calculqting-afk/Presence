@@ -12,11 +12,12 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="../assets/css/dashboard.css?v=20260924-header-alignment">
 </head>
 <body data-dashboard="admin">
   <div class="app-shell">
-    <aside class="sidebar" style="--nav-count: 9">
+    <aside class="sidebar" style="--nav-count: 10">
       <a class="brand" href="../index.html"><span class="brand-mark"><span></span></span><span>Presence</span></a>
       <p class="nav-label">Admin console</p>
       <nav class="nav-list" aria-label="Admin navigation">
@@ -27,6 +28,7 @@
         <button class="nav-button" data-view="modify-events" type="button"><span class="nav-icon">✎</span><span>Modify Events</span></button>
         <button class="nav-button" data-view="assign-fine" type="button"><span class="nav-icon">＋</span><span>Assign Fine</span></button>
         <button class="nav-button" data-view="assigned-fines" type="button"><span class="nav-icon">!</span><span>Assigned Fines</span></button>
+        <button class="nav-button" data-view="geofence" type="button"><span class="nav-icon">⌖</span><span>Geofence Locations</span></button>
         <button class="nav-button" data-view="profile" type="button"><span class="nav-icon">○</span><span>Profile</span></button>
         <button class="nav-button logout-button" data-logout type="button"><span class="nav-icon">↙</span><span>Logout</span></button>
       </nav>
@@ -212,6 +214,7 @@
     </section>
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
-  <script type="module" src="../assets/js/dashboard.js?v=20261001-performance"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script type="module" src="../assets/js/dashboard.js?v=20261001-geofence"></script>
 </body>
 </html>

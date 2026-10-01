@@ -422,6 +422,22 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 17px; }
 .field.full { grid-column: 1 / -1; }
+.geofence-editor { min-width: 0; margin: 0; padding: 18px; border: 1px solid #d8e5f3; border-radius: 12px; background: #f7faff; }
+.geofence-editor legend { padding: 0 6px; color: #17335d; font-size: .85rem; font-weight: 800; }
+.geofence-editor > p { margin: 8px 0 14px; color: var(--muted); font-size: .74rem; line-height: 1.5; }
+.geofence-toggle { display: inline-flex; align-items: center; gap: 8px; color: #17335d; font-size: .78rem; font-weight: 700; cursor: pointer; }
+.geofence-toggle input { width: 17px; height: 17px; accent-color: var(--blue); }
+.map-search-row { display: flex; gap: 9px; margin: 14px 0; }
+.map-search-row input { flex: 1; min-width: 0; min-height: 42px; padding: 0 12px; color: var(--ink); background: white; border: 1px solid #dfe7f1; border-radius: 9px; font: inherit; font-size: .78rem; }
+.map-search-row .outline-button { min-height: 42px; white-space: nowrap; }
+.geofence-map { height: 320px; overflow: hidden; border: 1px solid #cbdcf1; border-radius: 11px; background: #e8eef7; }
+.geofence-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 15px; }
+.geofence-help { display: block; margin-top: 12px; color: var(--muted); font-size: .71rem; line-height: 1.5; }
+.geofence-manager-panel { max-width: 980px; }
+.geofence-manager-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; }
+.geofence-manager-head strong, .geofence-manager-head small { display: block; }
+.geofence-manager-head strong { color: #17335d; font-size: .95rem; }
+.geofence-manager-head small { margin-top: 4px; color: var(--muted); font-size: .72rem; }
 .field label { display: block; margin-bottom: 7px; color: #4f5e74; font-size: .74rem; font-weight: 700; }
 .field > small { display: block; margin-top: 7px; color: #8793a8; font-size: .72rem; line-height: 1.5; }
 .fine-student-search-results { display: grid; gap: 6px; max-height: 220px; margin-top: 8px; padding: 8px; overflow-y: auto; background: white; border: 1px solid #d8e5f3; border-radius: 10px; box-shadow: 0 9px 22px rgba(36,65,109,.08); }
@@ -713,6 +729,9 @@ body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
   .stat-card { padding: 16px; }
   .stat-value { font-size: 1.4rem; }
   .event-grid, .form-grid { grid-template-columns: 1fr; }
+  .geofence-fields { grid-template-columns: 1fr; }
+  .geofence-manager-head { align-items: flex-start; flex-direction: column; }
+  .geofence-map { height: 270px; }
   #studentProfileModal .form-grid { grid-template-columns: 1fr; }
   .dashboard-modal-backdrop { align-items: start; padding: 12px; }
   .dashboard-modal { max-height: calc(100dvh - 24px); padding: 22px; }
