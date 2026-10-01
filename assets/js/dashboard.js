@@ -851,9 +851,17 @@ function initializeStudent() {
     const button = clickEvent.target.closest("[data-attend-event]");
     if (!button) return;
     const selectedEvent = events.find((event) => event.id === button.dataset.attendEvent);
-    if (!faceRegistrationLoaded) return showDashboardToast("Checking face registration", "Please wait a moment, then try checking in again.");
+    let faceRegistration;
+    try {
+      faceRegistration = await getDocFromServer(doc(db, "faceRegistrations", currentUser.uid));
+    } catch {
+      showGeofenceError("Facial recognition could not be verified", "Presence must verify your facial recognition before attendance can be recorded. Check your connection and try again.");
+      return;
+    }
+    faceRegistrationLoaded = true;
+    faceAlreadyRegistered = faceRegistration.data()?.registered === true;
     if (!faceAlreadyRegistered) {
-      showGeofenceError("Face registration required", "You must complete Face Registration before you can take attendance. The Face Registration page is now open.");
+      showGeofenceError("Facial recognition required", "You have not completed facial recognition yet. You must register your face first before you can take attendance. The Face Registration page is now open.");
       openView("face");
       return;
     }
