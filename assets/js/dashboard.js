@@ -241,6 +241,7 @@ function renderView(viewName) {
   document.querySelectorAll("[data-section]").forEach((section) => { section.hidden = section.dataset.section !== viewName; });
   const copy = pageCopy[dashboardRole][viewName];
   if (copy) [document.querySelector("#pageTitle").textContent, document.querySelector("#pageSubtitle").textContent] = copy;
+  window.dispatchEvent(new CustomEvent("presence:viewchange", { detail: { viewName } }));
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -440,8 +441,13 @@ function wireCommonNavigation() {
       sessionStorage.removeItem("presenceSession");
       sessionStorage.removeItem("presenceDeviceSession");
     } catch {}
-    await signOut(auth);
-    window.location.href = "../index.html";
+    try {
+      await signOut(auth);
+      window.location.replace("../index.html");
+    } catch (error) {
+      console.error("LOGOUT FAILED:", error);
+      showDashboardToast("Unable to log out", "Firebase could not end this session. Please try again.");
+    }
   });
   const dateText = new Intl.DateTimeFormat("en", { weekday: "short", month: "short", day: "numeric", year: "numeric" }).format(new Date());
   document.querySelectorAll("[data-current-date]").forEach((element) => { element.textContent = dateText; });
@@ -455,6 +461,8 @@ function initializeStudent() {
   let studentProfile;
   let pendingProfilePhoto = "";
   let presenceWriteErrorShown = false;
+  let eventRenderFrame;
+  let eventStatusTimer;
   studentLoggedOut = false;
   const studentProfileModal = document.querySelector("#studentProfileModal");
   let storedPresenceSession = "";
@@ -562,6 +570,25 @@ function initializeStudent() {
       timeline.innerHTML = `<div class="timeline">${activeEvents.slice(0, 4).map((event) => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${attendanceIds.has(event.id) ? '<span class="badge green">Attended</span>' : eventStatusBadge(getEventStatus(event))}</div>`).join("")}</div>`;
     }
     renderAttendanceSummary();
+  }
+
+  function scheduleEventRender() {
+    if (eventRenderFrame) return;
+    eventRenderFrame = window.requestAnimationFrame(() => {
+      eventRenderFrame = undefined;
+      renderEvents();
+    });
+  }
+
+  function scheduleEventStatusRefresh() {
+    window.clearTimeout(eventStatusTimer);
+    const now = Date.now();
+    const nextStatusChange = Math.min(...events.flatMap((event) => [eventOpenDate(event).getTime(), eventCloseDate(event).getTime()]).filter((time) => time > now));
+    if (!Number.isFinite(nextStatusChange)) return;
+    eventStatusTimer = window.setTimeout(() => {
+      renderEvents();
+      scheduleEventStatusRefresh();
+    }, Math.max(0, nextStatusChange - now) + 50);
   }
 
   function renderAttendanceSummary() {
@@ -1006,9 +1033,9 @@ function initializeStudent() {
     studentProfile = snapshot.data();
     renderProfile();
   });
-  onSnapshot(query(collection(db, "events"), orderBy("openAt", "asc")), (snapshot) => { events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderEvents(); });
-  onSnapshot(query(collection(db, "attendance"), where("studentUid", "==", currentUser.uid)), (snapshot) => { attendance = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderEvents(); });
-  onSnapshot(query(collection(db, "dismissedHistory"), where("studentUid", "==", currentUser.uid)), (snapshot) => { dismissedIds = new Set(snapshot.docs.map((item) => item.data().eventId)); renderEvents(); });
+  onSnapshot(query(collection(db, "events"), orderBy("openAt", "asc")), (snapshot) => { events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); scheduleEventRender(); scheduleEventStatusRefresh(); });
+  onSnapshot(query(collection(db, "attendance"), where("studentUid", "==", currentUser.uid)), (snapshot) => { attendance = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); scheduleEventRender(); });
+  onSnapshot(query(collection(db, "dismissedHistory"), where("studentUid", "==", currentUser.uid)), (snapshot) => { dismissedIds = new Set(snapshot.docs.map((item) => item.data().eventId)); scheduleEventRender(); });
   onSnapshot(query(collection(db, "fines"), where("studentUid", "==", currentUser.uid)), (snapshot) => { fines = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderFines(); renderProfile(); });
   onSnapshot(doc(db, "faceRegistrations", currentUser.uid), (snapshot) => {
     if (snapshot.data()?.registered) {
@@ -1019,7 +1046,6 @@ function initializeStudent() {
       unlockFaceRegistration();
     }
   });
-  window.setInterval(renderEvents, 15000);
 }
 
 function initializeAdmin() {
@@ -1077,8 +1103,31 @@ function initializeAdmin() {
   let removalCountdownTimer;
   let pendingAdminProfilePhoto = "";
   let addingCommunityService = false;
-  const studentPageSize = 20;
+  const studentPageSize = 10;
   let studentPage = 1;
+  let studentRenderFrame;
+  let adminEventStatusTimer;
+  let studentFilterSignature = "";
+  const studentDirectoryMediaQuery = window.matchMedia("(max-width: 580px)");
+
+  function scheduleStudentsRender() {
+    if (studentRenderFrame) return;
+    studentRenderFrame = window.requestAnimationFrame(() => {
+      studentRenderFrame = undefined;
+      renderStudents();
+    });
+  }
+
+  function scheduleAdminEventStatusRefresh() {
+    window.clearTimeout(adminEventStatusTimer);
+    const now = Date.now();
+    const nextStatusChange = Math.min(...events.flatMap((event) => [eventOpenDate(event).getTime(), eventCloseDate(event).getTime()]).filter((time) => time > now));
+    if (!Number.isFinite(nextStatusChange)) return;
+    adminEventStatusTimer = window.setTimeout(() => {
+      if (["dashboard", "modify-events"].includes(activeView)) renderAdminEvents();
+      scheduleAdminEventStatusRefresh();
+    }, Math.max(0, nextStatusChange - now) + 50);
+  }
 
   const eventSyncNotice = document.querySelector(".notice");
   if (eventSyncNotice) eventSyncNotice.textContent = "Events are saved online and sync automatically to student dashboards, including after refresh.";
@@ -1493,14 +1542,25 @@ function initializeAdmin() {
   }
 
   function renderStudents() {
+    if (activeView !== "modify-students") {
+      document.querySelector("#registeredCount").textContent = students.length;
+      if (activeView === "dashboard") renderAdminAttendance();
+      return;
+    }
     const search = studentSearch.value.trim().toLowerCase();
     const updateFilterOptions = (select, label, values) => {
       const currentValue = select.value;
       select.innerHTML = `<option value="all">All ${label}</option>${values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`;
       select.value = values.includes(currentValue) ? currentValue : "all";
     };
-    updateFilterOptions(studentCourseFilter, "courses", [...new Set(students.map((student) => student.course).filter(Boolean))].sort());
-    updateFilterOptions(studentSectionFilter, "sections", [...new Set(students.map((student) => student.section).filter(Boolean))].sort());
+    const courses = [...new Set(students.map((student) => student.course).filter(Boolean))].sort();
+    const sections = [...new Set(students.map((student) => student.section).filter(Boolean))].sort();
+    const filterSignature = `${courses.join("\u0001")}\u0002${sections.join("\u0001")}`;
+    if (filterSignature !== studentFilterSignature) {
+      studentFilterSignature = filterSignature;
+      updateFilterOptions(studentCourseFilter, "courses", courses);
+      updateFilterOptions(studentSectionFilter, "sections", sections);
+    }
 
     const localDate = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
     const presentToday = new Set(attendance.filter((record) => record.eventDate === localDate).map((record) => record.studentUid));
@@ -1545,19 +1605,26 @@ function initializeAdmin() {
       renderAdminAttendance();
       return;
     }
-    studentTableBody.innerHTML = visibleStudents.map((student) => {
+    const studentTableMarkup = visibleStudents.map((student) => {
       const avatar = student.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student.firstName, student.lastName));
       const presence = getStudentPresence(student.uid);
       const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
       return `<tr><td><div class="student-cell"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))}</strong><small>${escapeHtml(student.accountId)}</small></div></div></td><td><strong>${escapeHtml(student.course || "Not assigned")}</strong><br><small>Section ${escapeHtml(student.section)}</small></td><td><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span><small class="presence-time presence-status is-${presence.status}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</small></td><td>${escapeHtml(student.email || "Not provided")}</td><td><div class="table-actions"><button class="small-button" type="button" data-view-student="${student.uid}">Profile</button>${hasFaceRegistration ? `<button class="small-button danger" type="button" data-reset-face="${student.uid}">Reset face</button>` : ""}<button class="small-button" type="button" data-password-student="${student.uid}">Password</button><button class="small-button danger" type="button" data-delete-student="${student.uid}">Clear account</button></div></td></tr>`;
     }).join("");
-    studentMobileCards.innerHTML = visibleStudents.map((student) => {
+    const studentMobileMarkup = visibleStudents.map((student) => {
       const fullName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ");
       const avatar = student.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student.firstName, student.lastName));
       const presence = getStudentPresence(student.uid);
       const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
       return `<article class="student-mobile-card"><div class="student-mobile-card-head"><span class="mini-avatar">${avatar}</span><div><h3>${escapeHtml(fullName)}</h3><p>${escapeHtml(student.accountId)}</p></div><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span></div><div class="student-mobile-card-details"><div><span>Course / Section</span><strong>${escapeHtml(student.course || "Not assigned")} · ${escapeHtml(student.section || "Not assigned")}</strong></div><div><span>Live status</span><strong class="presence-status is-${presence.status}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</strong></div><div class="student-mobile-card-email"><span>Email</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div></div><button class="outline-button" type="button" data-view-student="${escapeHtml(student.uid)}">View profile</button></article>`;
     }).join("");
+    if (studentDirectoryMediaQuery.matches) {
+      studentTableBody.innerHTML = "";
+      studentMobileCards.innerHTML = studentMobileMarkup;
+    } else {
+      studentTableBody.innerHTML = studentTableMarkup;
+      studentMobileCards.innerHTML = "";
+    }
     renderSelectedStudent();
     renderAdminAttendance();
   }
@@ -2095,15 +2162,43 @@ function initializeAdmin() {
     }
   });
 
-  onSnapshot(query(collection(db, "events"), orderBy("openAt", "asc")), (snapshot) => { events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderAdminEvents(); renderFineOptions(); });
-  onSnapshot(collection(db, "students"), (snapshot) => { students = snapshot.docs.map((item) => ({ uid: item.id, ...item.data() })); renderStudents(); renderFineOptions(); });
-  onSnapshot(collection(db, "presenceSessions"), (snapshot) => { setPresenceSessions(snapshot); renderStudents(); });
-  onSnapshot(collection(db, "presence"), (snapshot) => { legacyPresenceByUid = new Map(snapshot.docs.map((item) => [item.id, item.data()])); renderStudents(); });
-  onSnapshot(collection(db, "attendance"), (snapshot) => { attendance = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderAdminAttendance(); renderSelectedStudent(); });
-  onSnapshot(collection(db, "fines"), (snapshot) => { fines = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderAdminFines(); renderSelectedStudent(); });
-  onSnapshot(collection(db, "faceRegistrations"), (snapshot) => { faceRegistrationsByUid = new Map(snapshot.docs.map((item) => [item.id, item.data()])); renderStudents(); });
+  studentDirectoryMediaQuery.addEventListener("change", scheduleStudentsRender);
+  window.addEventListener("presence:viewchange", (event) => {
+    const viewName = event.detail?.viewName;
+    if (viewName === "dashboard") {
+      renderAdminAttendance();
+      renderAdminEvents();
+    }
+    if (viewName === "modify-students") scheduleStudentsRender();
+    if (viewName === "modify-events") renderAdminEvents();
+    if (viewName === "assign-fine") renderFineOptions();
+    if (viewName === "assigned-fines") renderAdminFines();
+  });
+  onSnapshot(query(collection(db, "events"), orderBy("openAt", "asc")), (snapshot) => {
+    events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    if (["dashboard", "modify-events"].includes(activeView)) renderAdminEvents();
+    if (activeView === "assign-fine") renderFineOptions();
+    scheduleAdminEventStatusRefresh();
+  });
+  onSnapshot(collection(db, "students"), (snapshot) => {
+    students = snapshot.docs.map((item) => ({ uid: item.id, ...item.data() }));
+    scheduleStudentsRender();
+    if (activeView === "assign-fine") renderFineOptions();
+  });
+  onSnapshot(collection(db, "presenceSessions"), (snapshot) => { setPresenceSessions(snapshot); scheduleStudentsRender(); });
+  onSnapshot(collection(db, "presence"), (snapshot) => { legacyPresenceByUid = new Map(snapshot.docs.map((item) => [item.id, item.data()])); scheduleStudentsRender(); });
+  onSnapshot(collection(db, "attendance"), (snapshot) => {
+    attendance = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    scheduleStudentsRender();
+  });
+  onSnapshot(collection(db, "fines"), (snapshot) => {
+    fines = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    if (activeView === "assigned-fines") renderAdminFines();
+    if (activeView === "modify-students") scheduleStudentsRender();
+    if (selectedManagedStudentUid) renderSelectedStudent();
+  });
+  onSnapshot(collection(db, "faceRegistrations"), (snapshot) => { faceRegistrationsByUid = new Map(snapshot.docs.map((item) => [item.id, item.data()])); scheduleStudentsRender(); });
   onSnapshot(doc(db, "adminProfiles", currentUser.uid), (snapshot) => { renderAdminProfile(snapshot.data()); });
-  window.setInterval(() => { renderAdminEvents(); renderStudents(); }, 15000);
   resetStudentForm();
   resetEventForm();
 }
