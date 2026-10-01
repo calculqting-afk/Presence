@@ -102,6 +102,12 @@ function validateStudent(data) {
   if (data.password && data.password.length < 6) {
     throw new HttpsError("invalid-argument", "The password must contain at least 6 characters.");
   }
+  if (data.password && (typeof data.password !== "string" || !/^[0-9]{1,8}$/.test(data.password))) {
+    throw new HttpsError("invalid-argument", "The password must use digits only and cannot contain more than 8 digits.");
+  }
+  if (data.phone && (typeof data.phone !== "string" || !/^[0-9]{1,11}$/.test(data.phone))) {
+    throw new HttpsError("invalid-argument", "The phone number must use digits only and cannot contain more than 11 digits.");
+  }
 }
 
 function toStudentError(error) {

@@ -119,7 +119,7 @@
           <div class="field"><label for="profileCourse">Course</label><select id="profileCourse" required><option value="" disabled>Select a course</option><option value="BSInfo Tech">BSInfo Tech</option><option value="BSA">BSA</option><option value="BSFI">BSFI</option><option value="BSMB">BSMB</option></select></div>
           <div class="field"><label for="profileSection">Section</label><select id="profileSection" required><option value="1A">1A</option><option value="1B">1B</option><option value="2A">2A</option><option value="2B">2B</option><option value="3A">3A</option><option value="3B">3B</option><option value="4A">4A</option><option value="4B">4B</option></select></div>
           <div class="field"><label for="profileEmail">Email address</label><input id="profileEmail" type="email"></div>
-          <div class="field"><label for="profilePhone">Phone number</label><input id="profilePhone" type="tel"></div>
+          <div class="field"><label for="profilePhone">Phone number</label><input id="profilePhone" type="tel" maxlength="11" inputmode="numeric" pattern="[0-9]*" title="Use up to 11 digits"></div>
         </div>
         <div class="modal-actions"><button class="outline-button" type="button" data-close-student-profile>Cancel</button><button class="primary-button" type="submit">Save profile</button></div>
       </form>

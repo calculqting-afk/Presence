@@ -80,9 +80,9 @@
                 <div class="field"><label for="managedStudentId">Student ID number</label><input id="managedStudentId" required pattern="[A-Za-z0-9._-]+" title="Use only letters, numbers, periods, underscores, or dashes" placeholder="e.g. 25100-1"></div>
                 <div class="field"><label for="managedSection">Section</label><select id="managedSection" required><option value="" selected disabled>Select a section</option><option value="1A">1A</option><option value="1B">1B</option><option value="2A">2A</option><option value="2B">2B</option><option value="3A">3A</option><option value="3B">3B</option><option value="4A">4A</option><option value="4B">4B</option></select></div>
                 <div class="field"><label for="managedCourse">Course</label><select id="managedCourse" required><option value="" selected disabled>Select a course</option><option value="BSInfo Tech">BSInfo Tech</option><option value="BSA">BSA</option><option value="BSFI">BSFI</option><option value="BSMB">BSMB</option></select></div>
-                <div class="field"><label for="managedPassword">Password</label><input id="managedPassword" type="text" required minlength="6" autocomplete="off" placeholder="Visible · minimum 6 characters" aria-describedby="managedPasswordHelp"><small id="managedPasswordHelp">The password stays visible while you type and must contain at least 6 characters.</small></div>
+                <div class="field"><label for="managedPassword">Password</label><input id="managedPassword" type="text" required minlength="6" maxlength="8" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="Visible · up to 8 digits" aria-describedby="managedPasswordHelp"><small id="managedPasswordHelp">The password stays visible while you type, accepts digits only, and is limited to 8 digits.</small></div>
                 <div class="field"><label for="managedEmail">Email address</label><input id="managedEmail" type="email"></div>
-                <div class="field"><label for="managedPhone">Phone number</label><input id="managedPhone" type="tel"></div>
+                <div class="field"><label for="managedPhone">Phone number</label><input id="managedPhone" type="tel" maxlength="11" inputmode="numeric" pattern="[0-9]*" title="Use up to 11 digits"></div>
               </div>
               <div class="form-actions"><button class="outline-button" type="button" data-go-back>← Back</button><button class="outline-button" id="cancelStudentForm" type="button">Reset form</button><button class="primary-button" id="studentSubmitButton" type="submit">Add student</button></div>
             </form>
@@ -159,7 +159,7 @@
                 <div class="field"><label for="adminDisplayName">Full name</label><input id="adminDisplayName" required autocomplete="name" placeholder="School Admin"></div>
                 <div class="field"><label for="adminProfileBirthday">Birthday</label><input id="adminProfileBirthday" type="date"></div>
                 <div class="field"><label for="adminProfileEmail">Administrator email</label><input id="adminProfileEmail" type="email" disabled></div>
-                <div class="field"><label for="adminProfilePhone">Phone number</label><input id="adminProfilePhone" type="tel"></div>
+                <div class="field"><label for="adminProfilePhone">Phone number</label><input id="adminProfilePhone" type="tel" maxlength="11" inputmode="numeric" pattern="[0-9]*" title="Use up to 11 digits"></div>
               </div>
               <div class="form-actions"><button class="outline-button" type="button" data-go-back>← Back</button><button class="primary-button" type="submit">Save profile</button></div>
             </form>
@@ -176,7 +176,7 @@
       <p id="passwordStudentName">Enter the current password before setting a new one.</p>
       <form id="passwordChangeForm">
         <div class="field"><label for="currentStudentPassword">Current password</label><input id="currentStudentPassword" type="text" required minlength="6" autocomplete="off"></div>
-        <div class="field"><label for="newStudentPassword">New password</label><input id="newStudentPassword" type="text" required minlength="6" autocomplete="off"><small>At least 6 characters. The password is visible while you type.</small></div>
+        <div class="field"><label for="newStudentPassword">New password</label><input id="newStudentPassword" type="text" required minlength="6" maxlength="8" inputmode="numeric" pattern="[0-9]*" autocomplete="off"><small>The password is visible while you type, accepts digits only, and is limited to 8 digits.</small></div>
         <div class="modal-actions"><button class="outline-button" type="button" data-close-password>Cancel</button><button class="primary-button" type="submit">Change password</button></div>
       </form>
     </section>

@@ -1681,8 +1681,8 @@ function initializeAdmin() {
     document.querySelector("#managedPassword").required = true;
     document.querySelector("#managedPassword").disabled = false;
     document.querySelector("#managedPassword").value = "";
-    document.querySelector("#managedPassword").placeholder = "Visible · minimum 6 characters";
-    document.querySelector("#managedPasswordHelp").textContent = "The password stays visible while you type and must contain at least 6 characters.";
+    document.querySelector("#managedPassword").placeholder = "Visible · up to 8 digits";
+    document.querySelector("#managedPasswordHelp").textContent = "The password stays visible while you type, accepts digits only, and is limited to 8 digits.";
     document.querySelector("#studentPageTitle").textContent = "Add Student";
     document.querySelector("#studentFormTitle").textContent = "Student information";
     document.querySelector("#studentSubmitButton").textContent = "Add student";
