@@ -6,6 +6,14 @@ const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 
 initializeApp();
 const ADMIN_EMAIL = "mikhailovna2007@gmail.com";
+const ROLE = Object.freeze({
+  HEAD_ADMIN: "head_admin",
+  ATTENDANCE_ADMIN: "attendance_admin",
+  STUDENT_MANAGER: "student_manager",
+  VIEWER: "viewer",
+  STUDENT: "student"
+});
+const ASSIGNABLE_ROLES = new Set(Object.values(ROLE));
 
 function studentMatchesEventAudience(student, audience) {
   return student.active !== false
@@ -38,7 +46,8 @@ exports.checkInWithGeofence = onCall(async (request) => {
   const student = studentSnapshot.data();
   const event = eventSnapshot.data();
   const now = Date.now();
-  if (!event.openAt?.toMillis || !event.closeAt?.toMillis || now < event.openAt.toMillis() || now > event.closeAt.toMillis()) throw new HttpsError("permission-denied", "The attendance window is not open.");
+  const checkInCloseAt = event.checkInClosesAt?.toMillis ? event.checkInClosesAt : event.closeAt;
+  if (!event.openAt?.toMillis || !checkInCloseAt?.toMillis || now < event.openAt.toMillis() || now > checkInCloseAt.toMillis()) throw new HttpsError("permission-denied", "The check-in window is not open.");
   if (!studentMatchesEventAudience(student, event.audience || "All students")) throw new HttpsError("permission-denied", "This event is not assigned to your section.");
 
   let verifiedLocation;
@@ -145,10 +154,46 @@ function studentIdToEmail(studentId) {
 
 async function requireAdmin(request) {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in is required.");
-  if (request.auth.token.email?.toLowerCase() !== ADMIN_EMAIL) {
-    throw new HttpsError("permission-denied", "This account is not the authorized Presence administrator.");
+  const role = request.auth.token.role;
+  const isBootstrapHeadAdmin = request.auth.token.email?.toLowerCase() === ADMIN_EMAIL;
+  if (role !== ROLE.HEAD_ADMIN && !isBootstrapHeadAdmin) {
+    throw new HttpsError("permission-denied", "Only the Head Admin can manage student accounts.");
   }
 }
+
+function requireHeadAdmin(request) {
+  return requireAdmin(request);
+}
+
+exports.assignUserRole = onCall(async (request) => {
+  await requireHeadAdmin(request);
+  const uid = String(request.data?.uid || "").trim();
+  const role = String(request.data?.role || "").trim();
+  if (!uid || !ASSIGNABLE_ROLES.has(role)) {
+    throw new HttpsError("invalid-argument", "Choose a valid account and role.");
+  }
+
+  const firebaseAuth = getAuth();
+  const firestore = getFirestore();
+  const target = await firebaseAuth.getUser(uid).catch((error) => {
+    if (error.code === "auth/user-not-found") throw new HttpsError("not-found", "This account no longer exists.");
+    throw error;
+  });
+  const previousRole = target.customClaims?.role || ROLE.STUDENT;
+  const nextClaims = { ...(target.customClaims || {}), role };
+  await firebaseAuth.setCustomUserClaims(uid, nextClaims);
+  await firestore.doc(`students/${uid}`).set({ role, roleUpdatedAt: FieldValue.serverTimestamp(), roleUpdatedBy: request.auth.uid }, { merge: true });
+  await firestore.collection("auditLogs").add({
+    action: "role_changed",
+    actorUid: request.auth.uid,
+    actorEmail: request.auth.token.email || "",
+    targetUid: uid,
+    previousRole,
+    role,
+    createdAt: FieldValue.serverTimestamp()
+  });
+  return { ok: true, role };
+});
 
 function validateStudent(data) {
   const required = ["accountId", "firstName", "lastName", "section"];

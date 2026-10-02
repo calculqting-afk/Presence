@@ -55,9 +55,31 @@ let presenceSessionId;
 let studentLoggedOut = false;
 let activeView;
 let previousView = "dashboard";
+let currentUserRole = "student";
+let currentUserProfile = {};
+const ROLE_VIEWS = {
+  head_admin: ["dashboard", "add-student", "modify-students", "create", "modify-events", "past-events", "attendance-line", "assign-fine", "assigned-fines", "geofence", "profile"],
+  attendance_admin: ["dashboard", "create", "modify-events", "past-events", "attendance-line", "assign-fine", "assigned-fines", "geofence"],
+  student_manager: ["dashboard", "add-student", "modify-students"],
+  viewer: ["dashboard", "modify-students", "modify-events", "past-events", "attendance-line", "assigned-fines", "geofence"],
+  student: ["dashboard", "events", "attendances", "history", "fines", "face", "profile"]
+};
+const ROLE_ACCESS_LABELS = { head_admin: "Full access", attendance_admin: "Attendance access", student_manager: "Student management", viewer: "Read-only access" };
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
+}
+
+const ROLE_LABELS = { head_admin: "Head Admin", attendance_admin: "Attendance Admin", student_manager: "Student Manager", viewer: "Viewer", student: "Student" };
+function roleLabel(role) {
+  return ROLE_LABELS[role] || ROLE_LABELS.student;
+}
+
+function roleChangeErrorMessage(error) {
+  const code = String(error?.code || "").replace(/^functions\//, "");
+  if (code === "permission-denied") return "Only a Head Admin can assign roles. Sign out and sign in again, then retry.";
+  if (code === "unauthenticated") return "Your session has expired. Sign in again and retry.";
+  return error?.message || "The role could not be updated.";
 }
 
 function formatBirthday(value) {
@@ -250,16 +272,37 @@ function renderView(viewName) {
 }
 
 function openView(viewName) {
-  if (!pageCopy[dashboardRole][viewName] || viewName === activeView) return;
+  if (!pageCopy[dashboardRole][viewName] || !ROLE_VIEWS[currentUserRole]?.includes(viewName) || viewName === activeView) return;
   previousView = activeView || "dashboard";
   renderView(viewName);
   history.pushState({ presenceDashboard: true, view: viewName }, "", window.location.href);
 }
 
+function applyRoleNavigation() {
+  if (dashboardRole !== "admin") return;
+  const allowedViews = new Set(ROLE_VIEWS[currentUserRole] || []);
+  document.querySelectorAll("[data-view]").forEach((button) => {
+    button.hidden = !allowedViews.has(button.dataset.view);
+  });
+  document.querySelectorAll("[data-go-view]").forEach((button) => {
+    button.hidden = !allowedViews.has(button.dataset.goView);
+  });
+  document.querySelectorAll("[data-go-back]").forEach((button) => {
+    button.hidden = !allowedViews.has(previousView);
+  });
+  document.querySelector("[data-go-view=profile]")?.toggleAttribute("hidden", currentUserRole !== "head_admin");
+  document.querySelectorAll("[data-role-console]").forEach((element) => { element.textContent = `${roleLabel(currentUserRole)} console`; });
+  document.querySelectorAll("[data-admin-role]").forEach((element) => { element.textContent = ROLE_ACCESS_LABELS[currentUserRole] || "Student"; });
+  const displayName = [currentUserProfile.firstName, currentUserProfile.lastName].filter(Boolean).join(" ");
+  if (displayName) document.querySelectorAll("[data-admin-name]").forEach((element) => { element.textContent = displayName; });
+  document.querySelectorAll("[data-head-admin-only]").forEach((element) => { element.hidden = currentUserRole !== "head_admin"; });
+}
+
 function initializeDashboardHistory() {
-  const initialView = history.state?.presenceDashboard && pageCopy[dashboardRole][history.state.view]
+  const requestedView = history.state?.presenceDashboard && pageCopy[dashboardRole][history.state.view]
     ? history.state.view
     : "dashboard";
+  const initialView = ROLE_VIEWS[currentUserRole]?.includes(requestedView) ? requestedView : "dashboard";
   history.replaceState({ presenceDashboard: true, view: initialView, root: true }, "", window.location.href);
   history.pushState({ presenceDashboard: true, view: initialView }, "", window.location.href);
   renderView(initialView);
@@ -270,7 +313,7 @@ function initializeDashboardHistory() {
       history.go(1);
       return;
     }
-    renderView(state.view);
+    renderView(ROLE_VIEWS[currentUserRole]?.includes(state.view) ? state.view : "dashboard");
   });
 }
 
@@ -279,6 +322,13 @@ function formatEventDate(value) {
 }
 function formatEventTime(value) {
   return new Date(`2000-01-01T${value}`).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+function timePlusMinutes(value, minutes = 15) {
+  if (!/^\d{2}:\d{2}$/.test(value)) return "";
+  const [hours, minute] = value.split(":").map(Number);
+  const total = hours * 60 + minute + minutes;
+  if (total >= 24 * 60) return "";
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 function formatTimeWindow(event) {
   return `${formatEventTime(event.timeIn)} – ${formatEventTime(event.timeOut)}`;
@@ -289,11 +339,17 @@ function eventOpenDate(event) {
 function eventCloseDate(event) {
   return event.closeAt?.toDate?.() || new Date(`${event.date}T${event.timeOut}`);
 }
+function eventCheckInCloseDate(event) {
+  return event.checkInClosesAt?.toDate?.() || (event.checkInCutoff ? new Date(`${event.date}T${event.checkInCutoff}`) : eventCloseDate(event));
+}
 function eventCheckoutCloseDate(event) {
-  return new Date(eventCloseDate(event).getTime() + 15 * 60 * 1000);
+  return event.checkOutClosesAt?.toDate?.() || (event.checkOutCutoff ? new Date(`${event.date}T${event.checkOutCutoff}`) : new Date(eventCloseDate(event).getTime() + 15 * 60 * 1000));
 }
 function isCheckoutAvailable(event, now = new Date()) {
   return now >= eventCloseDate(event) && now <= eventCheckoutCloseDate(event);
+}
+function isEventFinished(event, now = new Date()) {
+  return now > eventCheckoutCloseDate(event);
 }
 function formatAttendanceTimestamp(value) {
   const date = value?.toDate?.() || (value ? new Date(value) : null);
@@ -307,7 +363,7 @@ function attendanceDuration(checkIn, checkOut) {
 }
 function getEventStatus(event, now = new Date()) {
   if (now < eventOpenDate(event)) return "upcoming";
-  if (now > eventCloseDate(event)) return "closed";
+  if (now > eventCheckInCloseDate(event)) return "closed";
   return "open";
 }
 function eventStatusBadge(status) {
@@ -413,10 +469,15 @@ async function waitForUser() {
 
 async function verifyRole(user) {
   if (!user) return false;
+  const isBootstrapHeadAdmin = user.email?.toLowerCase() === ADMIN_EMAIL;
+  const profile = isBootstrapHeadAdmin ? null : await getDoc(doc(db, "students", user.uid));
+  currentUserProfile = profile?.data() || {};
+  const role = isBootstrapHeadAdmin ? "head_admin" : profile?.data()?.role || "student";
+  currentUserRole = role;
   if (dashboardRole === "admin") {
-    return user.email?.toLowerCase() === ADMIN_EMAIL;
+    return ["head_admin", "attendance_admin", "student_manager", "viewer"].includes(role);
   }
-  if (user.email?.toLowerCase() === ADMIN_EMAIL) return false;
+  if (role !== "student") return false;
   const record = await getDoc(doc(db, "students", user.uid));
   return record.exists() && record.data().active === true;
 }
@@ -590,9 +651,11 @@ function initializeStudent() {
         const status = getEventStatus(event);
         const attended = attendanceIds.has(event.id);
         const disabled = attended || status !== "open";
-        const buttonText = attended ? "✓ Attendance saved" : status === "open" ? "Check in" : "Not open yet";
+        const buttonText = attended ? "✓ Attendance saved" : status === "open" ? "Check in" : status === "closed" ? "Check-in closed" : "Not open yet";
         const description = event.description || event.notes || `Attendance event for ${event.audience}.`;
-        return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div><div class="event-meta"><span class="event-check-time"><b>IN</b>${escapeHtml(formatEventTime(event.timeIn))}</span><span class="event-check-time"><b>OUT</b>${escapeHtml(formatEventTime(event.timeOut))}</span><span class="event-location">${escapeHtml(event.location)}</span></div><div class="event-card-actions">${attended ? '<span class="badge green">Attended</span>' : eventStatusBadge(status)}<button class="${attended ? "outline-button" : "primary-button"}" type="button" data-attend-event="${escapeHtml(event.id)}" ${disabled ? "disabled" : ""}>${buttonText}</button></div></div></article>`;
+        const checkInCutoff = event.checkInCutoff || event.timeOut;
+        const checkOutCutoff = event.checkOutCutoff || "";
+        return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div><div class="event-meta"><span class="event-check-time"><b>IN</b>${escapeHtml(formatEventTime(event.timeIn))} – ${escapeHtml(formatEventTime(checkInCutoff))}</span><span class="event-check-time"><b>OUT</b>${escapeHtml(formatEventTime(event.timeOut))}${checkOutCutoff ? ` – ${escapeHtml(formatEventTime(checkOutCutoff))}` : ""}</span><span class="event-location">${escapeHtml(event.location)}</span></div><div class="event-card-actions">${attended ? '<span class="badge green">Attended</span>' : eventStatusBadge(status)}<button class="${attended ? "outline-button" : "primary-button"}" type="button" data-attend-event="${escapeHtml(event.id)}" ${disabled ? "disabled" : ""}>${buttonText}</button></div></div></article>`;
       }).join("");
       timeline.innerHTML = `<div class="timeline">${activeEvents.slice(0, 4).map((event) => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${attendanceIds.has(event.id) ? '<span class="badge green">Attended</span>' : eventStatusBadge(getEventStatus(event))}</div>`).join("")}</div>`;
     }
@@ -610,7 +673,7 @@ function initializeStudent() {
   function scheduleEventStatusRefresh() {
     window.clearTimeout(eventStatusTimer);
     const now = Date.now();
-    const nextStatusChange = Math.min(...events.flatMap((event) => [eventOpenDate(event).getTime(), eventCloseDate(event).getTime(), eventCheckoutCloseDate(event).getTime()]).filter((time) => time > now));
+    const nextStatusChange = Math.min(...events.flatMap((event) => [eventOpenDate(event).getTime(), eventCheckInCloseDate(event).getTime(), eventCloseDate(event).getTime(), eventCheckoutCloseDate(event).getTime()]).filter((time) => time > now));
     if (!Number.isFinite(nextStatusChange)) return;
     eventStatusTimer = window.setTimeout(() => {
       renderEvents();
@@ -661,7 +724,9 @@ function initializeStudent() {
       const readyToCheckOut = !completed && record.status === "checked-in" && isCheckoutAvailable(event);
       const status = completed ? "Completed" : readyToCheckOut ? "Ready to check out" : new Date() < eventCloseDate(event) ? "Checked in" : "Checkout window closed";
       const color = completed ? "green" : readyToCheckOut ? "orange" : status === "Checked in" ? "blue" : "gray";
-      return `<article class="history-event-card attendance-record-card"><div class="history-card-top"><span class="event-type-badge">${escapeHtml(record.eventType || "School Event")}</span><span class="badge ${color}">${escapeHtml(status)}</span></div><h3>${escapeHtml(record.eventName || "Attendance event")}</h3><p>${escapeHtml(record.location || "Location not recorded")}</p><div class="event-detail-boxes"><div><span>Checked in</span><strong>${escapeHtml(formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>Checked out</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Duration</span><strong>${escapeHtml(attendanceDuration(checkedInAt, record.checkedOutAt))}</strong></div><div><span>Attendance window</span><strong>${escapeHtml(record.timeIn && record.timeOut ? `${formatEventTime(record.timeIn)} – ${formatEventTime(record.timeOut)}` : "Not recorded")}</strong></div></div>${readyToCheckOut ? `<div class="history-card-actions"><button class="primary-button" type="button" data-check-out-attendance="${escapeHtml(record.id)}">Check out</button></div>` : ""}</article>`;
+      const checkInWindow = event.timeIn ? `${formatEventTime(event.timeIn)} – ${formatEventTime(event.checkInCutoff || event.timeOut)}` : "Not recorded";
+      const checkOutWindow = event.timeOut ? `${formatEventTime(event.timeOut)} – ${formatEventTime(event.checkOutCutoff || timePlusMinutes(event.timeOut))}` : "Not recorded";
+      return `<article class="history-event-card attendance-record-card"><div class="history-card-top"><span class="event-type-badge">${escapeHtml(record.eventType || "School Event")}</span><span class="badge ${color}">${escapeHtml(status)}</span></div><h3>${escapeHtml(record.eventName || "Attendance event")}</h3><p>${escapeHtml(record.location || "Location not recorded")}</p><div class="event-detail-boxes"><div><span>Checked in</span><strong>${escapeHtml(formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>Checked out</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Check-in window</span><strong>${escapeHtml(checkInWindow)}</strong></div><div><span>Checkout window</span><strong>${escapeHtml(checkOutWindow)}</strong></div><div><span>Duration</span><strong>${escapeHtml(attendanceDuration(checkedInAt, record.checkedOutAt))}</strong></div></div>${readyToCheckOut ? `<div class="history-card-actions"><button class="primary-button" type="button" data-check-out-attendance="${escapeHtml(record.id)}">Check out</button></div>` : ""}</article>`;
     }).join("");
   }
 
@@ -914,7 +979,7 @@ function initializeStudent() {
       openView("face");
       return;
     }
-    if (!selectedEvent || getEventStatus(selectedEvent) !== "open") return showDashboardToast("Attendance unavailable", "Attendance is allowed only between Time In and Time Out.");
+    if (!selectedEvent || getEventStatus(selectedEvent) !== "open") return showDashboardToast("Attendance unavailable", "Attendance is allowed only from Time In until the check-in cutoff.");
     button.disabled = true;
     try {
       let checkInLocation;
@@ -983,7 +1048,7 @@ function initializeStudent() {
     const record = attendance.find((item) => item.id === button.dataset.checkOutAttendance);
     const event = events.find((item) => item.id === record?.eventId);
     if (!record || !event || !isCheckoutAvailable(event)) {
-      showDashboardToast("Checkout unavailable", "Checkout is available for 15 minutes after the scheduled event end time.");
+      showDashboardToast("Checkout unavailable", "Checkout is available from Time Out until the event's checkout cutoff.");
       return;
     }
     button.disabled = true;
@@ -1221,6 +1286,13 @@ function initializeAdmin() {
   let presenceByUid = new Map();
   let legacyPresenceByUid = new Map();
   const eventForm = document.querySelector("#eventForm");
+  function setDefaultCutoff(timeInputId, cutoffInputId) {
+    const time = document.querySelector(timeInputId).value;
+    const cutoff = document.querySelector(cutoffInputId);
+    if (!cutoff.value) cutoff.value = timePlusMinutes(time);
+  }
+  document.querySelector("#eventTimeIn").addEventListener("change", () => setDefaultCutoff("#eventTimeIn", "#eventCheckInCutoff"));
+  document.querySelector("#eventTimeOut").addEventListener("change", () => setDefaultCutoff("#eventTimeOut", "#eventCheckOutCutoff"));
   const studentForm = document.querySelector("#studentForm");
   const eventTableBody = document.querySelector("#eventTableBody");
   const pastEventList = document.querySelector("#pastEventList");
@@ -1261,11 +1333,15 @@ function initializeAdmin() {
   const passwordModal = document.querySelector("#passwordModal");
   const removeStudentModal = document.querySelector("#removeStudentModal");
   const resetFaceModal = document.querySelector("#resetFaceModal");
+  const roleChangeModal = document.querySelector("#roleChangeModal");
+  const roleChangeMessage = document.querySelector("#roleChangeMessage");
+  const confirmRoleChange = document.querySelector("#confirmRoleChange");
   const adminStudentDetail = document.querySelector("#adminStudentDetail");
   let selectedPasswordStudent;
   let selectedRemovalStudent;
   let selectedFaceResetStudent;
   let selectedManagedStudentUid;
+  let pendingRoleChange;
   let removalCountdownTimer;
   let pendingAdminProfilePhoto = "";
   let addingCommunityService = false;
@@ -1275,6 +1351,23 @@ function initializeAdmin() {
   let adminEventStatusTimer;
   let studentFilterSignature = "";
   const studentDirectoryMediaQuery = window.matchMedia("(max-width: 580px)");
+
+  function closeRoleChangeModal() {
+    if (pendingRoleChange?.selector) pendingRoleChange.selector.value = pendingRoleChange.previousRole;
+    pendingRoleChange = undefined;
+    roleChangeModal.hidden = true;
+  }
+
+  function openRoleChangeModal(student, role, selector) {
+    const previousRole = student.role || "student";
+    pendingRoleChange = { student, role, previousRole, selector };
+    roleChangeMessage.textContent = `Change ${student.accountId}'s role from ${roleLabel(previousRole)} to ${roleLabel(role)}? They will need to sign out and sign back in before the new access takes effect.`;
+    roleChangeModal.hidden = false;
+    confirmRoleChange.focus();
+  }
+
+  document.querySelectorAll("[data-close-role-change]").forEach((button) => button.addEventListener("click", closeRoleChangeModal));
+  roleChangeModal.addEventListener("click", (event) => { if (event.target === roleChangeModal) closeRoleChangeModal(); });
 
   function scheduleStudentsRender() {
     if (activeView !== "modify-students") return;
@@ -1288,7 +1381,7 @@ function initializeAdmin() {
   function scheduleAdminEventStatusRefresh() {
     window.clearTimeout(adminEventStatusTimer);
     const now = Date.now();
-    const nextStatusChange = Math.min(...events.flatMap((event) => [eventOpenDate(event).getTime(), eventCloseDate(event).getTime()]).filter((time) => time > now));
+    const nextStatusChange = Math.min(...events.flatMap((event) => [eventOpenDate(event).getTime(), eventCheckInCloseDate(event).getTime(), eventCloseDate(event).getTime(), eventCheckoutCloseDate(event).getTime()]).filter((time) => time > now));
     if (!Number.isFinite(nextStatusChange)) return;
     adminEventStatusTimer = window.setTimeout(() => {
       if (["dashboard", "modify-events"].includes(activeView)) renderAdminEvents();
@@ -1614,7 +1707,7 @@ function initializeAdmin() {
       return;
     }
     timeline.innerHTML = events.slice(0, 5).map((event) => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${eventStatusBadge(getEventStatus(event))}</div>`).join("");
-    const currentEvents = events.filter((event) => getEventStatus(event) !== "closed");
+    const currentEvents = events.filter((event) => !isEventFinished(event));
     eventTableBody.innerHTML = currentEvents.length ? currentEvents.map((event) => eventCardMarkup(event, false)).join("") : '<div class="empty-state panel">No current or upcoming events. Open Past Events to manage completed events.</div>';
   }
 
@@ -1623,7 +1716,7 @@ function initializeAdmin() {
   }
 
   function renderPastEvents() {
-    const pastEvents = events.filter((event) => getEventStatus(event) === "closed").sort((first, second) => eventCloseDate(second) - eventCloseDate(first));
+    const pastEvents = events.filter((event) => isEventFinished(event)).sort((first, second) => eventCloseDate(second) - eventCloseDate(first));
     pastEventList.innerHTML = pastEvents.length ? pastEvents.map((event) => eventCardMarkup(event, true)).join("") : '<div class="empty-state panel">No past events yet.</div>';
   }
 
@@ -1963,7 +2056,7 @@ function initializeAdmin() {
     nextStudentPage.disabled = studentPage >= totalPages;
     if (!filtered.length) {
       const emptyMessage = students.length ? "No students match the selected filters." : "No students have been registered yet.";
-      studentTableBody.innerHTML = `<tr><td colspan="5"><div class="empty-state">${emptyMessage}</div></td></tr>`;
+      studentTableBody.innerHTML = `<tr><td colspan="6"><div class="empty-state">${emptyMessage}</div></td></tr>`;
       studentMobileCards.innerHTML = `<div class="empty-state">${emptyMessage}</div>`;
       renderSelectedStudent();
       renderAdminAttendance();
@@ -1973,7 +2066,11 @@ function initializeAdmin() {
       const avatar = student.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student.firstName, student.lastName));
       const presence = getStudentPresence(student.uid);
       const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
-      return `<tr><td><div class="student-cell"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))}</strong><small>${escapeHtml(student.accountId)}</small></div></div></td><td><strong>${escapeHtml(student.course || "Not assigned")}</strong><br><small>Section ${escapeHtml(student.section)}</small></td><td><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span><small class="presence-time presence-status is-${presence.status}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</small></td><td>${escapeHtml(student.email || "Not provided")}</td><td><div class="table-actions"><button class="small-button" type="button" data-view-student="${student.uid}">Profile</button>${hasFaceRegistration ? `<button class="small-button danger" type="button" data-reset-face="${student.uid}">Reset face</button>` : ""}<button class="small-button" type="button" data-password-student="${student.uid}">Password</button><button class="small-button danger" type="button" data-delete-student="${student.uid}">Clear account</button></div></td></tr>`;
+      const role = student.role || "student";
+      const roleControl = currentUserRole === "head_admin"
+        ? `<select class="role-select" data-role-select="${escapeHtml(student.uid)}" aria-label="Role for ${escapeHtml(student.accountId)}">${Object.entries(ROLE_LABELS).map(([value, label]) => `<option value="${value}"${value === role ? " selected" : ""}>${label}</option>`).join("")}</select>`
+        : `<span class="badge blue">${escapeHtml(roleLabel(role))}</span>`;
+      return `<tr><td><div class="student-cell"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))}</strong><small>${escapeHtml(student.accountId)}</small></div></div></td><td><strong>${escapeHtml(student.course || "Not assigned")}</strong><br><small>Section ${escapeHtml(student.section)}</small></td><td><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span><small class="presence-time presence-status is-${presence.status}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</small></td><td>${escapeHtml(student.email || "Not provided")}</td><td>${roleControl}</td><td><div class="table-actions"><button class="small-button" type="button" data-view-student="${student.uid}">Profile</button>${hasFaceRegistration ? `<button class="small-button danger" type="button" data-reset-face="${student.uid}">Reset face</button>` : ""}<button class="small-button" type="button" data-password-student="${student.uid}">Password</button><button class="small-button danger" type="button" data-delete-student="${student.uid}">Clear account</button></div></td></tr>`;
     }).join("");
     const studentMobileMarkup = visibleStudents.map((student) => {
       const fullName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ");
@@ -2065,12 +2162,14 @@ function initializeAdmin() {
     document.querySelector("#eventType").value = event.type || "Other";
     document.querySelector("#eventTimeIn").value = event.timeIn;
     document.querySelector("#eventTimeOut").value = event.timeOut;
+    document.querySelector("#eventCheckInCutoff").value = event.checkInCutoff || timePlusMinutes(event.timeIn) || event.timeOut;
+    document.querySelector("#eventCheckOutCutoff").value = event.checkOutCutoff || timePlusMinutes(event.timeOut);
     document.querySelector("#eventAudience").value = event.audience;
     document.querySelector("#eventNotes").value = event.description || event.notes || "";
     eventGeofenceEditor.set(event.geofence || {});
     document.querySelector("#eventFormTitle").textContent = "Modify event";
     document.querySelector("#eventSubmitButton").textContent = "Save changes";
-    eventForm.dataset.returnView = getEventStatus(event) === "closed" ? "past-events" : "modify-events";
+    eventForm.dataset.returnView = isEventFinished(event) ? "past-events" : "modify-events";
     openView("create");
   }
 
@@ -2146,13 +2245,17 @@ function initializeAdmin() {
     submitEvent.preventDefault();
     const timeIn = document.querySelector("#eventTimeIn").value;
     const timeOut = document.querySelector("#eventTimeOut").value;
+    const checkInCutoff = document.querySelector("#eventCheckInCutoff").value;
+    const checkOutCutoff = document.querySelector("#eventCheckOutCutoff").value;
     const date = document.querySelector("#eventDate").value;
     if (timeOut <= timeIn) return showDashboardToast("Invalid attendance window", "Time Out must be later than Time In.");
+    if (checkInCutoff <= timeIn || checkInCutoff > timeOut) return showDashboardToast("Invalid check-in cutoff", "The check-in cutoff must be after Time In and no later than Time Out.");
+    if (checkOutCutoff <= timeOut) return showDashboardToast("Invalid checkout cutoff", "The checkout cutoff must be after Time Out.");
     const id = document.querySelector("#editingEventId").value;
     const requestedGeofence = eventGeofenceEditor.value();
     if (requestedGeofence.enabled && (!Number.isFinite(requestedGeofence.latitude) || !Number.isFinite(requestedGeofence.longitude))) return showDashboardToast("Choose an attendance area", "Click the map or search for the event location before saving.");
     const geofence = requestedGeofence.enabled ? requestedGeofence : { enabled: false };
-    const record = { name: document.querySelector("#eventName").value.trim(), type: document.querySelector("#eventType").value, date, location: document.querySelector("#eventLocation").value.trim(), timeIn, timeOut, audience: document.querySelector("#eventAudience").value, description: document.querySelector("#eventNotes").value.trim(), geofence, openAt: Timestamp.fromDate(new Date(`${date}T${timeIn}`)), closeAt: Timestamp.fromDate(new Date(`${date}T${timeOut}`)), updatedAt: serverTimestamp() };
+    const record = { name: document.querySelector("#eventName").value.trim(), type: document.querySelector("#eventType").value, date, location: document.querySelector("#eventLocation").value.trim(), timeIn, checkInCutoff, timeOut, checkOutCutoff, audience: document.querySelector("#eventAudience").value, description: document.querySelector("#eventNotes").value.trim(), geofence, openAt: Timestamp.fromDate(new Date(`${date}T${timeIn}`)), checkInClosesAt: Timestamp.fromDate(new Date(`${date}T${checkInCutoff}`)), closeAt: Timestamp.fromDate(new Date(`${date}T${timeOut}`)), checkOutClosesAt: Timestamp.fromDate(new Date(`${date}T${checkOutCutoff}`)), updatedAt: serverTimestamp() };
     try {
       if (id) {
         await setDoc(doc(db, "events", id), record, { merge: true });
@@ -2437,6 +2540,43 @@ function initializeAdmin() {
     if (remove) openRemoveModal(students.find((student) => student.uid === remove.dataset.deleteStudent));
   });
 
+  studentTableBody.addEventListener("change", async (changeEvent) => {
+    const selector = changeEvent.target.closest("[data-role-select]");
+    if (!selector || currentUserRole !== "head_admin") return;
+    const student = students.find((item) => item.uid === selector.dataset.roleSelect);
+    if (!student) return;
+    const previousRole = student.role || "student";
+    const role = selector.value;
+    openRoleChangeModal(student, role, selector);
+  });
+
+  confirmRoleChange.addEventListener("click", async () => {
+    if (!pendingRoleChange) return;
+    const { student, role, previousRole, selector } = pendingRoleChange;
+    selector.disabled = true;
+    confirmRoleChange.disabled = true;
+    confirmRoleChange.textContent = "Updating role…";
+    try {
+      await setDoc(doc(db, "students", student.uid), {
+        role,
+        roleUpdatedAt: serverTimestamp(),
+        roleUpdatedBy: currentUser.uid
+      }, { merge: true });
+      pendingRoleChange = undefined;
+      roleChangeModal.hidden = true;
+      showDashboardToast("Role updated", `${student.accountId} is now ${roleLabel(role)}. They must sign out and sign back in for the new access to apply.`);
+    } catch (error) {
+      selector.value = previousRole;
+      pendingRoleChange = undefined;
+      roleChangeModal.hidden = true;
+      showDashboardToast("Unable to update role", roleChangeErrorMessage(error));
+    } finally {
+      selector.disabled = false;
+      confirmRoleChange.disabled = false;
+      confirmRoleChange.textContent = "Update role";
+    }
+  });
+
   studentMobileCards.addEventListener("click", (clickEvent) => {
     const view = clickEvent.target.closest("[data-view-student]");
     if (!view) return;
@@ -2680,7 +2820,7 @@ function initializeAdmin() {
     if (activeView === "modify-students" && selectedManagedStudentUid) renderSelectedStudent();
   });
   onSnapshot(collection(db, "faceRegistrations"), (snapshot) => { faceRegistrationsByUid = new Map(snapshot.docs.map((item) => [item.id, item.data()])); scheduleStudentsRender(); });
-  onSnapshot(doc(db, "adminProfiles", currentUser.uid), (snapshot) => { renderAdminProfile(snapshot.data()); });
+  if (currentUserRole === "head_admin") onSnapshot(doc(db, "adminProfiles", currentUser.uid), (snapshot) => { renderAdminProfile(snapshot.data()); });
   resetStudentForm();
   resetEventForm();
 }
@@ -2694,7 +2834,11 @@ async function initialize() {
   }
   wireCommonNavigation();
   wireNotificationCenter();
-  updateDashboardGreeting(dashboardRole === "admin" ? "Admin" : "Student");
+  applyRoleNavigation();
+  const displayName = dashboardRole === "admin"
+    ? [currentUserProfile.firstName, currentUserProfile.lastName].filter(Boolean).join(" ") || "Admin"
+    : "Student";
+  updateDashboardGreeting(displayName);
   if (dashboardRole === "student") initializeStudent();
   else initializeAdmin();
   initializeDashboardHistory();

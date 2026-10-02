@@ -7,9 +7,46 @@ service cloud.firestore {
     }
 
     function isAdmin() {
+      return isHeadAdmin() || isAttendanceAdmin() || isStudentManager() || isViewer();
+    }
+
+    // The bootstrap email is the protected root account. Other roles are kept
+    // on each user's student profile so this works without Cloud Functions.
+    function isBootstrapHeadAdmin() {
       return signedIn()
         && request.auth.token.email is string
         && request.auth.token.email.matches("(?i)^mikhailovna2007@gmail\\.com$");
+    }
+
+    function hasStoredRole(role) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/students/$(request.auth.uid))
+        && get(/databases/$(database)/documents/students/$(request.auth.uid)).data.keys().hasAll(["role"])
+        && get(/databases/$(database)/documents/students/$(request.auth.uid)).data.role == role;
+    }
+
+    function isHeadAdmin() {
+      return isBootstrapHeadAdmin() || hasStoredRole("head_admin");
+    }
+
+    function isAttendanceAdmin() {
+      return hasStoredRole("attendance_admin");
+    }
+
+    function isStudentManager() {
+      return hasStoredRole("student_manager");
+    }
+
+    function isViewer() {
+      return hasStoredRole("viewer");
+    }
+
+    function canManageStudents() {
+      return isHeadAdmin() || isStudentManager();
+    }
+
+    function canManageAttendance() {
+      return isHeadAdmin() || isAttendanceAdmin();
     }
 
     function isStudent() {
@@ -22,8 +59,16 @@ service cloud.firestore {
       allow get: if isAdmin()
         || (signedIn() && request.auth.uid == studentUid && resource.data.active == true);
       allow list: if isAdmin();
-      allow create, delete: if isAdmin();
-      allow update: if isAdmin()
+      allow create: if canManageStudents()
+        && !request.resource.data.keys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy"]);
+      allow delete: if canManageStudents();
+      allow update: if (isHeadAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["role", "roleUpdatedAt", "roleUpdatedBy"])
+          && request.resource.data.role in ["head_admin", "attendance_admin", "student_manager", "viewer", "student"]
+          && request.resource.data.roleUpdatedAt is timestamp
+          && request.resource.data.roleUpdatedBy == request.auth.uid)
+        || (canManageStudents()
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy"]))
         || (isStudent()
           && request.auth.uid == studentUid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -38,7 +83,7 @@ service cloud.firestore {
     }
 
     match /adminProfiles/{adminUid} {
-      allow read, create, update: if isAdmin() && request.auth.uid == adminUid;
+      allow read, create, update: if isHeadAdmin() && request.auth.uid == adminUid;
       allow delete: if false;
     }
 
@@ -46,20 +91,24 @@ service cloud.firestore {
     // an update, and updates are denied, so the same ID cannot be registered twice.
     match /studentIds/{studentIdKey} {
       allow read: if signedIn();
-      allow create: if (isAdmin() || signedIn())
+      allow create: if (canManageStudents() || signedIn())
         && !exists(/databases/$(database)/documents/studentIds/$(studentIdKey))
-        && (isAdmin() || request.resource.data.uid == request.auth.uid);
+        && (canManageStudents() || request.resource.data.uid == request.auth.uid);
       allow update: if false;
-      allow delete: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow delete: if canManageStudents() || (signedIn() && resource.data.uid == request.auth.uid);
     }
 
     match /events/{eventId} {
       allow read: if isAdmin() || isStudent();
-      allow create, update: if isAdmin()
+      allow create, update: if canManageAttendance()
         && request.resource.data.openAt is timestamp
+        && request.resource.data.checkInClosesAt is timestamp
         && request.resource.data.closeAt is timestamp
-        && request.resource.data.openAt < request.resource.data.closeAt;
-      allow delete: if isAdmin();
+        && request.resource.data.checkOutClosesAt is timestamp
+        && request.resource.data.openAt < request.resource.data.checkInClosesAt
+        && request.resource.data.checkInClosesAt <= request.resource.data.closeAt
+        && request.resource.data.closeAt < request.resource.data.checkOutClosesAt;
+      allow delete: if canManageAttendance();
     }
 
     match /attendance/{attendanceId} {
@@ -72,13 +121,18 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/faceRegistrations/$(request.auth.uid)).data.registered == true
         && exists(/databases/$(database)/documents/events/$(request.resource.data.eventId))
         && request.time >= get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.openAt
-        && request.time <= get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.closeAt
+        && (
+          !get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.keys().hasAll(["checkInClosesAt"])
+          && request.time <= get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.closeAt
+          || get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.keys().hasAll(["checkInClosesAt"])
+          && request.time <= get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.checkInClosesAt
+        )
         && request.resource.data.keys().hasOnly([
           "studentUid", "studentId", "eventId", "eventName", "eventDate",
           "eventType", "eventDescription", "timeIn", "timeOut", "location",
           "audience", "attendedAt", "checkedInAt", "status", "checkInLocation"
         ]);
-      allow update: if isAdmin()
+      allow update: if canManageAttendance()
         || (isStudent()
           && resource.data.studentUid == request.auth.uid
           && resource.data.status == "checked-in"
@@ -90,18 +144,25 @@ service cloud.firestore {
           ])
           && exists(/databases/$(database)/documents/events/$(resource.data.eventId))
           && request.time >= get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.closeAt
-          && request.time <= get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.closeAt + duration.value(15, "m"));
-      allow delete: if isAdmin();
+          && (
+            !get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.keys().hasAll(["checkOutClosesAt"])
+            && request.time <= get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.closeAt + duration.value(15, "m")
+            || get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.keys().hasAll(["checkOutClosesAt"])
+            && request.time <= get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.checkOutClosesAt
+          ));
+      allow delete: if canManageAttendance();
     }
 
     match /fines/{fineId} {
       allow read: if isAdmin()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
-      allow create, update, delete: if isAdmin();
+      allow create, update, delete: if canManageAttendance();
     }
 
     match /dismissedHistory/{dismissalId} {
-      allow read, delete: if isAdmin()
+      allow read: if isAdmin()
+        || (isStudent() && resource.data.studentUid == request.auth.uid);
+      allow delete: if canManageAttendance()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
       allow create: if isStudent()
         && request.resource.data.studentUid == request.auth.uid;
@@ -113,17 +174,19 @@ service cloud.firestore {
       allow create, update: if isStudent()
         && request.auth.uid == studentUid
         && request.resource.data.registered == true;
-      allow delete: if isAdmin();
+      allow delete: if canManageStudents();
     }
 
     match /notifications/{notificationId} {
-      allow read, delete: if (isAdmin() && resource.data.recipientRole == "admin")
+      allow read: if (isAdmin() && resource.data.recipientRole == "admin")
         || (isStudent() && resource.data.recipientUid == request.auth.uid);
-      allow update: if isAdmin()
+      allow delete: if (canManageAttendance() && resource.data.recipientRole == "admin")
+        || (isStudent() && resource.data.recipientUid == request.auth.uid);
+      allow update: if canManageAttendance()
         || (isStudent()
           && resource.data.recipientUid == request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["read", "readAt"]));
-      allow create: if isAdmin()
+      allow create: if canManageAttendance()
         || (isStudent()
           && request.resource.data.category == "face"
           && ((request.resource.data.recipientUid == request.auth.uid)
@@ -141,7 +204,7 @@ service cloud.firestore {
         && request.resource.data.lastSeen is timestamp
         && (!("offlineAt" in request.resource.data)
           || request.resource.data.offlineAt is timestamp);
-      allow delete: if isAdmin();
+      allow delete: if isHeadAdmin();
     }
 
     match /presenceSessions/{sessionId} {
@@ -166,7 +229,12 @@ service cloud.firestore {
         && request.resource.data.lastSeen is timestamp
         && (!("offlineAt" in request.resource.data)
           || request.resource.data.offlineAt is timestamp);
-      allow delete: if isAdmin();
+      allow delete: if isHeadAdmin();
+    }
+
+    match /auditLogs/{auditId} {
+      allow read: if isHeadAdmin();
+      allow write: if false;
     }
 
     match /{document=**} {

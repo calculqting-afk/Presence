@@ -66,25 +66,29 @@ form.addEventListener("submit", async (event) => {
     await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
     const email = accountId.includes("@") ? accountId : studentIdToEmail(accountId);
     const credential = await signInWithEmailAndPassword(auth, email, password);
-    const isAdminEmail = credential.user.email?.toLowerCase() === ADMIN_EMAIL;
+    const isBootstrapHeadAdmin = credential.user.email?.toLowerCase() === ADMIN_EMAIL;
     let role;
     let studentRecord;
-    if (isAdminEmail) {
-      role = "admin";
-    } else {
+    if (!isBootstrapHeadAdmin) {
       studentRecord = await getDoc(doc(db, "students", credential.user.uid));
-      if (studentRecord.exists() && studentRecord.data().active === true) {
+      const assignedRole = studentRecord.data()?.role || "student";
+      if (["head_admin", "attendance_admin", "student_manager", "viewer"].includes(assignedRole)) {
+        role = "admin";
+      } else if (studentRecord.exists() && studentRecord.data().active === true) {
         role = "student";
       } else {
         await signOut(auth);
         throw new Error("This account is not a registered student.");
       }
+    } else {
+      role = "admin";
     }
 
     sessionStorage.setItem("presenceSession", JSON.stringify({
       role,
       uid: credential.user.uid,
-      accountId: role === "student" ? studentRecord.data().accountId : credential.user.email
+      accountId: role === "student" ? studentRecord.data().accountId : credential.user.email,
+      assignedRole: studentRecord?.data()?.role || (isBootstrapHeadAdmin ? "head_admin" : "student")
     }));
     showToast(role === "admin" ? "Admin access verified" : "Welcome to Presence", "Your account was verified successfully.");
     window.setTimeout(() => {

@@ -1,0 +1,111 @@
+[debug] [2026-10-02T03:29:50.893Z] ----------------------------------------------------------------------
+[debug] [2026-10-02T03:29:50.899Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\ACER\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js deploy --only hosting --project presence-a873f --debug
+[debug] [2026-10-02T03:29:50.899Z] CLI Version:   15.27.0
+[debug] [2026-10-02T03:29:50.900Z] Platform:      win32
+[debug] [2026-10-02T03:29:50.900Z] Node Version:  v26.5.0
+[debug] [2026-10-02T03:29:50.901Z] Detected Agent: codex_cli
+[debug] [2026-10-02T03:29:50.901Z] Time:          Fri Oct 02 2026 11:29:50 GMT+0800 (Taiwan Standard Time)
+[debug] [2026-10-02T03:29:50.901Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-10-02T03:29:55.341Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-02T03:29:55.341Z] > authorizing via signed-in user (mikhailovna2007@gmail.com)
+[debug] [2026-10-02T03:29:55.342Z] [iam] checking project presence-a873f for permissions ["firebase.projects.get","firebasehosting.sites.update"]
+[debug] [2026-10-02T03:29:55.367Z] Checked if tokens are valid: true, expires at: 1790914029656
+[debug] [2026-10-02T03:29:55.368Z] Checked if tokens are valid: true, expires at: 1790914029656
+[debug] [2026-10-02T03:29:55.370Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/presence-a873f:testIamPermissions [none]
+[debug] [2026-10-02T03:29:55.370Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/presence-a873f:testIamPermissions  x-goog-user-project=presence-a873f
+[debug] [2026-10-02T03:29:55.371Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/presence-a873f:testIamPermissions {"permissions":["firebase.projects.get","firebasehosting.sites.update"]}
+[debug] [2026-10-02T03:29:57.095Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/presence-a873f:testIamPermissions 200
+[debug] [2026-10-02T03:29:57.096Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/presence-a873f:testIamPermissions {"permissions":["firebase.projects.get","firebasehosting.sites.update"]}
+[debug] [2026-10-02T03:29:57.098Z] Checked if tokens are valid: true, expires at: 1790914029656
+[debug] [2026-10-02T03:29:57.098Z] Checked if tokens are valid: true, expires at: 1790914029656
+[debug] [2026-10-02T03:29:57.099Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/presence-a873f [none]
+[debug] [2026-10-02T03:29:57.808Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/presence-a873f 200
+[debug] [2026-10-02T03:29:57.808Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/presence-a873f {"projectId":"presence-a873f","projectNumber":"248498873583","displayName":"Presence","name":"projects/presence-a873f","resources":{"hostingSite":"presence-a873f"},"state":"ACTIVE","labels":{"firebase":"enabled"},"etag":"1_c6e994bd-81e4-438e-82e2-e0dcbcd1db8e"}
+[info] 
+[info] === Deploying to 'presence-a873f'...
+[info] 
+[info] i  deploying hosting 
+[debug] [2026-10-02T03:29:57.815Z] Checked if tokens are valid: true, expires at: 1790914029656
+[debug] [2026-10-02T03:29:57.816Z] Checked if tokens are valid: true, expires at: 1790914029656
+[debug] [2026-10-02T03:29:57.816Z] >>> [apiv2][query] GET https://firebasehosting.googleapis.com/v1beta1/projects/presence-a873f/sites/presence-a873f [none]
+[debug] [2026-10-02T03:29:58.775Z] <<< [apiv2][status] GET https://firebasehosting.googleapis.com/v1beta1/projects/presence-a873f/sites/presence-a873f 200
+[debug] [2026-10-02T03:29:58.775Z] <<< [apiv2][body] GET https://firebasehosting.googleapis.com/v1beta1/projects/presence-a873f/sites/presence-a873f {"name":"projects/presence-a873f/sites/presence-a873f","defaultUrl":"https://presence-a873f.web.app","type":"DEFAULT_SITE"}
+[debug] [2026-10-02T03:29:58.779Z] Checked if tokens are valid: true, expires at: 1790914029656
+[debug] [2026-10-02T03:29:58.780Z] Checked if tokens are valid: true, expires at: 1790914029656
+[debug] [2026-10-02T03:29:58.780Z] >>> [apiv2][query] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/presence-a873f/versions [none]
+[debug] [2026-10-02T03:29:58.780Z] >>> [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/presence-a873f/versions {"status":"CREATED","labels":{"deployment-tool":"cli-firebase"}}
+[debug] [2026-10-02T03:29:59.857Z] <<< [apiv2][status] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/presence-a873f/versions 200
+[debug] [2026-10-02T03:29:59.857Z] <<< [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/presence-a873f/versions {"name":"projects/248498873583/sites/presence-a873f/versions/f2acad3dbb067703","status":"CREATED","config":{},"labels":{"deployment-tool":"cli-firebase"}}
+[info] i  hosting[presence-a873f]: beginning deploy... 
+[info] i  hosting[presence-a873f]: found 10 files in . 
+[debug] [2026-10-02T03:29:59.888Z] [hosting] uploading with 200 concurrency
+[debug] [2026-10-02T03:29:59.894Z] Checked if tokens are valid: true, expires at: 1790914029656
+[debug] [2026-10-02T03:29:59.894Z] Checked if tokens are valid: true, expires at: 1790914029656
+[debug] [2026-10-02T03:29:59.898Z] [hosting] hash cache [] stored for 10 files
+[debug] [2026-10-02T03:29:59.898Z] [hosting][hash queue][FINAL] {"max":1,"min":0,"avg":0,"active":0,"complete":10,"success":10,"errored":0,"retried":0,"total":10,"elapsed":7}
+[debug] [2026-10-02T03:29:59.899Z] >>> [apiv2][query] POST https://firebasehosting.googleapis.com/v1beta1/projects/248498873583/sites/presence-a873f/versions/f2acad3dbb067703:populateFiles [none]
+[debug] [2026-10-02T03:29:59.899Z] >>> [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/248498873583/sites/presence-a873f/versions/f2acad3dbb067703:populateFiles {"files":{"/index.html":"8ee695a350dd567d04094f79c6fb98d71282662fd3003f847923c3b4c522ca3a","/Pictures/Presence Logo.png":"3b0d72619f4d2b6419d30c0dc4bbd7d60d26f3c3cccd93e5417696755110262b","/pages/student-dashboard.html":"7ecf0f6694ca8561c07e826646cc2958a3ce94f6ff3e5bcc477db2d7a7fa609b","/pages/admin-dashboard.html":"0f877ed9933a34b4ce5f83defdeb89cf35b086749457362ee4e1430a8d062c39","/config/firebase-config.js":"126e2ac8963d7ae0fc42a72340f51bcf35d8df3764037c029ba58f88a0313e72","/assets/js/script.js":"69be7a1861b016840e7a8c5c34cd028bda82a30fa43de1b76f31b2c89e7d6f95","/assets/js/dashboard.js":"c5c610e14a6684e93f855ad331eb21e7e9fb5658eb4f12b474fa102a6a3ac9a4","/assets/images/presence-logo.png":"3b0d72619f4d2b6419d30c0dc4bbd7d60d26f3c3cccd93e5417696755110262b","/assets/css/style.css":"93d12de80d8ebc40f84f36e026085f26e112dfa20d28382613afa2414cd92c83","/assets/css/dashboard.css":"26455704c587d7bde61471e9b0cf0a781a8fa69353c27be71958ddb7c2ec810b"}}
+[debug] [2026-10-02T03:30:00.618Z] <<< [apiv2][status] POST https://firebasehosting.googleapis.com/v1beta1/projects/248498873583/sites/presence-a873f/versions/f2acad3dbb067703:populateFiles 200
+[debug] [2026-10-02T03:30:00.619Z] <<< [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/248498873583/sites/presence-a873f/versions/f2acad3dbb067703:populateFiles {"uploadUrl":"https://upload-firebasehosting.googleapis.com/upload/sites/presence-a873f/versions/f2acad3dbb067703/files"}
+[debug] [2026-10-02T03:30:00.619Z] [hosting][populate queue][FINAL] {"max":725,"min":725,"avg":725,"active":0,"complete":1,"success":1,"errored":0,"retried":0,"total":1,"elapsed":725}
+[debug] [2026-10-02T03:30:00.620Z] [hosting] uploads queued: 0
+[debug] [2026-10-02T03:30:00.620Z] [hosting][upload queue][FINAL] {"max":0,"min":9999999999,"avg":0,"active":0,"complete":0,"success":0,"errored":0,"retried":0,"total":0,"elapsed":1790911800620}
+[info] i  hosting: upload complete 
+[info] +  hosting[presence-a873f]: file upload complete 
+[debug] [2026-10-02T03:30:00.621Z] [hosting] deploy completed after 760ms
+[debug] [2026-10-02T03:30:00.621Z] [
+  {
+    "config": {
+      "public": ".",
+      "ignore": [
+        "firebase.json",
+        "firestore.rules",
+        "docs/**",
+        ".firebaserc",
+        "functions/**",
+        ".git/**",
+        ".agents/**",
+        ".codex/**"
+      ],
+      "headers": [
+        {
+          "source": "**/*.@(js|css)",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "public, max-age=31536000, immutable"
+            }
+          ]
+        },
+        {
+          "source": "**/*.html",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
+            }
+          ]
+        }
+      ],
+      "cleanUrls": true,
+      "site": "presence-a873f"
+    },
+    "version": "projects/248498873583/sites/presence-a873f/versions/f2acad3dbb067703"
+  }
+]
+[info] i  hosting[presence-a873f]: finalizing version... 
+[debug] [2026-10-02T03:30:00.624Z] Checked if tokens are valid: true, expires at: 1790914029656
+[debug] [2026-10-02T03:30:00.624Z] Checked if tokens are valid: true, expires at: 1790914029656
+[debug] [2026-10-02T03:30:00.625Z] >>> [apiv2][query] PATCH https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/presence-a873f/versions/f2acad3dbb067703 updateMask=status%2Cconfig
+[debug] [2026-10-02T03:30:00.625Z] >>> [apiv2][body] PATCH https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/presence-a873f/versions/f2acad3dbb067703 {"status":"FINALIZED","config":{"headers":[{"glob":"**/*.@(js|css)","headers":{"Cache-Control":"public, max-age=31536000, immutable"}},{"glob":"**/*.html","headers":{"Cache-Control":"no-cache"}}],"cleanUrls":true}}
+[debug] [2026-10-02T03:30:01.278Z] <<< [apiv2][status] PATCH https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/presence-a873f/versions/f2acad3dbb067703 200
+[debug] [2026-10-02T03:30:01.278Z] <<< [apiv2][body] PATCH https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/presence-a873f/versions/f2acad3dbb067703 {"name":"projects/248498873583/sites/presence-a873f/versions/f2acad3dbb067703","status":"FINALIZED","config":{"headers":[{"headers":{"Cache-Control":"public, max-age=31536000, immutable"},"glob":"**/*.@(js|css)"},{"headers":{"Cache-Control":"no-cache"},"glob":"**/*.html"}],"cleanUrls":true},"labels":{"deployment-tool":"cli-firebase"},"createTime":"2026-10-02T03:29:58.499586Z","createUser":{"email":"mikhailovna2007@gmail.com"},"finalizeTime":"2026-10-02T03:30:00.457515Z","finalizeUser":{"email":"mikhailovna2007@gmail.com"}}
+[debug] [2026-10-02T03:30:01.279Z] [hosting] finalized version for presence-a873f:[object Object]
+[info] +  hosting[presence-a873f]: version finalized 
+[info] i  hosting[presence-a873f]: releasing new version... 
+[debug] [2026-10-02T03:30:01.280Z] Checked if tokens are valid: true, expires at: 1790914029656
+[debug] [2026-10-02T03:30:01.280Z] Checked if tokens are valid: true, expires at: 1790914029656
+[debug] [2026-10-02T03:30:01.280Z] >>> [apiv2][query] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/presence-a873f/channels/live/releases versionName=projects%2F248498873583%2Fsites%2Fpresence-a873f%2Fversions%2Ff2acad3dbb067703
+[debug] [2026-10-02T03:30:01.280Z] >>> [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/presence-a873f/channels/live/releases {}
+[debug] [2026-10-02T03:30:02.203Z] <<< [apiv2][status] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/presence-a873f/channels/live/releases 200
