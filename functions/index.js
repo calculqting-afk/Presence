@@ -69,7 +69,9 @@ exports.checkInWithGeofence = onCall(async (request) => {
       location: event.location || "",
       audience: event.audience || "All students",
       ...(verifiedLocation ? { checkInLocation: verifiedLocation } : {}),
-      attendedAt: FieldValue.serverTimestamp()
+      attendedAt: FieldValue.serverTimestamp(),
+      checkedInAt: FieldValue.serverTimestamp(),
+      status: "checked-in"
     });
   });
   return { ok: true };

@@ -8,7 +8,8 @@ service cloud.firestore {
 
     function isAdmin() {
       return signedIn()
-        && request.auth.token.email == "mikhailovna2007@gmail.com";
+        && request.auth.token.email is string
+        && request.auth.token.email.matches("(?i)^mikhailovna2007@gmail\\.com$");
     }
 
     function isStudent() {
@@ -75,9 +76,22 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly([
           "studentUid", "studentId", "eventId", "eventName", "eventDate",
           "eventType", "eventDescription", "timeIn", "timeOut", "location",
-          "audience", "attendedAt", "checkInLocation"
+          "audience", "attendedAt", "checkedInAt", "status", "checkInLocation"
         ]);
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (isStudent()
+          && resource.data.studentUid == request.auth.uid
+          && resource.data.status == "checked-in"
+          && request.resource.data.status == "completed"
+          && !("checkedOutAt" in resource.data)
+          && request.resource.data.checkedOutAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "checkedOutAt", "checkOutLocation", "status"
+          ])
+          && exists(/databases/$(database)/documents/events/$(resource.data.eventId))
+          && request.time >= get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.closeAt
+          && request.time <= get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.closeAt + duration.value(15, "m"));
+      allow delete: if isAdmin();
     }
 
     match /fines/{fineId} {

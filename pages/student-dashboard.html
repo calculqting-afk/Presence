@@ -12,16 +12,17 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20260924-header-alignment">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261002-data-cleanup">
 </head>
 <body data-dashboard="student">
   <div class="app-shell">
-    <aside class="sidebar" style="--nav-count: 7">
+    <aside class="sidebar" style="--nav-count: 8">
       <a class="brand" href="../index.html" data-dashboard-home><span class="brand-mark"><span></span></span><span>Presence</span></a>
       <p class="nav-label">Student space</p>
       <nav class="nav-list" aria-label="Student navigation">
         <button class="nav-button active" data-view="dashboard" type="button"><span class="nav-icon">⊞</span><span>Dashboard</span></button>
         <button class="nav-button" data-view="events" type="button"><span class="nav-icon">◇</span><span>Events</span></button>
+        <button class="nav-button" data-view="attendances" type="button"><span class="nav-icon">✓</span><span>My Attendances</span></button>
         <button class="nav-button" data-view="history" type="button"><span class="nav-icon">◷</span><span>Event History</span></button>
         <button class="nav-button" data-view="fines" type="button"><span class="nav-icon">!</span><span>Fines</span><span class="fine-warning-indicator" id="studentFineWarning" role="status" aria-label="Pending community service" hidden>!!</span></button>
         <button class="nav-button" data-view="face" type="button"><span class="nav-icon">◎</span><span>Face Registration</span></button>
@@ -45,7 +46,7 @@
             <button class="primary-button" type="button" data-go-view="events"><span>◇</span> View events</button>
           </div>
           <div class="stats-grid student-stats">
-            <article class="stat-card"><div class="stat-top"><span class="stat-label">Events attended</span><span class="stat-icon">◇</span></div><div class="stat-value" id="eventsAttendedCount">0</div><div class="stat-meta" id="eventsAttendedMeta">No attendance recorded yet</div></article>
+            <button class="stat-card stat-card-button" type="button" data-go-view="attendances" aria-label="View attendance records"><div class="stat-top"><span class="stat-label">Events attended</span><span class="stat-icon">◇</span></div><div class="stat-value" id="eventsAttendedCount">0</div><div class="stat-meta" id="eventsAttendedMeta">No attendance recorded yet</div><span class="stat-card-link">View details <span aria-hidden="true">→</span></span></button>
             <button class="stat-card stat-card-button" id="absenceSummaryCard" type="button" aria-label="View absence details"><div class="stat-top"><span class="stat-label">Absences</span><span class="stat-icon red">−</span></div><div class="stat-value" id="absenceCount">0</div><div class="stat-meta" id="absenceMeta">No missed events</div><span class="stat-card-link">View details <span aria-hidden="true">→</span></span></button>
             <article class="stat-card"><div class="stat-top"><span class="stat-label">Days present</span><span class="stat-icon green">✓</span></div><div class="stat-value" id="daysPresentCount">0</div><div class="stat-meta" id="daysPresentMeta">Based on attended events</div></article>
           </div>
@@ -60,6 +61,11 @@
         <section class="view-section" data-section="events" hidden>
           <div class="section-head"><div><p class="eyebrow">School updates</p><h2>Announcements &amp; Events</h2><p>Read announcements and view upcoming attendance schedules.</p></div></div>
           <div class="event-grid" id="studentEventGrid"><div class="empty-state panel event-empty">No events have been published yet.</div></div>
+        </section>
+
+        <section class="view-section" data-section="attendances" hidden>
+          <div class="section-head"><div><p class="eyebrow">Personal attendance</p><h2>My Attendances</h2><p>Track your exact check-in and check-out records.</p></div></div>
+          <div class="history-card-grid history-section" id="studentAttendanceList"><div class="empty-state panel">No attendance records yet.</div></div>
         </section>
 
         <section class="view-section" data-section="history" hidden>
@@ -126,6 +132,6 @@
     </section>
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
-  <script type="module" src="../assets/js/dashboard.js?v=20261001-geofence"></script>
+  <script type="module" src="../assets/js/dashboard.js?v=20261002-render-optimization"></script>
 </body>
 </html>

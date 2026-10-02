@@ -26,6 +26,7 @@ const pageCopy = {
   student: {
     dashboard: ["Dashboard", "Your attendance at a glance"],
     events: ["Announcements & Events", "Clear descriptions and attendance schedules"],
+    attendances: ["My Attendances", "Your check-in and check-out records"],
     history: ["Event History", "Completed events and attendance records"],
     fines: ["Fines", "Your assigned community-service requirements"],
     face: ["Face Registration", "Set up secure attendance check-ins"],
@@ -37,6 +38,8 @@ const pageCopy = {
     "modify-students": ["Modify Students", "Edit or remove registered students"],
     create: ["Create Announcement/Event", "Add a description and automatic attendance window"],
     "modify-events": ["Modify Events", "Edit schedules or remove events"],
+    "past-events": ["Past Events", "Edit or remove completed attendance events"],
+    "attendance-line": ["Attendance Line", "Live student check-in and check-out activity"],
     "assign-fine": ["Assign Fine", "Create or update community-service requirements"],
     "assigned-fines": ["Assigned Fines", "Search and manage student fine records"],
     geofence: ["Geofence Locations", "Set attendance areas for each event"],
@@ -285,6 +288,22 @@ function eventOpenDate(event) {
 }
 function eventCloseDate(event) {
   return event.closeAt?.toDate?.() || new Date(`${event.date}T${event.timeOut}`);
+}
+function eventCheckoutCloseDate(event) {
+  return new Date(eventCloseDate(event).getTime() + 15 * 60 * 1000);
+}
+function isCheckoutAvailable(event, now = new Date()) {
+  return now >= eventCloseDate(event) && now <= eventCheckoutCloseDate(event);
+}
+function formatAttendanceTimestamp(value) {
+  const date = value?.toDate?.() || (value ? new Date(value) : null);
+  return date && !Number.isNaN(date.getTime()) ? date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "Not recorded";
+}
+function attendanceDuration(checkIn, checkOut) {
+  const started = checkIn?.toDate?.() || (checkIn ? new Date(checkIn) : null);
+  const ended = checkOut?.toDate?.() || (checkOut ? new Date(checkOut) : null);
+  if (!started || !ended || Number.isNaN(started.getTime()) || Number.isNaN(ended.getTime())) return "In progress";
+  return formatServiceMinutes(Math.max(0, Math.round((ended - started) / 60000)));
 }
 function getEventStatus(event, now = new Date()) {
   if (now < eventOpenDate(event)) return "upcoming";
@@ -591,10 +610,11 @@ function initializeStudent() {
   function scheduleEventStatusRefresh() {
     window.clearTimeout(eventStatusTimer);
     const now = Date.now();
-    const nextStatusChange = Math.min(...events.flatMap((event) => [eventOpenDate(event).getTime(), eventCloseDate(event).getTime()]).filter((time) => time > now));
+    const nextStatusChange = Math.min(...events.flatMap((event) => [eventOpenDate(event).getTime(), eventCloseDate(event).getTime(), eventCheckoutCloseDate(event).getTime()]).filter((time) => time > now));
     if (!Number.isFinite(nextStatusChange)) return;
     eventStatusTimer = window.setTimeout(() => {
       renderEvents();
+      renderMyAttendances();
       scheduleEventStatusRefresh();
     }, Math.max(0, nextStatusChange - now) + 50);
   }
@@ -620,6 +640,28 @@ function initializeStudent() {
     history.innerHTML = records.reverse().map(({ event, status }) => {
       const description = event.description || event.notes || "No description provided.";
       return `<article class="history-event-card"><div class="history-card-top"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="badge ${status === "Attended" ? "green" : "orange"}">${status}</span></div><h3>${escapeHtml(event.name)}</h3><p>${escapeHtml(description)}</p><div class="event-detail-boxes"><div><span>Date</span><strong>${escapeHtml(formatEventDate(event.date))}</strong></div><div><span>Time</span><strong>${escapeHtml(formatTimeWindow(event))}</strong></div><div><span>Location</span><strong>${escapeHtml(event.location)}</strong></div><div><span>Audience</span><strong>${escapeHtml(event.audience || "All students")}</strong></div></div><div class="history-card-actions"><button class="small-button danger" type="button" data-dismiss-history="${escapeHtml(event.id)}">Remove from history</button></div></article>`;
+    }).join("");
+  }
+
+  function renderMyAttendances() {
+    const container = document.querySelector("#studentAttendanceList");
+    const records = attendance.slice().sort((first, second) => {
+      const firstTime = first.checkedInAt?.seconds || first.attendedAt?.seconds || 0;
+      const secondTime = second.checkedInAt?.seconds || second.attendedAt?.seconds || 0;
+      return secondTime - firstTime;
+    });
+    if (!records.length) {
+      container.innerHTML = '<div class="empty-state panel">No attendance records yet.</div>';
+      return;
+    }
+    container.innerHTML = records.map((record) => {
+      const event = events.find((item) => item.id === record.eventId) || record;
+      const checkedInAt = record.checkedInAt || record.attendedAt;
+      const completed = Boolean(record.checkedOutAt);
+      const readyToCheckOut = !completed && record.status === "checked-in" && isCheckoutAvailable(event);
+      const status = completed ? "Completed" : readyToCheckOut ? "Ready to check out" : new Date() < eventCloseDate(event) ? "Checked in" : "Checkout window closed";
+      const color = completed ? "green" : readyToCheckOut ? "orange" : status === "Checked in" ? "blue" : "gray";
+      return `<article class="history-event-card attendance-record-card"><div class="history-card-top"><span class="event-type-badge">${escapeHtml(record.eventType || "School Event")}</span><span class="badge ${color}">${escapeHtml(status)}</span></div><h3>${escapeHtml(record.eventName || "Attendance event")}</h3><p>${escapeHtml(record.location || "Location not recorded")}</p><div class="event-detail-boxes"><div><span>Checked in</span><strong>${escapeHtml(formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>Checked out</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Duration</span><strong>${escapeHtml(attendanceDuration(checkedInAt, record.checkedOutAt))}</strong></div><div><span>Attendance window</span><strong>${escapeHtml(record.timeIn && record.timeOut ? `${formatEventTime(record.timeIn)} – ${formatEventTime(record.timeOut)}` : "Not recorded")}</strong></div></div>${readyToCheckOut ? `<div class="history-card-actions"><button class="primary-button" type="button" data-check-out-attendance="${escapeHtml(record.id)}">Check out</button></div>` : ""}</article>`;
     }).join("");
   }
 
@@ -909,7 +951,9 @@ function initializeStudent() {
         location: selectedEvent.location,
         audience: selectedEvent.audience || "All students",
         ...(checkInLocation ? { checkInLocation } : {}),
-        attendedAt: serverTimestamp()
+        attendedAt: serverTimestamp(),
+        checkedInAt: serverTimestamp(),
+        status: "checked-in"
       });
       showDashboardToast("Attendance recorded", "Your attendance was saved successfully.");
     } catch (error) {
@@ -931,6 +975,35 @@ function initializeStudent() {
     if (!button) return;
     await setDoc(doc(db, "dismissedHistory", `${currentUser.uid}_${button.dataset.dismissHistory}`), { studentUid: currentUser.uid, eventId: button.dataset.dismissHistory, dismissedAt: serverTimestamp() });
     showDashboardToast("History entry removed", "The finished event is hidden from your history.");
+  });
+
+  document.querySelector("#studentAttendanceList").addEventListener("click", async (clickEvent) => {
+    const button = clickEvent.target.closest("[data-check-out-attendance]");
+    if (!button) return;
+    const record = attendance.find((item) => item.id === button.dataset.checkOutAttendance);
+    const event = events.find((item) => item.id === record?.eventId);
+    if (!record || !event || !isCheckoutAvailable(event)) {
+      showDashboardToast("Checkout unavailable", "Checkout is available for 15 minutes after the scheduled event end time.");
+      return;
+    }
+    button.disabled = true;
+    try {
+      let checkOutLocation;
+      if (event.geofence?.enabled) {
+        if (!Number.isFinite(event.geofence.latitude) || !Number.isFinite(event.geofence.longitude) || !Number.isFinite(event.geofence.radiusMeters)) {
+          throw new Error("This event's attendance area is incomplete. Please contact your administrator.");
+        }
+        const position = await getCurrentCheckInLocation();
+        const distance = distanceInMeters(position.coords.latitude, position.coords.longitude, event.geofence.latitude, event.geofence.longitude);
+        if (distance > event.geofence.radiusMeters) throw new Error(`You are about ${Math.round(distance)} m from the allowed attendance area.`);
+        checkOutLocation = { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: Math.round(position.coords.accuracy), distanceMeters: Math.round(distance) };
+      }
+      await setDoc(doc(db, "attendance", record.id), { checkedOutAt: serverTimestamp(), status: "completed", ...(checkOutLocation ? { checkOutLocation } : {}) }, { merge: true });
+      showDashboardToast("Checkout recorded", "Your attendance record now includes your checkout time.");
+    } catch (error) {
+      showDashboardToast("Unable to check out", error.message || "Try again while you are in the attendance area.");
+      button.disabled = false;
+    }
   });
 
   const startCameraButton = document.querySelector("#startCamera");
@@ -1122,8 +1195,8 @@ function initializeStudent() {
     studentProfile = snapshot.data();
     renderProfile();
   });
-  onSnapshot(query(collection(db, "events"), orderBy("openAt", "asc")), (snapshot) => { events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); scheduleEventRender(); scheduleEventStatusRefresh(); });
-  onSnapshot(query(collection(db, "attendance"), where("studentUid", "==", currentUser.uid)), (snapshot) => { attendance = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); scheduleEventRender(); });
+  onSnapshot(query(collection(db, "events"), orderBy("openAt", "asc")), (snapshot) => { events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); scheduleEventRender(); renderMyAttendances(); scheduleEventStatusRefresh(); });
+  onSnapshot(query(collection(db, "attendance"), where("studentUid", "==", currentUser.uid)), (snapshot) => { attendance = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); scheduleEventRender(); renderMyAttendances(); });
   onSnapshot(query(collection(db, "dismissedHistory"), where("studentUid", "==", currentUser.uid)), (snapshot) => { dismissedIds = new Set(snapshot.docs.map((item) => item.data().eventId)); scheduleEventRender(); });
   onSnapshot(query(collection(db, "fines"), where("studentUid", "==", currentUser.uid)), (snapshot) => { fines = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderFines(); renderProfile(); });
   onSnapshot(doc(db, "faceRegistrations", currentUser.uid), (snapshot) => {
@@ -1150,6 +1223,9 @@ function initializeAdmin() {
   const eventForm = document.querySelector("#eventForm");
   const studentForm = document.querySelector("#studentForm");
   const eventTableBody = document.querySelector("#eventTableBody");
+  const pastEventList = document.querySelector("#pastEventList");
+  const pastEventRemovalModal = document.querySelector("#pastEventRemovalModal");
+  let selectedPastEventForRemoval;
   const studentTableBody = document.querySelector("#studentTableBody");
   const studentMobileCards = document.querySelector("#studentMobileCards");
   const studentSearch = document.querySelector("#studentSearch");
@@ -1201,6 +1277,7 @@ function initializeAdmin() {
   const studentDirectoryMediaQuery = window.matchMedia("(max-width: 580px)");
 
   function scheduleStudentsRender() {
+    if (activeView !== "modify-students") return;
     if (studentRenderFrame) return;
     studentRenderFrame = window.requestAnimationFrame(() => {
       studentRenderFrame = undefined;
@@ -1215,6 +1292,7 @@ function initializeAdmin() {
     if (!Number.isFinite(nextStatusChange)) return;
     adminEventStatusTimer = window.setTimeout(() => {
       if (["dashboard", "modify-events"].includes(activeView)) renderAdminEvents();
+      if (activeView === "past-events") renderPastEvents();
       scheduleAdminEventStatusRefresh();
     }, Math.max(0, nextStatusChange - now) + 50);
   }
@@ -1418,6 +1496,71 @@ function initializeAdmin() {
   });
   document.querySelector("#adminDisplayName").addEventListener("input", () => { if (!pendingAdminProfilePhoto) updateAdminPhotoPreview(); });
 
+  const dataCleanupModal = document.querySelector("#dataCleanupModal");
+  const clearEventData = document.querySelector("#clearEventData");
+  const clearFineData = document.querySelector("#clearFineData");
+  const dataCleanupConfirm = document.querySelector("#dataCleanupConfirm");
+  const confirmDataCleanup = document.querySelector("#confirmDataCleanup");
+
+  function updateDataCleanupState() {
+    const selected = clearEventData.checked || clearFineData.checked;
+    confirmDataCleanup.disabled = !selected || dataCleanupConfirm.value.trim() !== "CLEAR";
+  }
+
+  function renderDataCleanupCounts() {
+    document.querySelector("#dataCleanupCounts").innerHTML = `<div><strong>${events.length}</strong><span>Events</span></div><div><strong>${attendance.length}</strong><span>Attendance records</span></div><div><strong>${fines.length}</strong><span>Assigned fines</span></div>`;
+  }
+
+  function closeDataCleanupModal() {
+    dataCleanupModal.hidden = true;
+    clearEventData.checked = false;
+    clearFineData.checked = false;
+    dataCleanupConfirm.value = "";
+    updateDataCleanupState();
+  }
+
+  document.querySelector("#openDataCleanup").addEventListener("click", () => {
+    renderDataCleanupCounts();
+    dataCleanupModal.hidden = false;
+    clearEventData.focus();
+  });
+  [clearEventData, clearFineData].forEach((input) => input.addEventListener("change", updateDataCleanupState));
+  dataCleanupConfirm.addEventListener("input", updateDataCleanupState);
+  document.querySelectorAll("[data-close-data-cleanup]").forEach((button) => button.addEventListener("click", closeDataCleanupModal));
+  dataCleanupModal.addEventListener("click", (event) => { if (event.target === dataCleanupModal) closeDataCleanupModal(); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !dataCleanupModal.hidden) closeDataCleanupModal(); });
+  confirmDataCleanup.addEventListener("click", async () => {
+    if (confirmDataCleanup.disabled) return;
+    confirmDataCleanup.disabled = true;
+    confirmDataCleanup.textContent = "Clearing data…";
+    try {
+      await currentUser.getIdToken(true);
+      const clearEvents = clearEventData.checked;
+      const clearFines = clearFineData.checked;
+      const snapshots = await Promise.all([
+        clearEvents ? getDocs(collection(db, "events")) : Promise.resolve(null),
+        clearEvents ? getDocs(collection(db, "attendance")) : Promise.resolve(null),
+        clearEvents ? getDocs(collection(db, "dismissedHistory")) : Promise.resolve(null),
+        clearFines ? getDocs(collection(db, "fines")) : Promise.resolve(null)
+      ]);
+      const [eventSnapshot, attendanceSnapshot, dismissedSnapshot, fineSnapshot] = snapshots;
+      await Promise.all([
+        eventSnapshot ? writeInBatches(eventSnapshot.docs, (batch, item) => batch.delete(item.ref)) : Promise.resolve(),
+        attendanceSnapshot ? writeInBatches(attendanceSnapshot.docs, (batch, item) => batch.delete(item.ref)) : Promise.resolve(),
+        dismissedSnapshot ? writeInBatches(dismissedSnapshot.docs, (batch, item) => batch.delete(item.ref)) : Promise.resolve(),
+        fineSnapshot ? writeInBatches(fineSnapshot.docs, (batch, item) => batch.delete(item.ref)) : Promise.resolve()
+      ]);
+      const counts = { events: eventSnapshot?.size || 0, attendance: attendanceSnapshot?.size || 0, fines: fineSnapshot?.size || 0 };
+      closeDataCleanupModal();
+      showDashboardToast("Selected data cleared", `${counts.events || 0} event${counts.events === 1 ? "" : "s"}, ${counts.attendance || 0} attendance record${counts.attendance === 1 ? "" : "s"}, and ${counts.fines || 0} fine${counts.fines === 1 ? "" : "s"} were removed.`);
+    } catch (error) {
+      showDashboardToast("Unable to clear data", error.code === "permission-denied" ? "Your account is not allowed to clear these records." : error.message || "Try again after refreshing the dashboard.");
+      updateDataCleanupState();
+    } finally {
+      confirmDataCleanup.textContent = "Clear selected data";
+    }
+  });
+
   function renderAdminAttendance() {
     const now = new Date();
     const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -1425,6 +1568,7 @@ function initializeAdmin() {
     const present = presentIds.size;
     const pending = Math.max(students.length - present, 0);
     const rate = students.length ? Math.round((present / students.length) * 100) : 0;
+    document.querySelector("#registeredCount").textContent = students.length;
     document.querySelector("#presentTodayCount").textContent = present;
     document.querySelector("#presentTodayMeta").textContent = students.length ? `${rate}% of registered students` : "No attendance records yet";
     document.querySelector("#notCheckedInCount").textContent = pending;
@@ -1433,6 +1577,33 @@ function initializeAdmin() {
     document.querySelector("#adminAttendanceDetail").textContent = `${present} present`;
     document.querySelector("#adminAttendanceRing").style.background = `conic-gradient(#1f6feb 0 ${rate}%, #e8eef7 ${rate}% 100%)`;
   }
+
+  function attendanceLineMarkup(records) {
+    if (!records.length) return '<div class="empty-state">No attendance activity yet.</div>';
+    return records.map((record) => {
+      const student = students.find((item) => item.uid === record.studentUid);
+      const studentName = student ? [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ") : record.studentId || "Student";
+      const avatar = student?.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student?.firstName || studentName, student?.lastName || ""));
+      const checkedInAt = record.checkedInAt || record.attendedAt;
+      const completed = Boolean(record.checkedOutAt);
+      return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || record.studentId || "Student ID unavailable")}${student?.section ? ` · ${escapeHtml(student.section)}` : ""}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><small>${escapeHtml(record.eventDate || "Date unavailable")}</small></div><div class="attendance-line-times"><div><span>IN</span><strong>${escapeHtml(formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>OUT</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Duration</span><strong>${escapeHtml(attendanceDuration(checkedInAt, record.checkedOutAt))}</strong></div></div><span class="badge ${completed ? "green" : "blue"}">${completed ? "Completed" : "Checked in"}</span></article>`;
+    }).join("");
+  }
+
+  function renderAttendanceLine() {
+    const filter = document.querySelector("#adminAttendanceEventFilter");
+    const selectedEvent = filter.value || "all";
+    const eventOptions = events.map((event) => `<option value="${escapeHtml(event.id)}">${escapeHtml(event.name)}${event.date ? ` · ${escapeHtml(event.date)}` : ""}</option>`).join("");
+    filter.innerHTML = `<option value="all">All events</option>${eventOptions}`;
+    filter.value = events.some((event) => event.id === selectedEvent) ? selectedEvent : "all";
+    const records = attendance
+      .filter((record) => filter.value === "all" || record.eventId === filter.value)
+      .sort((first, second) => (second.checkedInAt?.seconds || second.attendedAt?.seconds || 0) - (first.checkedInAt?.seconds || first.attendedAt?.seconds || 0));
+    document.querySelector("#adminAttendanceLine").innerHTML = attendanceLineMarkup(records);
+    document.querySelector("#adminDashboardAttendanceLine").innerHTML = attendanceLineMarkup(records.slice(0, 5));
+  }
+
+  document.querySelector("#adminAttendanceEventFilter").addEventListener("change", renderAttendanceLine);
 
   function renderAdminEvents() {
     document.querySelector("#eventCount").textContent = events.length;
@@ -1443,7 +1614,17 @@ function initializeAdmin() {
       return;
     }
     timeline.innerHTML = events.slice(0, 5).map((event) => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${eventStatusBadge(getEventStatus(event))}</div>`).join("");
-    eventTableBody.innerHTML = events.map((event) => `<article class="admin-event-card"><div class="admin-event-card-top"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span>${eventStatusBadge(getEventStatus(event))}</div><h3>${escapeHtml(event.name)}</h3><p>${escapeHtml(event.description || event.notes || "No description provided.")}</p><div class="event-detail-boxes"><div><span>Date</span><strong>${escapeHtml(formatEventDate(event.date))}</strong></div><div><span>Time</span><strong>${escapeHtml(formatTimeWindow(event))}</strong></div><div><span>Location</span><strong>${escapeHtml(event.location)}</strong></div><div><span>Attendance area</span><strong>${event.geofence?.enabled ? `${escapeHtml(String(event.geofence.radiusMeters || 100))} m required` : "Not required"}</strong></div></div><div class="admin-event-card-actions"><button class="outline-button" type="button" data-manage-geofence="${event.id}">Attendance area</button><button class="outline-button" type="button" data-edit-event="${event.id}">Edit event</button><button class="small-button danger modal-danger-button" type="button" data-delete-event="${event.id}">Remove</button></div></article>`).join("");
+    const currentEvents = events.filter((event) => getEventStatus(event) !== "closed");
+    eventTableBody.innerHTML = currentEvents.length ? currentEvents.map((event) => eventCardMarkup(event, false)).join("") : '<div class="empty-state panel">No current or upcoming events. Open Past Events to manage completed events.</div>';
+  }
+
+  function eventCardMarkup(event, past) {
+    return `<article class="admin-event-card"><div class="admin-event-card-top"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span>${eventStatusBadge(getEventStatus(event))}</div><h3>${escapeHtml(event.name)}</h3><p>${escapeHtml(event.description || event.notes || "No description provided.")}</p><div class="event-detail-boxes"><div><span>Date</span><strong>${escapeHtml(formatEventDate(event.date))}</strong></div><div><span>Time</span><strong>${escapeHtml(formatTimeWindow(event))}</strong></div><div><span>Location</span><strong>${escapeHtml(event.location)}</strong></div><div><span>Attendance area</span><strong>${event.geofence?.enabled ? `${escapeHtml(String(event.geofence.radiusMeters || 100))} m required` : "Not required"}</strong></div></div><div class="admin-event-card-actions">${past ? "" : `<button class="outline-button" type="button" data-manage-geofence="${event.id}">Attendance area</button>`}<button class="outline-button" type="button" data-edit-event="${event.id}">Edit event</button><button class="small-button danger modal-danger-button" type="button" data-delete-event="${event.id}">Remove</button></div></article>`;
+  }
+
+  function renderPastEvents() {
+    const pastEvents = events.filter((event) => getEventStatus(event) === "closed").sort((first, second) => eventCloseDate(second) - eventCloseDate(first));
+    pastEventList.innerHTML = pastEvents.length ? pastEvents.map((event) => eventCardMarkup(event, true)).join("") : '<div class="empty-state panel">No past events yet.</div>';
   }
 
   function renderFineOptions() {
@@ -1729,11 +1910,7 @@ function initializeAdmin() {
   }
 
   function renderStudents() {
-    if (activeView !== "modify-students") {
-      document.querySelector("#registeredCount").textContent = students.length;
-      if (activeView === "dashboard") renderAdminAttendance();
-      return;
-    }
+    if (activeView !== "modify-students") return;
     const search = studentSearch.value.trim().toLowerCase();
     const updateFilterOptions = (select, label, values) => {
       const currentValue = select.value;
@@ -1876,6 +2053,7 @@ function initializeAdmin() {
     document.querySelector("#editingEventId").value = "";
     document.querySelector("#eventFormTitle").textContent = "Event details";
     document.querySelector("#eventSubmitButton").textContent = "Create event";
+    delete eventForm.dataset.returnView;
   }
   function editEvent(id) {
     const event = events.find((item) => item.id === id);
@@ -1892,8 +2070,78 @@ function initializeAdmin() {
     eventGeofenceEditor.set(event.geofence || {});
     document.querySelector("#eventFormTitle").textContent = "Modify event";
     document.querySelector("#eventSubmitButton").textContent = "Save changes";
+    eventForm.dataset.returnView = getEventStatus(event) === "closed" ? "past-events" : "modify-events";
     openView("create");
   }
+
+  async function writeInBatches(documents, write) {
+    for (let start = 0; start < documents.length; start += 450) {
+      const batch = writeBatch(db);
+      documents.slice(start, start + 450).forEach((item) => write(batch, item));
+      await batch.commit();
+    }
+  }
+
+  async function syncEventRecords(eventId, event) {
+    const [attendanceSnapshot, fineSnapshot] = await Promise.all([
+      getDocs(query(collection(db, "attendance"), where("eventId", "==", eventId))),
+      getDocs(query(collection(db, "fines"), where("eventId", "==", eventId)))
+    ]);
+    const attendanceUpdate = {
+      eventName: event.name,
+      eventType: event.type || "School Event",
+      eventDescription: event.description || "",
+      eventDate: event.date,
+      timeIn: event.timeIn,
+      timeOut: event.timeOut,
+      location: event.location,
+      audience: event.audience || "All students"
+    };
+    const fineUpdate = {
+      eventName: event.name,
+      eventDate: event.date,
+      eventTimeIn: event.timeIn,
+      eventTimeOut: event.timeOut,
+      eventLocation: event.location,
+      eventRemoved: false
+    };
+    await Promise.all([
+      writeInBatches(attendanceSnapshot.docs, (batch, item) => batch.set(item.ref, attendanceUpdate, { merge: true })),
+      writeInBatches(fineSnapshot.docs, (batch, item) => batch.set(item.ref, fineUpdate, { merge: true }))
+    ]);
+    return attendanceSnapshot.size;
+  }
+
+  function closePastEventRemovalModal() {
+    pastEventRemovalModal.hidden = true;
+    selectedPastEventForRemoval = undefined;
+  }
+
+  function openPastEventRemovalModal(eventId) {
+    const event = events.find((item) => item.id === eventId);
+    if (!event) return;
+    selectedPastEventForRemoval = event;
+    const attendanceCount = attendance.filter((record) => record.eventId === event.id).length;
+    document.querySelector("#pastEventRemovalMessage").textContent = `Removing ${event.name} will permanently remove ${attendanceCount} student attendance record${attendanceCount === 1 ? "" : "s"} from My Attendances, Event History, and the Attendance Line. Linked fines will remain as administrative records.`;
+    pastEventRemovalModal.hidden = false;
+    document.querySelector("#confirmPastEventRemoval").focus();
+  }
+
+  async function removeEventAndRecords(event) {
+    const [attendanceSnapshot, dismissedSnapshot, fineSnapshot] = await Promise.all([
+      getDocs(query(collection(db, "attendance"), where("eventId", "==", event.id))),
+      getDocs(query(collection(db, "dismissedHistory"), where("eventId", "==", event.id))),
+      getDocs(query(collection(db, "fines"), where("eventId", "==", event.id)))
+    ]);
+    await Promise.all([
+      writeInBatches(attendanceSnapshot.docs, (batch, item) => batch.delete(item.ref)),
+      writeInBatches(dismissedSnapshot.docs, (batch, item) => batch.delete(item.ref)),
+      writeInBatches(fineSnapshot.docs, (batch, item) => batch.set(item.ref, { eventRemoved: true, eventRemovedAt: serverTimestamp() }, { merge: true }))
+    ]);
+    await deleteDoc(doc(db, "events", event.id));
+    return attendanceSnapshot.size;
+  }
+
   eventForm.addEventListener("submit", async (submitEvent) => {
     submitEvent.preventDefault();
     const timeIn = document.querySelector("#eventTimeIn").value;
@@ -1908,6 +2156,7 @@ function initializeAdmin() {
     try {
       if (id) {
         await setDoc(doc(db, "events", id), record, { merge: true });
+        await syncEventRecords(id, record);
         const recipients = students.filter((student) => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
         Promise.allSettled(recipients.map((student) => createNotification({ recipientUid: student.uid, category: "system", title: "Event updated", message: `${record.name} was updated. Review the latest event details.`, targetView: "events", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section }))).catch(() => {});
       } else {
@@ -1915,15 +2164,16 @@ function initializeAdmin() {
         const recipients = students.filter((student) => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
         Promise.allSettled(recipients.map((student) => createNotification({ recipientUid: student.uid, category: "system", title: "New event published", message: `${record.name} is scheduled for ${formatEventDate(record.date)}.`, targetView: "events", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section }))).catch(() => {});
       }
+      const returnView = eventForm.dataset.returnView || "modify-events";
       resetEventForm();
-      openView("modify-events");
-      showDashboardToast(id ? "Event updated" : "Event created", "The event and attendance window were saved and synced.");
+      openView(returnView);
+      showDashboardToast(id ? "Event updated" : "Event created", id ? "The event and linked attendance records were synced." : "The event and attendance window were saved and synced.");
     } catch (error) {
       showDashboardToast("Unable to save event", error.message);
     }
   });
   document.querySelector("#clearEventForm").addEventListener("click", resetEventForm);
-  eventTableBody.addEventListener("click", async (clickEvent) => {
+  const handleEventCardAction = async (clickEvent) => {
     const manageGeofence = clickEvent.target.closest("[data-manage-geofence]");
     const edit = clickEvent.target.closest("[data-edit-event]");
     const remove = clickEvent.target.closest("[data-delete-event]");
@@ -1933,9 +2183,28 @@ function initializeAdmin() {
       loadGeofenceManager(manageGeofence.dataset.manageGeofence);
     }
     if (edit) editEvent(edit.dataset.editEvent);
-    if (remove) {
-      await deleteDoc(doc(db, "events", remove.dataset.deleteEvent));
-      showDashboardToast("Event removed", "The event was deleted.");
+    if (remove) openPastEventRemovalModal(remove.dataset.deleteEvent);
+  };
+  eventTableBody.addEventListener("click", handleEventCardAction);
+  pastEventList.addEventListener("click", handleEventCardAction);
+  document.querySelectorAll("[data-close-past-event-removal]").forEach((button) => button.addEventListener("click", closePastEventRemovalModal));
+  pastEventRemovalModal.addEventListener("click", (event) => { if (event.target === pastEventRemovalModal) closePastEventRemovalModal(); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !pastEventRemovalModal.hidden) closePastEventRemovalModal(); });
+  document.querySelector("#confirmPastEventRemoval").addEventListener("click", async () => {
+    if (!selectedPastEventForRemoval) return;
+    const event = selectedPastEventForRemoval;
+    const button = document.querySelector("#confirmPastEventRemoval");
+    button.disabled = true;
+    button.textContent = "Removing event…";
+    try {
+      const removedRecords = await removeEventAndRecords(event);
+      closePastEventRemovalModal();
+      showDashboardToast("Event removed", `${event.name} and ${removedRecords} linked attendance record${removedRecords === 1 ? "" : "s"} were removed.`);
+    } catch (error) {
+      showDashboardToast("Unable to remove event", error.message || "Try again.");
+    } finally {
+      button.disabled = false;
+      button.textContent = "Remove event";
     }
   });
 
@@ -2366,9 +2635,12 @@ function initializeAdmin() {
     if (viewName === "dashboard") {
       renderAdminAttendance();
       renderAdminEvents();
+      renderAttendanceLine();
     }
+    if (viewName === "attendance-line") renderAttendanceLine();
     if (viewName === "modify-students") scheduleStudentsRender();
     if (viewName === "modify-events") renderAdminEvents();
+    if (viewName === "past-events") renderPastEvents();
     if (viewName === "geofence") { renderGeofenceEventOptions(); loadGeofenceManager(); }
     if (viewName === "assign-fine") renderFineOptions();
     if (viewName === "assigned-fines") renderAdminFines();
@@ -2376,27 +2648,36 @@ function initializeAdmin() {
   onSnapshot(query(collection(db, "events"), orderBy("openAt", "asc")), (snapshot) => {
     events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     if (["dashboard", "modify-events"].includes(activeView)) renderAdminEvents();
+    if (activeView === "past-events") renderPastEvents();
     renderGeofenceEventOptions();
     if (activeView === "geofence") loadGeofenceManager();
     if (activeView === "assign-fine") renderFineOptions();
+    if (["dashboard", "attendance-line"].includes(activeView)) renderAttendanceLine();
     scheduleAdminEventStatusRefresh();
   });
   onSnapshot(collection(db, "students"), (snapshot) => {
     students = snapshot.docs.map((item) => ({ uid: item.id, ...item.data() }));
     scheduleStudentsRender();
     if (activeView === "assign-fine") renderFineOptions();
+    if (activeView === "dashboard") renderAdminAttendance();
+    if (["dashboard", "attendance-line"].includes(activeView)) renderAttendanceLine();
   });
   onSnapshot(collection(db, "presenceSessions"), (snapshot) => { setPresenceSessions(snapshot); scheduleStudentsRender(); });
   onSnapshot(collection(db, "presence"), (snapshot) => { legacyPresenceByUid = new Map(snapshot.docs.map((item) => [item.id, item.data()])); scheduleStudentsRender(); });
   onSnapshot(collection(db, "attendance"), (snapshot) => {
     attendance = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     scheduleStudentsRender();
+    if (activeView === "dashboard") {
+      renderAdminAttendance();
+      renderAttendanceLine();
+    }
+    if (activeView === "attendance-line") renderAttendanceLine();
   });
   onSnapshot(collection(db, "fines"), (snapshot) => {
     fines = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     if (activeView === "assigned-fines") renderAdminFines();
     if (activeView === "modify-students") scheduleStudentsRender();
-    if (selectedManagedStudentUid) renderSelectedStudent();
+    if (activeView === "modify-students" && selectedManagedStudentUid) renderSelectedStudent();
   });
   onSnapshot(collection(db, "faceRegistrations"), (snapshot) => { faceRegistrationsByUid = new Map(snapshot.docs.map((item) => [item.id, item.data()])); scheduleStudentsRender(); });
   onSnapshot(doc(db, "adminProfiles", currentUser.uid), (snapshot) => { renderAdminProfile(snapshot.data()); });
