@@ -30,17 +30,43 @@ function distanceInMeters(latitudeA, longitudeA, latitudeB, longitudeB) {
   return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function verifiedGeofenceLocation(location, geofence, fieldName) {
+  const latitude = Number(location?.latitude);
+  const longitude = Number(location?.longitude);
+  const accuracy = Number(location?.accuracy);
+  const centerLatitude = Number(geofence?.latitude);
+  const centerLongitude = Number(geofence?.longitude);
+  const radiusMeters = Number(geofence?.radiusMeters);
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90
+    || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
+    || !Number.isFinite(centerLatitude) || centerLatitude < -90 || centerLatitude > 90
+    || !Number.isFinite(centerLongitude) || centerLongitude < -180 || centerLongitude > 180
+    || !Number.isFinite(radiusMeters) || radiusMeters <= 0) {
+    throw new HttpsError("invalid-argument", `A valid ${fieldName} location is required for this event.`);
+  }
+  const distanceMeters = distanceInMeters(latitude, longitude, centerLatitude, centerLongitude);
+  if (distanceMeters > radiusMeters) throw new HttpsError("permission-denied", "You are outside the allowed attendance area.");
+  return {
+    latitude,
+    longitude,
+    ...(Number.isFinite(accuracy) && accuracy >= 0 ? { accuracy: Math.round(accuracy) } : {}),
+    distanceMeters: Math.round(distanceMeters)
+  };
+}
+
 exports.checkInWithGeofence = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in before checking in.");
   const { eventId, checkInLocation } = request.data || {};
   if (typeof eventId !== "string" || !eventId) throw new HttpsError("invalid-argument", "An event is required.");
 
   const firestore = getFirestore();
-  const [studentSnapshot, eventSnapshot] = await Promise.all([
+  const [studentSnapshot, eventSnapshot, faceSnapshot] = await Promise.all([
     firestore.doc(`students/${request.auth.uid}`).get(),
-    firestore.doc(`events/${eventId}`).get()
+    firestore.doc(`events/${eventId}`).get(),
+    firestore.doc(`faceRegistrations/${request.auth.uid}`).get()
   ]);
   if (!studentSnapshot.exists || studentSnapshot.data().active !== true) throw new HttpsError("permission-denied", "Only active students can check in.");
+  if (!faceSnapshot.exists || faceSnapshot.data().registered !== true) throw new HttpsError("permission-denied", "Face registration is required before checking in.");
   if (!eventSnapshot.exists) throw new HttpsError("not-found", "This event no longer exists.");
 
   const student = studentSnapshot.data();
@@ -52,14 +78,7 @@ exports.checkInWithGeofence = onCall(async (request) => {
 
   let verifiedLocation;
   if (event.geofence?.enabled) {
-    const area = event.geofence;
-    const latitude = Number(checkInLocation?.latitude);
-    const longitude = Number(checkInLocation?.longitude);
-    const radiusMeters = Number(area.radiusMeters);
-    if (![latitude, longitude, Number(area.latitude), Number(area.longitude), radiusMeters].every(Number.isFinite)) throw new HttpsError("invalid-argument", "A valid location is required for this event.");
-    const distanceMeters = distanceInMeters(latitude, longitude, Number(area.latitude), Number(area.longitude));
-    if (distanceMeters > radiusMeters) throw new HttpsError("permission-denied", "You are outside the allowed attendance area.");
-    verifiedLocation = { latitude, longitude, accuracy: Math.round(Number(checkInLocation.accuracy) || 0), distanceMeters: Math.round(distanceMeters) };
+    verifiedLocation = verifiedGeofenceLocation(checkInLocation, event.geofence, "check-in");
   }
 
   const attendanceReference = firestore.doc(`attendance/${request.auth.uid}_${eventId}`);
@@ -81,6 +100,42 @@ exports.checkInWithGeofence = onCall(async (request) => {
       attendedAt: FieldValue.serverTimestamp(),
       checkedInAt: FieldValue.serverTimestamp(),
       status: "checked-in"
+    });
+  });
+  return { ok: true };
+});
+
+exports.checkOutWithGeofence = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in before checking out.");
+  const { eventId, checkOutLocation } = request.data || {};
+  if (typeof eventId !== "string" || !eventId) throw new HttpsError("invalid-argument", "An event is required.");
+
+  const firestore = getFirestore();
+  const attendanceReference = firestore.doc(`attendance/${request.auth.uid}_${eventId}`);
+  const [studentSnapshot, eventSnapshot, attendanceSnapshot] = await Promise.all([
+    firestore.doc(`students/${request.auth.uid}`).get(),
+    firestore.doc(`events/${eventId}`).get(),
+    attendanceReference.get()
+  ]);
+  if (!studentSnapshot.exists || studentSnapshot.data().active !== true) throw new HttpsError("permission-denied", "Only active students can check out.");
+  if (!eventSnapshot.exists) throw new HttpsError("not-found", "This event no longer exists.");
+  if (!attendanceSnapshot.exists || attendanceSnapshot.data().studentUid !== request.auth.uid || attendanceSnapshot.data().status !== "checked-in") throw new HttpsError("failed-precondition", "You must check in before checking out.");
+
+  const event = eventSnapshot.data();
+  const checkOutCloseAt = event.checkOutClosesAt?.toMillis ? event.checkOutClosesAt : event.closeAt;
+  const now = Date.now();
+  if (!event.closeAt?.toMillis || !checkOutCloseAt?.toMillis || now < event.closeAt.toMillis() || now > checkOutCloseAt.toMillis()) throw new HttpsError("permission-denied", "The check-out window is not open.");
+  const verifiedLocation = event.geofence?.enabled
+    ? verifiedGeofenceLocation(checkOutLocation, event.geofence, "check-out")
+    : undefined;
+
+  await firestore.runTransaction(async (transaction) => {
+    const attendance = await transaction.get(attendanceReference);
+    if (!attendance.exists || attendance.data().studentUid !== request.auth.uid || attendance.data().status !== "checked-in") throw new HttpsError("failed-precondition", "You must check in before checking out.");
+    transaction.update(attendanceReference, {
+      ...(verifiedLocation ? { checkOutLocation: verifiedLocation } : {}),
+      checkedOutAt: FieldValue.serverTimestamp(),
+      status: "completed"
     });
   });
   return { ok: true };

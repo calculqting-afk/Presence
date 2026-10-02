@@ -114,42 +114,10 @@ service cloud.firestore {
     match /attendance/{attendanceId} {
       allow read: if isAdmin()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
-      allow create: if isStudent()
-        && request.resource.data.studentUid == request.auth.uid
-        && attendanceId == request.auth.uid + "_" + request.resource.data.eventId
-        && exists(/databases/$(database)/documents/faceRegistrations/$(request.auth.uid))
-        && get(/databases/$(database)/documents/faceRegistrations/$(request.auth.uid)).data.registered == true
-        && exists(/databases/$(database)/documents/events/$(request.resource.data.eventId))
-        && request.time >= get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.openAt
-        && (
-          !get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.keys().hasAll(["checkInClosesAt"])
-          && request.time <= get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.closeAt
-          || get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.keys().hasAll(["checkInClosesAt"])
-          && request.time <= get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.checkInClosesAt
-        )
-        && request.resource.data.keys().hasOnly([
-          "studentUid", "studentId", "eventId", "eventName", "eventDate",
-          "eventType", "eventDescription", "timeIn", "timeOut", "location",
-          "audience", "attendedAt", "checkedInAt", "status", "checkInLocation"
-        ]);
-      allow update: if canManageAttendance()
-        || (isStudent()
-          && resource.data.studentUid == request.auth.uid
-          && resource.data.status == "checked-in"
-          && request.resource.data.status == "completed"
-          && !("checkedOutAt" in resource.data)
-          && request.resource.data.checkedOutAt == request.time
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            "checkedOutAt", "checkOutLocation", "status"
-          ])
-          && exists(/databases/$(database)/documents/events/$(resource.data.eventId))
-          && request.time >= get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.closeAt
-          && (
-            !get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.keys().hasAll(["checkOutClosesAt"])
-            && request.time <= get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.closeAt + duration.value(15, "m")
-            || get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.keys().hasAll(["checkOutClosesAt"])
-            && request.time <= get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.checkOutClosesAt
-          ));
+      // Student attendance changes are only made by callable functions, whose
+      // Admin SDK writes bypass these rules after server-side verification.
+      allow create: if canManageAttendance();
+      allow update: if canManageAttendance();
       allow delete: if canManageAttendance();
     }
 

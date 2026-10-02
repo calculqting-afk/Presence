@@ -1,5 +1,6 @@
-import { ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js";
+import { ADMIN_EMAIL, auth, db, functions, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js";
 import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-functions.js";
 import {
   Timestamp,
   addDoc,
@@ -1003,22 +1004,9 @@ function initializeStudent() {
         }
         checkInLocation = { latitude, longitude, accuracy: Math.round(accuracy), distanceMeters: Math.round(distance) };
       }
-      await setDoc(doc(db, "attendance", `${currentUser.uid}_${selectedEvent.id}`), {
-        studentUid: currentUser.uid,
-        studentId: studentProfile.accountId,
+      await httpsCallable(functions, "checkInWithGeofence")({
         eventId: selectedEvent.id,
-        eventName: selectedEvent.name,
-        eventType: selectedEvent.type || "School Event",
-        eventDescription: selectedEvent.description || selectedEvent.notes || "",
-        eventDate: selectedEvent.date,
-        timeIn: selectedEvent.timeIn,
-        timeOut: selectedEvent.timeOut,
-        location: selectedEvent.location,
-        audience: selectedEvent.audience || "All students",
-        ...(checkInLocation ? { checkInLocation } : {}),
-        attendedAt: serverTimestamp(),
-        checkedInAt: serverTimestamp(),
-        status: "checked-in"
+        checkInLocation
       });
       showDashboardToast("Attendance recorded", "Your attendance was saved successfully.");
     } catch (error) {
@@ -1063,7 +1051,10 @@ function initializeStudent() {
         if (distance > event.geofence.radiusMeters) throw new Error(`You are about ${Math.round(distance)} m from the allowed attendance area.`);
         checkOutLocation = { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: Math.round(position.coords.accuracy), distanceMeters: Math.round(distance) };
       }
-      await setDoc(doc(db, "attendance", record.id), { checkedOutAt: serverTimestamp(), status: "completed", ...(checkOutLocation ? { checkOutLocation } : {}) }, { merge: true });
+      await httpsCallable(functions, "checkOutWithGeofence")({
+        eventId: record.eventId,
+        checkOutLocation
+      });
       showDashboardToast("Checkout recorded", "Your attendance record now includes your checkout time.");
     } catch (error) {
       showDashboardToast("Unable to check out", error.message || "Try again while you are in the attendance area.");
