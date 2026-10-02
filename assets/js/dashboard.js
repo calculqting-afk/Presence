@@ -58,11 +58,12 @@ let activeView;
 let previousView = "dashboard";
 let currentUserRole = "student";
 let currentUserProfile = {};
+let geofencesByEventId = new Map();
 const ROLE_VIEWS = {
   head_admin: ["dashboard", "add-student", "modify-students", "create", "modify-events", "past-events", "attendance-line", "assign-fine", "assigned-fines", "geofence", "profile"],
   attendance_admin: ["dashboard", "create", "modify-events", "past-events", "attendance-line", "assign-fine", "assigned-fines", "geofence"],
   student_manager: ["dashboard", "add-student", "modify-students"],
-  viewer: ["dashboard", "modify-students", "modify-events", "past-events", "attendance-line", "assigned-fines", "geofence"],
+  viewer: ["dashboard", "modify-events", "past-events", "attendance-line", "assigned-fines"],
   student: ["dashboard", "events", "attendances", "history", "fines", "face", "profile"]
 };
 const ROLE_ACCESS_LABELS = { head_admin: "Full access", attendance_admin: "Attendance access", student_manager: "Student management", viewer: "Read-only access" };
@@ -984,25 +985,11 @@ function initializeStudent() {
     button.disabled = true;
     try {
       let checkInLocation;
-      if (selectedEvent.geofence?.enabled) {
-        const area = selectedEvent.geofence;
-        if (!Number.isFinite(area.latitude) || !Number.isFinite(area.longitude) || !Number.isFinite(area.radiusMeters)) {
-          const configurationError = new Error("This event's attendance area is incomplete. Please contact your administrator.");
-          configurationError.geofenceIssue = "configuration";
-          throw configurationError;
-        }
+      if (selectedEvent.requiresGeofence) {
         showDashboardToast("Checking your location", "Allow location access to confirm you are in the attendance area.");
         const position = await getCurrentCheckInLocation();
         const { latitude, longitude, accuracy } = position.coords;
-        const distance = distanceInMeters(latitude, longitude, area.latitude, area.longitude);
-        if (distance > area.radiusMeters) {
-          const rangeError = new Error(`You are about ${Math.round(distance)} m from the allowed attendance area.`);
-          rangeError.geofenceIssue = "outside";
-          rangeError.distanceMeters = Math.round(distance);
-          rangeError.radiusMeters = Math.round(area.radiusMeters);
-          throw rangeError;
-        }
-        checkInLocation = { latitude, longitude, accuracy: Math.round(accuracy), distanceMeters: Math.round(distance) };
+        checkInLocation = { latitude, longitude, accuracy: Math.round(accuracy) };
       }
       await httpsCallable(functions, "checkInWithGeofence")({
         eventId: selectedEvent.id,
@@ -1042,14 +1029,9 @@ function initializeStudent() {
     button.disabled = true;
     try {
       let checkOutLocation;
-      if (event.geofence?.enabled) {
-        if (!Number.isFinite(event.geofence.latitude) || !Number.isFinite(event.geofence.longitude) || !Number.isFinite(event.geofence.radiusMeters)) {
-          throw new Error("This event's attendance area is incomplete. Please contact your administrator.");
-        }
+      if (event.requiresGeofence) {
         const position = await getCurrentCheckInLocation();
-        const distance = distanceInMeters(position.coords.latitude, position.coords.longitude, event.geofence.latitude, event.geofence.longitude);
-        if (distance > event.geofence.radiusMeters) throw new Error(`You are about ${Math.round(distance)} m from the allowed attendance area.`);
-        checkOutLocation = { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: Math.round(position.coords.accuracy), distanceMeters: Math.round(distance) };
+        checkOutLocation = { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: Math.round(position.coords.accuracy) };
       }
       await httpsCallable(functions, "checkOutWithGeofence")({
         eventId: record.eventId,
@@ -1482,7 +1464,13 @@ function initializeAdmin() {
     if (!selectedEvent) return;
     const geofence = managerGeofenceEditor.value();
     if (geofence.enabled && (!Number.isFinite(geofence.latitude) || !Number.isFinite(geofence.longitude))) return showDashboardToast("Choose an attendance area", "Click the map or search for the event location before saving.");
-    try { await setDoc(doc(db, "events", selectedEvent.id), { geofence, updatedAt: serverTimestamp() }, { merge: true }); showDashboardToast("Attendance area saved", `${selectedEvent.name} now uses the updated location rule.`); } catch (error) { showDashboardToast("Unable to save area", error.message); }
+    try {
+      const batch = writeBatch(db);
+      batch.set(doc(db, "eventGeofences", selectedEvent.id), geofence);
+      batch.set(doc(db, "events", selectedEvent.id), { requiresGeofence: geofence.enabled, updatedAt: serverTimestamp() }, { merge: true });
+      await batch.commit();
+      showDashboardToast("Attendance area saved", `${selectedEvent.name} now uses the updated location rule.`);
+    } catch (error) { showDashboardToast("Unable to save area", error.message); }
   });
   document.querySelector("#geofenceEditEvent").addEventListener("click", () => { const id = geofenceEventSelect.value; if (id) editEvent(id); });
   window.addEventListener("presence:viewchange", ({ detail }) => { if (detail.viewName === "create") window.setTimeout(() => eventGeofenceEditor.invalidate(), 0); if (detail.viewName === "geofence") window.setTimeout(() => managerGeofenceEditor.invalidate(), 0); });
@@ -2246,15 +2234,22 @@ function initializeAdmin() {
     const requestedGeofence = eventGeofenceEditor.value();
     if (requestedGeofence.enabled && (!Number.isFinite(requestedGeofence.latitude) || !Number.isFinite(requestedGeofence.longitude))) return showDashboardToast("Choose an attendance area", "Click the map or search for the event location before saving.");
     const geofence = requestedGeofence.enabled ? requestedGeofence : { enabled: false };
-    const record = { name: document.querySelector("#eventName").value.trim(), type: document.querySelector("#eventType").value, date, location: document.querySelector("#eventLocation").value.trim(), timeIn, checkInCutoff, timeOut, checkOutCutoff, audience: document.querySelector("#eventAudience").value, description: document.querySelector("#eventNotes").value.trim(), geofence, openAt: Timestamp.fromDate(new Date(`${date}T${timeIn}`)), checkInClosesAt: Timestamp.fromDate(new Date(`${date}T${checkInCutoff}`)), closeAt: Timestamp.fromDate(new Date(`${date}T${timeOut}`)), checkOutClosesAt: Timestamp.fromDate(new Date(`${date}T${checkOutCutoff}`)), updatedAt: serverTimestamp() };
+    const record = { name: document.querySelector("#eventName").value.trim(), type: document.querySelector("#eventType").value, date, location: document.querySelector("#eventLocation").value.trim(), timeIn, checkInCutoff, timeOut, checkOutCutoff, audience: document.querySelector("#eventAudience").value, description: document.querySelector("#eventNotes").value.trim(), requiresGeofence: geofence.enabled, openAt: Timestamp.fromDate(new Date(`${date}T${timeIn}`)), checkInClosesAt: Timestamp.fromDate(new Date(`${date}T${checkInCutoff}`)), closeAt: Timestamp.fromDate(new Date(`${date}T${timeOut}`)), checkOutClosesAt: Timestamp.fromDate(new Date(`${date}T${checkOutCutoff}`)), updatedAt: serverTimestamp() };
     try {
       if (id) {
-        await setDoc(doc(db, "events", id), record, { merge: true });
+        const batch = writeBatch(db);
+        batch.set(doc(db, "events", id), record, { merge: true });
+        batch.set(doc(db, "eventGeofences", id), geofence);
+        await batch.commit();
         await syncEventRecords(id, record);
         const recipients = students.filter((student) => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
         Promise.allSettled(recipients.map((student) => createNotification({ recipientUid: student.uid, category: "system", title: "Event updated", message: `${record.name} was updated. Review the latest event details.`, targetView: "events", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section }))).catch(() => {});
       } else {
-        await addDoc(collection(db, "events"), { ...record, createdAt: serverTimestamp(), createdBy: currentUser.uid });
+        const eventReference = doc(collection(db, "events"));
+        const batch = writeBatch(db);
+        batch.set(eventReference, { ...record, createdAt: serverTimestamp(), createdBy: currentUser.uid });
+        batch.set(doc(db, "eventGeofences", eventReference.id), geofence);
+        await batch.commit();
         const recipients = students.filter((student) => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
         Promise.allSettled(recipients.map((student) => createNotification({ recipientUid: student.uid, category: "system", title: "New event published", message: `${record.name} is scheduled for ${formatEventDate(record.date)}.`, targetView: "events", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section }))).catch(() => {});
       }
@@ -2776,8 +2771,15 @@ function initializeAdmin() {
     if (viewName === "assign-fine") renderFineOptions();
     if (viewName === "assigned-fines") renderAdminFines();
   });
+  if (currentUserRole === "head_admin") httpsCallable(functions, "migrateEventGeofences")().catch(() => {});
+  if (["head_admin", "attendance_admin"].includes(currentUserRole)) onSnapshot(collection(db, "eventGeofences"), (snapshot) => {
+    geofencesByEventId = new Map(snapshot.docs.map((item) => [item.id, item.data()]));
+    events = events.map((event) => ({ ...event, geofence: geofencesByEventId.get(event.id) || { enabled: false } }));
+    if (activeView === "geofence") loadGeofenceManager();
+    if (["dashboard", "modify-events", "past-events"].includes(activeView)) renderAdminEvents();
+  });
   onSnapshot(query(collection(db, "events"), orderBy("openAt", "asc")), (snapshot) => {
-    events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    events = snapshot.docs.map((item) => ({ id: item.id, ...item.data(), ...(["head_admin", "attendance_admin"].includes(currentUserRole) ? { geofence: geofencesByEventId.get(item.id) || { enabled: false } } : {}) }));
     if (["dashboard", "modify-events"].includes(activeView)) renderAdminEvents();
     if (activeView === "past-events") renderPastEvents();
     renderGeofenceEventOptions();

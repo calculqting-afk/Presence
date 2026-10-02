@@ -60,10 +60,11 @@ exports.checkInWithGeofence = onCall(async (request) => {
   if (typeof eventId !== "string" || !eventId) throw new HttpsError("invalid-argument", "An event is required.");
 
   const firestore = getFirestore();
-  const [studentSnapshot, eventSnapshot, faceSnapshot] = await Promise.all([
+  const [studentSnapshot, eventSnapshot, faceSnapshot, geofenceSnapshot] = await Promise.all([
     firestore.doc(`students/${request.auth.uid}`).get(),
     firestore.doc(`events/${eventId}`).get(),
-    firestore.doc(`faceRegistrations/${request.auth.uid}`).get()
+    firestore.doc(`faceRegistrations/${request.auth.uid}`).get(),
+    firestore.doc(`eventGeofences/${eventId}`).get()
   ]);
   if (!studentSnapshot.exists || studentSnapshot.data().active !== true) throw new HttpsError("permission-denied", "Only active students can check in.");
   if (!faceSnapshot.exists || faceSnapshot.data().registered !== true) throw new HttpsError("permission-denied", "Face registration is required before checking in.");
@@ -77,8 +78,9 @@ exports.checkInWithGeofence = onCall(async (request) => {
   if (!studentMatchesEventAudience(student, event.audience || "All students")) throw new HttpsError("permission-denied", "This event is not assigned to your section.");
 
   let verifiedLocation;
-  if (event.geofence?.enabled) {
-    verifiedLocation = verifiedGeofenceLocation(checkInLocation, event.geofence, "check-in");
+  const geofence = geofenceSnapshot.exists ? geofenceSnapshot.data() : event.geofence;
+  if (event.requiresGeofence || geofence?.enabled) {
+    verifiedLocation = verifiedGeofenceLocation(checkInLocation, geofence, "check-in");
   }
 
   const attendanceReference = firestore.doc(`attendance/${request.auth.uid}_${eventId}`);
@@ -112,10 +114,11 @@ exports.checkOutWithGeofence = onCall(async (request) => {
 
   const firestore = getFirestore();
   const attendanceReference = firestore.doc(`attendance/${request.auth.uid}_${eventId}`);
-  const [studentSnapshot, eventSnapshot, attendanceSnapshot] = await Promise.all([
+  const [studentSnapshot, eventSnapshot, attendanceSnapshot, geofenceSnapshot] = await Promise.all([
     firestore.doc(`students/${request.auth.uid}`).get(),
     firestore.doc(`events/${eventId}`).get(),
-    attendanceReference.get()
+    attendanceReference.get(),
+    firestore.doc(`eventGeofences/${eventId}`).get()
   ]);
   if (!studentSnapshot.exists || studentSnapshot.data().active !== true) throw new HttpsError("permission-denied", "Only active students can check out.");
   if (!eventSnapshot.exists) throw new HttpsError("not-found", "This event no longer exists.");
@@ -125,8 +128,9 @@ exports.checkOutWithGeofence = onCall(async (request) => {
   const checkOutCloseAt = event.checkOutClosesAt?.toMillis ? event.checkOutClosesAt : event.closeAt;
   const now = Date.now();
   if (!event.closeAt?.toMillis || !checkOutCloseAt?.toMillis || now < event.closeAt.toMillis() || now > checkOutCloseAt.toMillis()) throw new HttpsError("permission-denied", "The check-out window is not open.");
-  const verifiedLocation = event.geofence?.enabled
-    ? verifiedGeofenceLocation(checkOutLocation, event.geofence, "check-out")
+  const geofence = geofenceSnapshot.exists ? geofenceSnapshot.data() : event.geofence;
+  const verifiedLocation = (event.requiresGeofence || geofence?.enabled)
+    ? verifiedGeofenceLocation(checkOutLocation, geofence, "check-out")
     : undefined;
 
   await firestore.runTransaction(async (transaction) => {
@@ -139,6 +143,31 @@ exports.checkOutWithGeofence = onCall(async (request) => {
     });
   });
   return { ok: true };
+});
+
+// One-time, Head Admin-only migration for event documents created before
+// geofence coordinates were moved out of student-readable event records.
+exports.migrateEventGeofences = onCall(async (request) => {
+  await requireHeadAdmin(request);
+  const firestore = getFirestore();
+  const events = await firestore.collection("events").get();
+  let migrated = 0;
+  while (events.docs.length) {
+    const group = events.docs.splice(0, 400);
+    const batch = firestore.batch();
+    group.forEach((snapshot) => {
+      const legacyGeofence = snapshot.data().geofence;
+      if (!legacyGeofence) return;
+      batch.set(firestore.doc(`eventGeofences/${snapshot.id}`), legacyGeofence);
+      batch.update(snapshot.ref, {
+        geofence: FieldValue.delete(),
+        requiresGeofence: legacyGeofence.enabled === true
+      });
+      migrated += 1;
+    });
+    await batch.commit();
+  }
+  return { ok: true, migrated };
 });
 
 async function createReminderNotifications(firestore, events, reminder) {

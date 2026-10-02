@@ -49,6 +49,10 @@ service cloud.firestore {
       return isHeadAdmin() || isAttendanceAdmin();
     }
 
+    function canViewAttendanceReports() {
+      return isHeadAdmin() || isAttendanceAdmin() || isViewer();
+    }
+
     function isStudent() {
       return signedIn()
         && exists(/databases/$(database)/documents/students/$(request.auth.uid))
@@ -65,9 +69,10 @@ service cloud.firestore {
 
     function validGeofence(geofence) {
       return geofence is map
-        && geofence.keys().hasOnly(["enabled", "latitude", "longitude", "radiusMeters"])
+        && geofence.keys().hasOnly(["enabled", "latitude", "longitude", "radiusMeters", "address"])
         && geofence.keys().hasAll(["enabled"])
         && geofence.enabled is bool
+        && optionalShortText(geofence, "address", 500)
         && (!geofence.enabled || (
           geofence.keys().hasAll(["latitude", "longitude", "radiusMeters"])
           && geofence.latitude is number && geofence.latitude >= -90 && geofence.latitude <= 90
@@ -79,16 +84,16 @@ service cloud.firestore {
     function validEvent(data) {
       return data.keys().hasOnly([
           "name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff",
-          "audience", "description", "notes", "geofence", "openAt", "checkInClosesAt", "closeAt",
+          "audience", "description", "notes", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt",
           "checkOutClosesAt", "createdAt", "createdBy", "updatedAt"
         ])
-        && data.keys().hasAll(["name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "audience", "description", "geofence", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt"])
+        && data.keys().hasAll(["name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "audience", "description", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt"])
         && shortText(data.name, 160) && shortText(data.type, 60) && shortText(data.date, 10)
         && shortText(data.location, 240) && shortText(data.timeIn, 5) && shortText(data.checkInCutoff, 5)
         && shortText(data.timeOut, 5) && shortText(data.checkOutCutoff, 5)
         && data.audience in ["All students", "Section 1A", "Section 1B", "Section 2A", "Section 2B", "Section 3A", "Section 3B", "Section 4A", "Section 4B"]
         && shortText(data.description, 4000) && optionalShortText(data, "notes", 4000)
-        && validGeofence(data.geofence)
+        && data.requiresGeofence is bool
         && data.openAt is timestamp && data.checkInClosesAt is timestamp && data.closeAt is timestamp && data.checkOutClosesAt is timestamp
         && (!('createdAt' in data) || data.createdAt is timestamp)
         && optionalShortText(data, "createdBy", 128)
@@ -226,7 +231,10 @@ service cloud.firestore {
     }
 
     match /events/{eventId} {
-      allow read: if isAdmin() || isStudent();
+      // Viewer and student event reads exclude legacy documents until the
+      // Head Admin migration removes their embedded geofence coordinates.
+      allow read: if isHeadAdmin() || isAttendanceAdmin()
+        || ((isViewer() || isStudent()) && !resource.data.keys().hasAll(["geofence"]));
       allow create, update: if canManageAttendance()
         && validEvent(request.resource.data)
         && request.resource.data.openAt is timestamp
@@ -240,7 +248,7 @@ service cloud.firestore {
     }
 
     match /attendance/{attendanceId} {
-      allow read: if isAdmin()
+      allow read: if canViewAttendanceReports()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
       // Student attendance changes are only made by callable functions, whose
       // Admin SDK writes bypass these rules after server-side verification.
@@ -250,7 +258,7 @@ service cloud.firestore {
     }
 
     match /fines/{fineId} {
-      allow read: if isAdmin()
+      allow read: if canViewAttendanceReports()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
       allow create: if canManageAttendance() && validFine(request.resource.data);
       allow update: if canManageAttendance() && validFine(request.resource.data);
@@ -273,6 +281,13 @@ service cloud.firestore {
         && request.auth.uid == studentUid
         && request.resource.data.registered == true;
       allow delete: if canManageStudents();
+    }
+
+    match /eventGeofences/{eventId} {
+      // Exact event coordinates are private to attendance administrators.
+      allow read: if canManageAttendance();
+      allow create, update: if canManageAttendance() && validGeofence(request.resource.data);
+      allow delete: if canManageAttendance();
     }
 
     match /notifications/{notificationId} {
