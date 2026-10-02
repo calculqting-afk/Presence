@@ -55,11 +55,136 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/students/$(request.auth.uid)).data.active == true;
     }
 
+    function shortText(value, maximum) {
+      return value is string && value.size() <= maximum;
+    }
+
+    function optionalShortText(data, key, maximum) {
+      return !(key in data) || shortText(data[key], maximum);
+    }
+
+    function validGeofence(geofence) {
+      return geofence is map
+        && geofence.keys().hasOnly(["enabled", "latitude", "longitude", "radiusMeters"])
+        && geofence.keys().hasAll(["enabled"])
+        && geofence.enabled is bool
+        && (!geofence.enabled || (
+          geofence.keys().hasAll(["latitude", "longitude", "radiusMeters"])
+          && geofence.latitude is number && geofence.latitude >= -90 && geofence.latitude <= 90
+          && geofence.longitude is number && geofence.longitude >= -180 && geofence.longitude <= 180
+          && geofence.radiusMeters is number && geofence.radiusMeters > 0 && geofence.radiusMeters <= 10000
+        ));
+    }
+
+    function validEvent(data) {
+      return data.keys().hasOnly([
+          "name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff",
+          "audience", "description", "notes", "geofence", "openAt", "checkInClosesAt", "closeAt",
+          "checkOutClosesAt", "createdAt", "createdBy", "updatedAt"
+        ])
+        && data.keys().hasAll(["name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "audience", "description", "geofence", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt"])
+        && shortText(data.name, 160) && shortText(data.type, 60) && shortText(data.date, 10)
+        && shortText(data.location, 240) && shortText(data.timeIn, 5) && shortText(data.checkInCutoff, 5)
+        && shortText(data.timeOut, 5) && shortText(data.checkOutCutoff, 5)
+        && data.audience in ["All students", "Section 1A", "Section 1B", "Section 2A", "Section 2B", "Section 3A", "Section 3B", "Section 4A", "Section 4B"]
+        && shortText(data.description, 4000) && optionalShortText(data, "notes", 4000)
+        && validGeofence(data.geofence)
+        && data.openAt is timestamp && data.checkInClosesAt is timestamp && data.closeAt is timestamp && data.checkOutClosesAt is timestamp
+        && (!('createdAt' in data) || data.createdAt is timestamp)
+        && optionalShortText(data, "createdBy", 128)
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function validStudent(data) {
+      return data.keys().hasOnly([
+          "uid", "accountId", "accountIdKey", "authEmail", "firstName", "middleName", "lastName", "birthday",
+          "course", "section", "email", "phone", "photoDataUrl", "active", "role", "roleUpdatedAt",
+          "roleUpdatedBy", "createdAt", "updatedAt"
+        ])
+        && optionalShortText(data, "uid", 128) && optionalShortText(data, "accountId", 64)
+        && optionalShortText(data, "accountIdKey", 64) && optionalShortText(data, "authEmail", 320)
+        && optionalShortText(data, "firstName", 80) && optionalShortText(data, "middleName", 80)
+        && optionalShortText(data, "lastName", 80) && optionalShortText(data, "birthday", 10)
+        && optionalShortText(data, "course", 120) && optionalShortText(data, "email", 320)
+        && optionalShortText(data, "phone", 24)
+        && (!("photoDataUrl" in data) || (shortText(data.photoDataUrl, 350000) && data.photoDataUrl.matches('^data:image/(jpeg|png|webp);base64,.+$')))
+        && (!("section" in data) || data.section in ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"])
+        && (!("active" in data) || data.active is bool)
+        && (!("role" in data) || data.role in ["head_admin", "attendance_admin", "student_manager", "viewer", "student"])
+        && (!("roleUpdatedAt" in data) || data.roleUpdatedAt is timestamp)
+        && optionalShortText(data, "roleUpdatedBy", 128)
+        && (!("createdAt" in data) || data.createdAt is timestamp)
+        && (!("updatedAt" in data) || data.updatedAt is timestamp);
+    }
+
+    function validFine(data) {
+      return data.keys().hasOnly([
+          "studentUid", "studentId", "studentName", "eventId", "eventName", "eventDate", "eventTimeIn",
+          "eventTimeOut", "eventLocation", "serviceMinutes", "reason", "status", "assignmentHistory",
+          "assignedAt", "assignedBy", "updatedAt", "updatedBy", "eventRemoved", "eventRemovedAt"
+        ])
+        && data.keys().hasAll(["studentUid", "studentId", "studentName", "serviceMinutes", "reason", "status", "assignmentHistory"])
+        && shortText(data.studentUid, 128) && shortText(data.studentId, 64) && shortText(data.studentName, 200)
+        && optionalShortText(data, "eventId", 128) && optionalShortText(data, "eventName", 160)
+        && optionalShortText(data, "eventDate", 10) && optionalShortText(data, "eventTimeIn", 5)
+        && optionalShortText(data, "eventTimeOut", 5) && optionalShortText(data, "eventLocation", 240)
+        && data.serviceMinutes is number && data.serviceMinutes >= 1 && data.serviceMinutes <= 6000
+        && shortText(data.reason, 2000) && data.status in ["Pending", "Completed"]
+        && data.assignmentHistory is list && data.assignmentHistory.size() <= 50
+        && (!("assignedAt" in data) || data.assignedAt is timestamp) && optionalShortText(data, "assignedBy", 128)
+        && (!("updatedAt" in data) || data.updatedAt is timestamp) && optionalShortText(data, "updatedBy", 128)
+        && (!("eventRemoved" in data) || data.eventRemoved is bool)
+        && (!("eventRemovedAt" in data) || data.eventRemovedAt is timestamp);
+    }
+
+    function validNotification(data) {
+      return data.keys().hasOnly([
+          "recipientUid", "recipientRole", "category", "title", "message", "targetView", "studentName",
+          "studentId", "section", "eventId", "reminderType", "read", "readAt", "createdAt"
+        ])
+        && data.keys().hasAll(["recipientUid", "recipientRole", "category", "title", "message", "targetView", "studentName", "studentId", "section", "read", "createdAt"])
+        && shortText(data.recipientUid, 128) && shortText(data.recipientRole, 40)
+        && data.category in ["attendance", "service", "face", "system"]
+        && shortText(data.title, 160) && shortText(data.message, 2000) && shortText(data.targetView, 60)
+        && shortText(data.studentName, 200) && shortText(data.studentId, 64) && shortText(data.section, 10)
+        && optionalShortText(data, "eventId", 128) && optionalShortText(data, "reminderType", 30)
+        && data.read is bool && (!("readAt" in data) || data.readAt is timestamp) && data.createdAt is timestamp;
+    }
+
+    function validLocation(location) {
+      return location is map
+        && location.keys().hasOnly(["latitude", "longitude", "accuracy", "distanceMeters"])
+        && location.keys().hasAll(["latitude", "longitude", "distanceMeters"])
+        && location.latitude is number && location.latitude >= -90 && location.latitude <= 90
+        && location.longitude is number && location.longitude >= -180 && location.longitude <= 180
+        && (!("accuracy" in location) || (location.accuracy is number && location.accuracy >= 0 && location.accuracy <= 100000))
+        && location.distanceMeters is number && location.distanceMeters >= 0 && location.distanceMeters <= 20000000;
+    }
+
+    function validAttendance(data) {
+      return data.keys().hasOnly([
+          "studentUid", "studentId", "eventId", "eventName", "eventType", "eventDescription", "eventDate",
+          "timeIn", "timeOut", "location", "audience", "checkInLocation", "checkOutLocation", "attendedAt",
+          "checkedInAt", "checkedOutAt", "status"
+        ])
+        && data.keys().hasAll(["studentUid", "studentId", "eventId", "eventName", "eventType", "eventDescription", "eventDate", "timeIn", "timeOut", "location", "audience", "attendedAt", "checkedInAt", "status"])
+        && shortText(data.studentUid, 128) && shortText(data.studentId, 64) && shortText(data.eventId, 128)
+        && shortText(data.eventName, 160) && shortText(data.eventType, 60) && shortText(data.eventDescription, 4000)
+        && shortText(data.eventDate, 10) && shortText(data.timeIn, 5) && shortText(data.timeOut, 5)
+        && shortText(data.location, 240) && shortText(data.audience, 30)
+        && (!("checkInLocation" in data) || validLocation(data.checkInLocation))
+        && (!("checkOutLocation" in data) || validLocation(data.checkOutLocation))
+        && data.attendedAt is timestamp && data.checkedInAt is timestamp
+        && (!("checkedOutAt" in data) || data.checkedOutAt is timestamp)
+        && data.status in ["checked-in", "completed"];
+    }
+
     match /students/{studentUid} {
       allow get: if isAdmin()
         || (signedIn() && request.auth.uid == studentUid && resource.data.active == true);
       allow list: if isAdmin();
       allow create: if canManageStudents()
+        && validStudent(request.resource.data)
         && !request.resource.data.keys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy"]);
       allow delete: if canManageStudents();
       allow update: if (isHeadAdmin()
@@ -68,9 +193,11 @@ service cloud.firestore {
           && request.resource.data.roleUpdatedAt is timestamp
           && request.resource.data.roleUpdatedBy == request.auth.uid)
         || (canManageStudents()
+          && validStudent(request.resource.data)
           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy"]))
         || (isStudent()
           && request.auth.uid == studentUid
+          && validStudent(request.resource.data)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             "accountId", "accountIdKey", "firstName", "middleName", "lastName", "birthday", "course", "section", "email", "phone", "photoDataUrl", "updatedAt"
           ])
@@ -101,6 +228,7 @@ service cloud.firestore {
     match /events/{eventId} {
       allow read: if isAdmin() || isStudent();
       allow create, update: if canManageAttendance()
+        && validEvent(request.resource.data)
         && request.resource.data.openAt is timestamp
         && request.resource.data.checkInClosesAt is timestamp
         && request.resource.data.closeAt is timestamp
@@ -116,15 +244,17 @@ service cloud.firestore {
         || (isStudent() && resource.data.studentUid == request.auth.uid);
       // Student attendance changes are only made by callable functions, whose
       // Admin SDK writes bypass these rules after server-side verification.
-      allow create: if canManageAttendance();
-      allow update: if canManageAttendance();
+      allow create: if canManageAttendance() && validAttendance(request.resource.data);
+      allow update: if canManageAttendance() && validAttendance(request.resource.data);
       allow delete: if canManageAttendance();
     }
 
     match /fines/{fineId} {
       allow read: if isAdmin()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
-      allow create, update, delete: if canManageAttendance();
+      allow create: if canManageAttendance() && validFine(request.resource.data);
+      allow update: if canManageAttendance() && validFine(request.resource.data);
+      allow delete: if canManageAttendance();
     }
 
     match /dismissedHistory/{dismissalId} {
@@ -150,12 +280,14 @@ service cloud.firestore {
         || (isStudent() && resource.data.recipientUid == request.auth.uid);
       allow delete: if (canManageAttendance() && resource.data.recipientRole == "admin")
         || (isStudent() && resource.data.recipientUid == request.auth.uid);
-      allow update: if canManageAttendance()
+      allow update: if (canManageAttendance() && validNotification(request.resource.data))
         || (isStudent()
           && resource.data.recipientUid == request.auth.uid
+          && validNotification(request.resource.data)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["read", "readAt"]));
-      allow create: if canManageAttendance()
+      allow create: if (canManageAttendance() && validNotification(request.resource.data))
         || (isStudent()
+          && validNotification(request.resource.data)
           && request.resource.data.category == "face"
           && ((request.resource.data.recipientUid == request.auth.uid)
             || request.resource.data.recipientRole == "admin"));
