@@ -234,32 +234,73 @@ function wireNotificationCenter() {
     if (!item) return;
     const record = notificationRecords.find((notification) => notification.id === item.dataset.openNotification);
     if (!record) return;
-    if (!record.read) await setDoc(doc(db, "notifications", record.id), { read: true, readAt: serverTimestamp() }, { merge: true });
+    if (!record.read) {
+      const previous = { ...record };
+      record.read = true;
+      record.readAt = new Date();
+      render();
+      try {
+        await setDoc(doc(db, "notifications", record.id), { read: true, readAt: serverTimestamp() }, { merge: true });
+      } catch (error) {
+        Object.assign(record, previous);
+        render();
+        showDashboardToast("Unable to mark notification read", error.code === "permission-denied" ? "Your account is not allowed to update this notification." : (error.message || "Please try again."));
+        return;
+      }
+    }
     close();
     openView(record.targetView || "dashboard");
   });
   document.querySelector("#markNotificationsRead").addEventListener("click", async () => {
     const unread = notificationRecords.filter((item) => !item.read);
     if (!unread.length) return;
-    const batch = writeBatch(db);
-    unread.forEach((item) => batch.set(doc(db, "notifications", item.id), { read: true, readAt: serverTimestamp() }, { merge: true }));
-    await batch.commit();
+    const button = document.querySelector("#markNotificationsRead");
+    const previous = unread.map((item) => ({ item, read: item.read, readAt: item.readAt }));
+    unread.forEach((item) => { item.read = true; item.readAt = new Date(); });
+    button.disabled = true;
+    render();
+    try {
+      for (let index = 0; index < unread.length; index += 400) {
+        const batch = writeBatch(db);
+        unread.slice(index, index + 400).forEach((item) => batch.set(doc(db, "notifications", item.id), { read: true, readAt: serverTimestamp() }, { merge: true }));
+        await batch.commit();
+      }
+    } catch (error) {
+      previous.forEach(({ item, read, readAt }) => { item.read = read; item.readAt = readAt; });
+      render();
+      showDashboardToast("Unable to mark notifications read", error.code === "permission-denied" ? "Your account is not allowed to update these notifications." : (error.message || "Please try again."));
+    } finally {
+      button.disabled = false;
+    }
   });
   document.querySelector("#clearReadNotifications").addEventListener("click", async () => {
     const read = notificationRecords.filter((item) => item.read);
     if (!read.length) return;
-    const batch = writeBatch(db);
-    read.forEach((item) => batch.delete(doc(db, "notifications", item.id)));
-    await batch.commit();
+    const button = document.querySelector("#clearReadNotifications");
+    const previous = notificationRecords;
+    notificationRecords = notificationRecords.filter((item) => !item.read);
+    button.disabled = true;
+    render();
+    try {
+      for (let index = 0; index < read.length; index += 400) {
+        const batch = writeBatch(db);
+        read.slice(index, index + 400).forEach((item) => batch.delete(doc(db, "notifications", item.id)));
+        await batch.commit();
+      }
+    } catch (error) {
+      notificationRecords = previous;
+      render();
+      showDashboardToast("Unable to clear notifications", error.code === "permission-denied" ? "Your account is not allowed to delete these notifications." : (error.message || "Please try again."));
+    } finally {
+      button.disabled = false;
+    }
   });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !panel.hidden) close(); });
-  const notificationQuery = dashboardRole === "admin"
-    ? query(collection(db, "notifications"), where("recipientRole", "==", "admin"))
-    : query(collection(db, "notifications"), where("recipientUid", "==", currentUser.uid));
+  const notificationQuery = query(collection(db, "notifications"), where("recipientUid", "==", currentUser.uid));
   onSnapshot(notificationQuery, (snapshot) => {
     notificationRecords = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
     render();
-  });
+  }, (error) => showDashboardToast("Notifications unavailable", error.code === "permission-denied" ? "Your account cannot load notifications." : (error.message || "Please refresh and try again.")));
 }
 
 function renderView(viewName) {
@@ -1219,7 +1260,7 @@ function initializeStudent() {
     document.querySelector("#faceStatus").className = "badge green";
     lockFaceRegistration();
     createNotification({ recipientUid: currentUser.uid, category: "face", title: "Face registration confirmed", message: "Your face registration is ready for future attendance check-ins.", targetView: "face" }).catch(() => {});
-    createNotification({ recipientRole: "admin", category: "face", title: "Face registration completed", message: `${[studentProfile?.firstName, studentProfile?.lastName].filter(Boolean).join(" ") || "A student"} completed face registration.`, targetView: "modify-students", studentName: [studentProfile?.firstName, studentProfile?.lastName].filter(Boolean).join(" "), studentId: studentProfile?.accountId || "", section: studentProfile?.section || "" }).catch(() => {});
+    httpsCallable(functions, "notifyFaceRegistration")().catch(() => {});
     showDashboardToast("Face registered", "Registration status was saved successfully.");
   });
 
@@ -1258,6 +1299,21 @@ function initializeAdmin() {
   let faceRegistrationsByUid = new Map();
   let presenceByUid = new Map();
   let legacyPresenceByUid = new Map();
+  async function notifyRoles(roles, notification) {
+    const recipients = students
+      .filter((student) => student.active !== false && roles.includes(student.role))
+      .map((student) => ({ uid: student.uid, role: student.role }));
+    if (roles.includes(currentUserRole) && !recipients.some((recipient) => recipient.uid === currentUser.uid)) {
+      recipients.push({ uid: currentUser.uid, role: currentUserRole });
+    }
+    const results = await Promise.allSettled(recipients.map((recipient) => createNotification({
+      ...notification,
+      recipientUid: recipient.uid,
+      recipientRole: recipient.role
+    })));
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed) throw failed.reason;
+  }
   const eventForm = document.querySelector("#eventForm");
   function setDefaultCutoff(timeInputId, cutoffInputId) {
     const time = document.querySelector(timeInputId).value;
@@ -1846,7 +1902,7 @@ function initializeAdmin() {
           updatedBy: currentUser.uid
         }, { merge: true });
         createNotification({ recipientUid: student.uid, category: "service", title: addingCommunityService ? "Community service updated" : "Community service requirement updated", message: addingCommunityService ? `${formatServiceMinutes(enteredServiceMinutes)} was added to your ${fineData.eventName || "community service"} requirement.` : `Your service requirement for ${fineData.eventName || "an attendance absence"} was updated.`, targetView: "fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
-        createNotification({ recipientRole: "admin", category: "service", title: "Community service updated", message: `${student.accountId}'s service requirement was updated.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
+        notifyRoles(["head_admin", "attendance_admin"], { category: "service", title: "Community service updated", message: `${student.accountId}'s service requirement was updated.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
         showDashboardToast(addingCommunityService ? "Community service added" : "Fine updated", addingCommunityService ? `${formatServiceMinutes(enteredServiceMinutes)} was added to this fine.` : `${student.accountId}'s fine was updated.`);
       } else {
         await addDoc(collection(db, "fines"), {
@@ -1856,7 +1912,7 @@ function initializeAdmin() {
           assignedBy: currentUser.uid
         });
         createNotification({ recipientUid: student.uid, category: "service", title: "Community service assigned", message: `You were assigned ${formatServiceMinutes(serviceMinutes)} of community service for ${fineData.eventName || "an attendance absence"}.`, targetView: "fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
-        createNotification({ recipientRole: "admin", category: "service", title: "Community service assigned", message: `${student.accountId} was assigned a community-service requirement.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
+        notifyRoles(["head_admin", "attendance_admin"], { category: "service", title: "Community service assigned", message: `${student.accountId} was assigned a community-service requirement.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
         showDashboardToast("Fine assigned", `${student.accountId} was assigned a new community-service requirement.`);
       }
       resetFineForm();
@@ -2115,6 +2171,7 @@ function initializeAdmin() {
       const registration = await waitForFaceRegistration(student.uid, false);
       if (!registration) throw new Error("Drive did not confirm removal. The student remains registered.");
       await createNotification({ recipientUid: student.uid, category: "face", title: "Face registration reset", message: "Your administrator reset your face registration. You may now register one new photo.", targetView: "face", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section });
+      await notifyRoles(["head_admin", "student_manager"], { category: "face", title: "Face registration reset", message: `${student.accountId}'s face registration was reset.`, targetView: "modify-students", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section });
       showDashboardToast("Face registration reset", `${student.accountId} can now register one new photo.`);
       return true;
     } catch (error) {
@@ -2244,6 +2301,7 @@ function initializeAdmin() {
         await syncEventRecords(id, record);
         const recipients = students.filter((student) => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
         Promise.allSettled(recipients.map((student) => createNotification({ recipientUid: student.uid, category: "system", title: "Event updated", message: `${record.name} was updated. Review the latest event details.`, targetView: "events", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section }))).catch(() => {});
+        notifyRoles(["head_admin", "attendance_admin", "viewer"], { category: "system", title: "Event updated", message: `${record.name} was updated. Review the latest event details.`, targetView: "modify-events" }).catch(() => {});
       } else {
         const eventReference = doc(collection(db, "events"));
         const batch = writeBatch(db);
@@ -2252,6 +2310,7 @@ function initializeAdmin() {
         await batch.commit();
         const recipients = students.filter((student) => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
         Promise.allSettled(recipients.map((student) => createNotification({ recipientUid: student.uid, category: "system", title: "New event published", message: `${record.name} is scheduled for ${formatEventDate(record.date)}.`, targetView: "events", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section }))).catch(() => {});
+        notifyRoles(["head_admin", "attendance_admin", "viewer"], { category: "system", title: "New event published", message: `${record.name} is scheduled for ${formatEventDate(record.date)}.`, targetView: "modify-events" }).catch(() => {});
       }
       const returnView = eventForm.dataset.returnView || "modify-events";
       resetEventForm();

@@ -20,6 +20,34 @@ function studentMatchesEventAudience(student, audience) {
     && (audience === "All students" || audience === `Section ${student.section}`);
 }
 
+function notificationData(recipient, notification) {
+  return {
+    recipientUid: recipient.uid,
+    recipientRole: recipient.role || ROLE.STUDENT,
+    category: notification.category || "system",
+    title: notification.title,
+    message: notification.message,
+    targetView: notification.targetView || "dashboard",
+    studentName: notification.studentName || "",
+    studentId: notification.studentId || "",
+    section: notification.section || "",
+    read: false,
+    createdAt: FieldValue.serverTimestamp()
+  };
+}
+
+async function notifyRoles(firestore, roles, notification) {
+  const profiles = await firestore.collection("students").where("active", "==", true).get();
+  const recipients = profiles.docs
+    .map((snapshot) => ({ uid: snapshot.id, ...snapshot.data() }))
+    .filter((profile) => roles.includes(profile.role));
+  if (roles.includes(ROLE.HEAD_ADMIN)) {
+    const bootstrap = await getAuth().getUserByEmail(ADMIN_EMAIL).catch((error) => error.code === "auth/user-not-found" ? null : Promise.reject(error));
+    if (bootstrap && !recipients.some((recipient) => recipient.uid === bootstrap.uid)) recipients.push({ uid: bootstrap.uid, role: ROLE.HEAD_ADMIN });
+  }
+  await Promise.all(recipients.map((recipient) => firestore.collection("notifications").add(notificationData(recipient, notification))));
+}
+
 function distanceInMeters(latitudeA, longitudeA, latitudeB, longitudeB) {
   const radians = (value) => value * Math.PI / 180;
   const earthRadius = 6371000;
@@ -141,6 +169,29 @@ exports.checkOutWithGeofence = onCall(async (request) => {
       checkedOutAt: FieldValue.serverTimestamp(),
       status: "completed"
     });
+  });
+  return { ok: true };
+});
+
+exports.notifyFaceRegistration = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in is required.");
+  const firestore = getFirestore();
+  const [studentSnapshot, registrationSnapshot] = await Promise.all([
+    firestore.doc(`students/${request.auth.uid}`).get(),
+    firestore.doc(`faceRegistrations/${request.auth.uid}`).get()
+  ]);
+  if (!studentSnapshot.exists || studentSnapshot.data().active !== true || registrationSnapshot.data()?.registered !== true) {
+    throw new HttpsError("permission-denied", "Face registration has not been verified.");
+  }
+  const student = studentSnapshot.data();
+  await notifyRoles(firestore, [ROLE.HEAD_ADMIN, ROLE.STUDENT_MANAGER], {
+    category: "face",
+    title: "Face registration completed",
+    message: `${[student.firstName, student.lastName].filter(Boolean).join(" ") || "A student"} completed face registration.`,
+    targetView: "modify-students",
+    studentName: [student.firstName, student.lastName].filter(Boolean).join(" "),
+    studentId: student.accountId || "",
+    section: student.section || ""
   });
   return { ok: true };
 });
@@ -289,6 +340,9 @@ function validateStudent(data) {
   }
   if (!/^[A-Za-z0-9._-]+$/.test(data.accountId)) {
     throw new HttpsError("invalid-argument", "Student ID may only use letters, numbers, dots, dashes, and underscores.");
+  }
+  if (typeof data.email === "string" && data.email.trim().toLowerCase() === ADMIN_EMAIL) {
+    throw new HttpsError("invalid-argument", "The protected Head Admin email cannot be registered as a student email.");
   }
   if (!allowedSections.has(data.section)) {
     throw new HttpsError("invalid-argument", "Choose a valid section from 1A through 4B.");
