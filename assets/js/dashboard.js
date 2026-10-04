@@ -1,6 +1,5 @@
-import { ADMIN_EMAIL, auth, db, functions, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js";
+import { ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js";
 import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
-import { httpsCallable } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-functions.js";
 import {
   Timestamp,
   addDoc,
@@ -67,12 +66,26 @@ const ROLE_VIEWS = {
   student: ["dashboard", "events", "attendances", "history", "fines", "face", "profile"]
 };
 const ROLE_ACCESS_LABELS = { head_admin: "Full access", attendance_admin: "Attendance access", student_manager: "Student management", viewer: "Read-only access" };
+const NOTIFICATION_CATEGORIES_BY_ROLE = {
+  student: new Set(["attendance", "face"]),
+  head_admin: new Set(["attendance", "service", "face", "system"]),
+  attendance_admin: new Set(["attendance", "system"]),
+  student_manager: new Set(["face", "system"]),
+  viewer: new Set(["attendance", "system"])
+};
+
+function canReceiveNotification(role, category) {
+  return NOTIFICATION_CATEGORIES_BY_ROLE[role]?.has(category || "system") || false;
+}
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
 }
 
 const ROLE_LABELS = { head_admin: "Head Admin", attendance_admin: "Attendance Admin", student_manager: "Student Manager", viewer: "Viewer", student: "Student" };
+function firebaseErrorCode(error) {
+  return String(error?.code || "").replace(/^(?:firestore|functions)\//, "");
+}
 function roleLabel(role) {
   return ROLE_LABELS[role] || ROLE_LABELS.student;
 }
@@ -127,6 +140,8 @@ function showDashboardToast(titleText, messageText) {
 }
 
 async function createNotification(notification) {
+  const effectiveRecipientRole = notification.recipientRole || (notification.recipientUid === currentUser?.uid ? currentUserRole : "");
+  if (effectiveRecipientRole && !canReceiveNotification(effectiveRecipientRole, notification.category)) return null;
   return addDoc(collection(db, "notifications"), {
     recipientUid: notification.recipientUid || "",
     recipientRole: notification.recipientRole || "",
@@ -137,6 +152,7 @@ async function createNotification(notification) {
     studentName: notification.studentName || "",
     studentId: notification.studentId || "",
     section: notification.section || "",
+    ...(notification.eventId ? { eventId: notification.eventId } : {}),
     read: false,
     createdAt: serverTimestamp()
   });
@@ -203,6 +219,8 @@ function wireNotificationCenter() {
   const search = document.querySelector("#notificationSearch");
   let notificationRecords = [];
   let activeFilter = "all";
+  let unsubscribeNotifications;
+  let retryNotificationsTimer;
 
   const close = () => { panel.hidden = true; bell.setAttribute("aria-expanded", "false"); };
   const render = () => {
@@ -296,11 +314,33 @@ function wireNotificationCenter() {
     }
   });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !panel.hidden) close(); });
-  const notificationQuery = query(collection(db, "notifications"), where("recipientUid", "==", currentUser.uid));
-  onSnapshot(notificationQuery, (snapshot) => {
-    notificationRecords = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-    render();
-  }, (error) => showDashboardToast("Notifications unavailable", error.code === "permission-denied" ? "Your account cannot load notifications." : (error.message || "Please refresh and try again.")));
+  const subscribeToNotifications = () => {
+    window.clearTimeout(retryNotificationsTimer);
+    unsubscribeNotifications?.();
+    const notificationQuery = query(collection(db, "notifications"), where("recipientUid", "==", currentUser.uid));
+    unsubscribeNotifications = onSnapshot(notificationQuery, (snapshot) => {
+      notificationRecords = snapshot.docs
+        .map((item) => ({ id: item.id, ...item.data() }))
+        .filter((item) => canReceiveNotification(currentUserRole, item.category))
+        .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      render();
+    }, (error) => {
+      // A listener error is terminal. Keep cached records and retry transient failures.
+      console.error("Notification listener failed", { code: error.code, message: error.message });
+      // A rules or auth-token change can resolve a permission error without a
+      // page reload, so every terminal listener error is retried silently.
+      retryNotificationsTimer = window.setTimeout(subscribeToNotifications, 5000);
+    });
+  };
+  window.addEventListener("online", subscribeToNotifications);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") subscribeToNotifications();
+  });
+  window.addEventListener("beforeunload", () => {
+    window.clearTimeout(retryNotificationsTimer);
+    unsubscribeNotifications?.();
+  }, { once: true });
+  subscribeToNotifications();
 }
 
 function renderView(viewName) {
@@ -682,8 +722,8 @@ function initializeStudent() {
   }
 
   function renderEvents() {
-    const attendanceIds = new Set(attendance.map((record) => record.eventId));
-    const activeEvents = events.filter((event) => getEventStatus(event) !== "closed");
+    const attendanceByEventId = new Map(attendance.map((record) => [record.eventId, record]));
+    const activeEvents = events.filter((event) => !isEventFinished(event));
     const eventGrid = document.querySelector("#studentEventGrid");
     const timeline = document.querySelector("#studentEventTimeline");
     if (!activeEvents.length) {
@@ -692,15 +732,27 @@ function initializeStudent() {
     } else {
       eventGrid.innerHTML = activeEvents.map((event) => {
         const status = getEventStatus(event);
-        const attended = attendanceIds.has(event.id);
+        const attendanceRecord = attendanceByEventId.get(event.id);
+        const attended = Boolean(attendanceRecord);
+        const completed = attendanceRecord?.status === "completed" || Boolean(attendanceRecord?.checkedOutAt);
+        const checkoutOpen = attended && !completed && isCheckoutAvailable(event);
         const disabled = attended || status !== "open";
-        const buttonText = attended ? "✓ Attendance saved" : status === "open" ? "Check in" : status === "closed" ? "Check-in closed" : "Not open yet";
+        const buttonText = completed
+          ? "✓ Attendance completed"
+          : attended
+            ? checkoutOpen ? "Check out in My Attendances" : "✓ Checked in"
+            : status === "open" ? "Check in" : status === "closed" ? "Check-in closed" : "Not open yet";
+        const attendanceBadge = completed
+          ? '<span class="badge green">Completed</span>'
+          : attended
+            ? `<span class="badge green">${checkoutOpen ? "Checkout available" : "Checked in"}</span>`
+            : eventStatusBadge(status);
         const description = event.description || event.notes || `Attendance event for ${event.audience}.`;
         const checkInCutoff = event.checkInCutoff || event.timeOut;
         const checkOutCutoff = event.checkOutCutoff || "";
-        return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div><div class="event-meta"><span class="event-check-time"><b>IN</b>${escapeHtml(formatEventTime(event.timeIn))} – ${escapeHtml(formatEventTime(checkInCutoff))}</span><span class="event-check-time"><b>OUT</b>${escapeHtml(formatEventTime(event.timeOut))}${checkOutCutoff ? ` – ${escapeHtml(formatEventTime(checkOutCutoff))}` : ""}</span><span class="event-location">${escapeHtml(event.location)}</span></div><div class="event-card-actions">${attended ? '<span class="badge green">Attended</span>' : eventStatusBadge(status)}<button class="${attended ? "outline-button" : "primary-button"}" type="button" data-attend-event="${escapeHtml(event.id)}" ${disabled ? "disabled" : ""}>${buttonText}</button></div></div></article>`;
+        return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div><div class="event-meta"><span class="event-check-time"><b>IN</b>${escapeHtml(formatEventTime(event.timeIn))} – ${escapeHtml(formatEventTime(checkInCutoff))}</span><span class="event-check-time"><b>OUT</b>${escapeHtml(formatEventTime(event.timeOut))}${checkOutCutoff ? ` – ${escapeHtml(formatEventTime(checkOutCutoff))}` : ""}</span><span class="event-location">${escapeHtml(event.location)}</span></div><div class="event-card-actions">${attendanceBadge}<button class="${attended ? "outline-button" : "primary-button"}" type="button" data-attend-event="${escapeHtml(event.id)}" ${disabled ? "disabled" : ""}>${buttonText}</button></div></div></article>`;
       }).join("");
-      timeline.innerHTML = `<div class="timeline">${activeEvents.slice(0, 4).map((event) => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${attendanceIds.has(event.id) ? '<span class="badge green">Attended</span>' : eventStatusBadge(getEventStatus(event))}</div>`).join("")}</div>`;
+      timeline.innerHTML = `<div class="timeline">${activeEvents.slice(0, 4).map((event) => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${attendanceByEventId.has(event.id) ? '<span class="badge green">Attended</span>' : eventStatusBadge(getEventStatus(event))}</div>`).join("")}</div>`;
     }
     renderAttendanceSummary();
   }
@@ -727,7 +779,7 @@ function initializeStudent() {
 
   function renderAttendanceSummary() {
     const attendedIds = new Set(attendance.map((record) => record.eventId));
-    const closedEvents = events.filter((event) => getEventStatus(event) === "closed");
+    const closedEvents = events.filter((event) => isEventFinished(event));
     const absences = closedEvents.filter((event) => !attendedIds.has(event.id));
     const presentDays = new Set(attendance.map((record) => record.eventDate)).size;
     document.querySelector("#eventsAttendedCount").textContent = attendance.length;
@@ -995,15 +1047,6 @@ function initializeStudent() {
       reject(locationError);
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }));
   }
-  function distanceInMeters(latitudeA, longitudeA, latitudeB, longitudeB) {
-    const radians = (value) => value * Math.PI / 180;
-    const earthRadius = 6371000;
-    const deltaLatitude = radians(latitudeB - latitudeA);
-    const deltaLongitude = radians(longitudeB - longitudeA);
-    const a = Math.sin(deltaLatitude / 2) ** 2 + Math.cos(radians(latitudeA)) * Math.cos(radians(latitudeB)) * Math.sin(deltaLongitude / 2) ** 2;
-    return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }
-
   document.querySelector("#studentEventGrid").addEventListener("click", async (clickEvent) => {
     const button = clickEvent.target.closest("[data-attend-event]");
     if (!button) return;
@@ -1030,22 +1073,36 @@ function initializeStudent() {
         showDashboardToast("Checking your location", "Allow location access to confirm you are in the attendance area.");
         const position = await getCurrentCheckInLocation();
         const { latitude, longitude, accuracy } = position.coords;
-        checkInLocation = { latitude, longitude, accuracy: Math.round(accuracy) };
+        checkInLocation = { latitude, longitude, accuracy: Math.round(accuracy), distanceMeters: 0 };
       }
-      await httpsCallable(functions, "checkInWithGeofence")({
+      await setDoc(doc(db, "attendance", `${currentUser.uid}_${selectedEvent.id}`), {
+        studentUid: currentUser.uid,
+        studentId: currentUserProfile.accountId || "",
         eventId: selectedEvent.id,
-        checkInLocation
+        eventName: selectedEvent.name || "Attendance event",
+        eventType: selectedEvent.type || "School Event",
+        eventDescription: selectedEvent.description || "",
+        eventDate: selectedEvent.date || "",
+        timeIn: selectedEvent.timeIn || "",
+        timeOut: selectedEvent.timeOut || "",
+        location: selectedEvent.location || "",
+        audience: selectedEvent.audience || "All students",
+        ...(checkInLocation ? { checkInLocation } : {}),
+        attendedAt: serverTimestamp(),
+        checkedInAt: serverTimestamp(),
+        status: "checked-in"
       });
       showDashboardToast("Attendance recorded", "Your attendance was saved successfully.");
     } catch (error) {
-      if (error.geofenceIssue === "outside") {
-        showGeofenceError("You are outside the attendance area", `You are approximately ${error.distanceMeters} meters from the event location. You must be within ${error.radiusMeters} meters to check in, so attendance cannot be recorded yet.`);
-      } else if (error.geofenceIssue === "location") {
+      if (error.geofenceIssue === "location") {
         showGeofenceError("Allow location for Presence", "Your device location may be on, but this browser has not allowed this site to use it. Click the site controls icon to the left of the address bar, set Location to Allow, then reload this page and try again.");
-      } else if (error.geofenceIssue === "configuration") {
-        showGeofenceError("Attendance area needs setup", error.message);
+      } else if (selectedEvent.requiresGeofence && firebaseErrorCode(error) === "permission-denied") {
+        showGeofenceError("You are outside the attendance area", "You must be within the event attendance area to check in. Allow location access and move closer to the venue, then try again.");
       } else {
-        showDashboardToast("Attendance rejected", error.code === "permission-denied" ? "The attendance window is not open, or your account cannot check in to this event." : error.message);
+        const message = error.code === "permission-denied"
+          ? "Attendance was rejected. Confirm that you are within the event area and that the attendance window is open."
+          : (error.message || "Attendance could not be recorded. Please try again.");
+        showDashboardToast("Attendance rejected", message);
       }
       button.disabled = false;
     }
@@ -1072,15 +1129,22 @@ function initializeStudent() {
       let checkOutLocation;
       if (event.requiresGeofence) {
         const position = await getCurrentCheckInLocation();
-        checkOutLocation = { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: Math.round(position.coords.accuracy) };
+        checkOutLocation = { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: Math.round(position.coords.accuracy), distanceMeters: 0 };
       }
-      await httpsCallable(functions, "checkOutWithGeofence")({
-        eventId: record.eventId,
-        checkOutLocation
-      });
+      await setDoc(doc(db, "attendance", `${currentUser.uid}_${record.eventId}`), {
+        ...(checkOutLocation ? { checkOutLocation } : {}),
+        checkedOutAt: serverTimestamp(),
+        status: "completed"
+      }, { merge: true });
       showDashboardToast("Checkout recorded", "Your attendance record now includes your checkout time.");
     } catch (error) {
-      showDashboardToast("Unable to check out", error.message || "Try again while you are in the attendance area.");
+      if (error.geofenceIssue === "location") {
+        showGeofenceError("Allow location for Presence", "Your device location may be on, but this browser has not allowed this site to use it. Click the site controls icon to the left of the address bar, set Location to Allow, then reload this page and try again.");
+      } else if (event.requiresGeofence && firebaseErrorCode(error) === "permission-denied") {
+        showGeofenceError("You are outside the attendance area", "You must be within the event attendance area to check out. Allow location access and move closer to the venue, then try again.");
+      } else {
+        showDashboardToast("Unable to check out", error.message || "Try again while you are in the attendance area.");
+      }
       button.disabled = false;
     }
   });
@@ -1259,8 +1323,7 @@ function initializeStudent() {
     document.querySelector("#faceStatus").textContent = "Registered";
     document.querySelector("#faceStatus").className = "badge green";
     lockFaceRegistration();
-    createNotification({ recipientUid: currentUser.uid, category: "face", title: "Face registration confirmed", message: "Your face registration is ready for future attendance check-ins.", targetView: "face" }).catch(() => {});
-    httpsCallable(functions, "notifyFaceRegistration")().catch(() => {});
+        createNotification({ recipientUid: currentUser.uid, category: "face", title: "Face registration confirmed", message: "Your face registration is ready for future attendance check-ins.", targetView: "face" }).catch(() => {});
     showDashboardToast("Face registered", "Registration status was saved successfully.");
   });
 
@@ -1747,7 +1810,9 @@ function initializeAdmin() {
   }
 
   function eventCardMarkup(event, past) {
-    return `<article class="admin-event-card"><div class="admin-event-card-top"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span>${eventStatusBadge(getEventStatus(event))}</div><h3>${escapeHtml(event.name)}</h3><p>${escapeHtml(event.description || event.notes || "No description provided.")}</p><div class="event-detail-boxes"><div><span>Date</span><strong>${escapeHtml(formatEventDate(event.date))}</strong></div><div><span>Time</span><strong>${escapeHtml(formatTimeWindow(event))}</strong></div><div><span>Location</span><strong>${escapeHtml(event.location)}</strong></div><div><span>Attendance area</span><strong>${event.geofence?.enabled ? `${escapeHtml(String(event.geofence.radiusMeters || 100))} m required` : "Not required"}</strong></div></div><div class="admin-event-card-actions">${past ? "" : `<button class="outline-button" type="button" data-manage-geofence="${event.id}">Attendance area</button>`}<button class="outline-button" type="button" data-edit-event="${event.id}">Edit event</button><button class="small-button danger modal-danger-button" type="button" data-delete-event="${event.id}">Remove</button></div></article>`;
+    const checkInWindow = `${formatEventTime(event.timeIn)} – ${formatEventTime(event.checkInCutoff || event.timeOut)}`;
+    const checkOutWindow = `${formatEventTime(event.timeOut)} – ${formatEventTime(event.checkOutCutoff || timePlusMinutes(event.timeOut) || event.timeOut)}`;
+    return `<article class="event-card admin-event-card admin-event-card-student-style"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(event.description || event.notes || "No description provided.")}</div><div class="event-meta"><span class="event-check-time"><b>IN</b>${escapeHtml(checkInWindow)}</span><span class="event-check-time"><b>OUT</b>${escapeHtml(checkOutWindow)}</span><span class="event-location">${escapeHtml(event.location)}</span></div><div class="event-card-actions">${eventStatusBadge(getEventStatus(event))}<div class="admin-event-card-actions">${past ? "" : `<button class="outline-button" type="button" data-manage-geofence="${event.id}">Attendance area</button>`}<button class="outline-button" type="button" data-edit-event="${event.id}">Edit event</button><button class="small-button danger modal-danger-button" type="button" data-delete-event="${event.id}">Remove</button></div></div></div></article>`;
   }
 
   function renderPastEvents() {
@@ -1901,7 +1966,6 @@ function initializeAdmin() {
           updatedAt: serverTimestamp(),
           updatedBy: currentUser.uid
         }, { merge: true });
-        createNotification({ recipientUid: student.uid, category: "service", title: addingCommunityService ? "Community service updated" : "Community service requirement updated", message: addingCommunityService ? `${formatServiceMinutes(enteredServiceMinutes)} was added to your ${fineData.eventName || "community service"} requirement.` : `Your service requirement for ${fineData.eventName || "an attendance absence"} was updated.`, targetView: "fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
         notifyRoles(["head_admin", "attendance_admin"], { category: "service", title: "Community service updated", message: `${student.accountId}'s service requirement was updated.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
         showDashboardToast(addingCommunityService ? "Community service added" : "Fine updated", addingCommunityService ? `${formatServiceMinutes(enteredServiceMinutes)} was added to this fine.` : `${student.accountId}'s fine was updated.`);
       } else {
@@ -1911,7 +1975,6 @@ function initializeAdmin() {
           assignedAt: serverTimestamp(),
           assignedBy: currentUser.uid
         });
-        createNotification({ recipientUid: student.uid, category: "service", title: "Community service assigned", message: `You were assigned ${formatServiceMinutes(serviceMinutes)} of community service for ${fineData.eventName || "an attendance absence"}.`, targetView: "fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
         notifyRoles(["head_admin", "attendance_admin"], { category: "service", title: "Community service assigned", message: `${student.accountId} was assigned a community-service requirement.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
         showDashboardToast("Fine assigned", `${student.accountId} was assigned a new community-service requirement.`);
       }
@@ -2170,7 +2233,7 @@ function initializeAdmin() {
       await resetFacePhotoInDrive(student.uid);
       const registration = await waitForFaceRegistration(student.uid, false);
       if (!registration) throw new Error("Drive did not confirm removal. The student remains registered.");
-      await createNotification({ recipientUid: student.uid, category: "face", title: "Face registration reset", message: "Your administrator reset your face registration. You may now register one new photo.", targetView: "face", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section });
+      await createNotification({ recipientUid: student.uid, recipientRole: "student", category: "face", title: "Face registration reset", message: "Your administrator reset your face registration. You may now register one new photo.", targetView: "face", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section });
       await notifyRoles(["head_admin", "student_manager"], { category: "face", title: "Face registration reset", message: `${student.accountId}'s face registration was reset.`, targetView: "modify-students", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section });
       showDashboardToast("Face registration reset", `${student.accountId} can now register one new photo.`);
       return true;
@@ -2187,6 +2250,19 @@ function initializeAdmin() {
     document.querySelector("#eventFormTitle").textContent = "Event details";
     document.querySelector("#eventSubmitButton").textContent = "Create event";
     delete eventForm.dataset.returnView;
+  }
+  function duplicateEventSignature(event) {
+    const normalized = (value) => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+    return [
+      event.name,
+      event.date,
+      event.location,
+      event.audience,
+      event.timeIn,
+      event.checkInCutoff,
+      event.timeOut,
+      event.checkOutCutoff
+    ].map(normalized).join("\u001f");
   }
   function editEvent(id) {
     const event = events.find((item) => item.id === id);
@@ -2292,6 +2368,10 @@ function initializeAdmin() {
     if (requestedGeofence.enabled && (!Number.isFinite(requestedGeofence.latitude) || !Number.isFinite(requestedGeofence.longitude))) return showDashboardToast("Choose an attendance area", "Click the map or search for the event location before saving.");
     const geofence = requestedGeofence.enabled ? requestedGeofence : { enabled: false };
     const record = { name: document.querySelector("#eventName").value.trim(), type: document.querySelector("#eventType").value, date, location: document.querySelector("#eventLocation").value.trim(), timeIn, checkInCutoff, timeOut, checkOutCutoff, audience: document.querySelector("#eventAudience").value, description: document.querySelector("#eventNotes").value.trim(), requiresGeofence: geofence.enabled, openAt: Timestamp.fromDate(new Date(`${date}T${timeIn}`)), checkInClosesAt: Timestamp.fromDate(new Date(`${date}T${checkInCutoff}`)), closeAt: Timestamp.fromDate(new Date(`${date}T${timeOut}`)), checkOutClosesAt: Timestamp.fromDate(new Date(`${date}T${checkOutCutoff}`)), updatedAt: serverTimestamp() };
+    const duplicate = events.find((event) => event.id !== id && duplicateEventSignature(event) === duplicateEventSignature(record));
+    if (duplicate) {
+      return showDashboardToast("Duplicate event", `An event named ${record.name} already uses this date, location, audience, and attendance schedule. Change one of those details before saving.`);
+    }
     try {
       if (id) {
         const batch = writeBatch(db);
@@ -2299,25 +2379,32 @@ function initializeAdmin() {
         batch.set(doc(db, "eventGeofences", id), geofence);
         await batch.commit();
         await syncEventRecords(id, record);
-        const recipients = students.filter((student) => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
-        Promise.allSettled(recipients.map((student) => createNotification({ recipientUid: student.uid, category: "system", title: "Event updated", message: `${record.name} was updated. Review the latest event details.`, targetView: "events", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section }))).catch(() => {});
-        notifyRoles(["head_admin", "attendance_admin", "viewer"], { category: "system", title: "Event updated", message: `${record.name} was updated. Review the latest event details.`, targetView: "modify-events" }).catch(() => {});
+        if (!isEventFinished(record)) {
+          const recipients = students.filter((student) => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
+          Promise.allSettled(recipients.map((student) => createNotification({ recipientUid: student.uid, recipientRole: "student", category: "attendance", title: "Event updated", message: `${record.name} was updated. Review the latest event details.`, targetView: "events", eventId: id, studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section }))).catch(() => {});
+          notifyRoles(["head_admin", "attendance_admin", "viewer"], { category: "system", title: "Event updated", message: `${record.name} was updated. Review the latest event details.`, targetView: "modify-events", eventId: id }).catch(() => {});
+        }
       } else {
         const eventReference = doc(collection(db, "events"));
         const batch = writeBatch(db);
         batch.set(eventReference, { ...record, createdAt: serverTimestamp(), createdBy: currentUser.uid });
         batch.set(doc(db, "eventGeofences", eventReference.id), geofence);
         await batch.commit();
-        const recipients = students.filter((student) => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
-        Promise.allSettled(recipients.map((student) => createNotification({ recipientUid: student.uid, category: "system", title: "New event published", message: `${record.name} is scheduled for ${formatEventDate(record.date)}.`, targetView: "events", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section }))).catch(() => {});
-        notifyRoles(["head_admin", "attendance_admin", "viewer"], { category: "system", title: "New event published", message: `${record.name} is scheduled for ${formatEventDate(record.date)}.`, targetView: "modify-events" }).catch(() => {});
+        if (!isEventFinished(record)) {
+          const recipients = students.filter((student) => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
+          Promise.allSettled(recipients.map((student) => createNotification({ recipientUid: student.uid, recipientRole: "student", category: "attendance", title: "New event published", message: `${record.name} is scheduled for ${formatEventDate(record.date)}.`, targetView: "events", eventId: eventReference.id, studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section }))).catch(() => {});
+          notifyRoles(["head_admin", "attendance_admin", "viewer"], { category: "system", title: "New event published", message: `${record.name} is scheduled for ${formatEventDate(record.date)}.`, targetView: "modify-events", eventId: eventReference.id }).catch(() => {});
+        }
       }
       const returnView = eventForm.dataset.returnView || "modify-events";
       resetEventForm();
       openView(returnView);
       showDashboardToast(id ? "Event updated" : "Event created", id ? "The event and linked attendance records were synced." : "The event and attendance window were saved and synced.");
     } catch (error) {
-      showDashboardToast("Unable to save event", error.message);
+      const message = firebaseErrorCode(error) === "permission-denied"
+        ? "Your account is not allowed to create events. Confirm you are signed in as a Head Admin or Attendance Admin and that the latest Firestore Rules are deployed."
+        : (error.message || "The event could not be saved. Please try again.");
+      showDashboardToast("Unable to save event", message);
     }
   });
   document.querySelector("#clearEventForm").addEventListener("click", resetEventForm);
@@ -2830,7 +2917,6 @@ function initializeAdmin() {
     if (viewName === "assign-fine") renderFineOptions();
     if (viewName === "assigned-fines") renderAdminFines();
   });
-  if (currentUserRole === "head_admin") httpsCallable(functions, "migrateEventGeofences")().catch(() => {});
   if (["head_admin", "attendance_admin"].includes(currentUserRole)) onSnapshot(collection(db, "eventGeofences"), (snapshot) => {
     geofencesByEventId = new Map(snapshot.docs.map((item) => [item.id, item.data()]));
     events = events.map((event) => ({ ...event, geofence: geofencesByEventId.get(event.id) || { enabled: false } }));

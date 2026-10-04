@@ -334,6 +334,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .history-card-actions { justify-content: flex-end; }
 .admin-event-card-actions { justify-content: flex-end; }
 .admin-event-card-actions .outline-button { min-height: 38px; }
+.admin-event-card.admin-event-card-student-style { padding: 0; overflow: hidden; border-color: var(--line); border-radius: 17px; }
+.admin-event-card.admin-event-card-student-style .event-body h3 { margin: 12px 0 16px; font-size: 1.15rem; }
+.admin-event-card-student-style .admin-event-card-actions { flex-wrap: wrap; margin: 0; padding: 0; border: 0; }
+.admin-event-card-student-style .admin-event-card-actions .outline-button { min-height: 36px; }
 .history-list { display: grid; }
 .history-row { display: grid; grid-template-columns: 90px 1fr auto; align-items: center; gap: 16px; padding: 15px 0; border-bottom: 1px solid #edf1f6; }
 .history-row:last-child { border-bottom: 0; }

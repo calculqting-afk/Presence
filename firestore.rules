@@ -187,6 +187,67 @@ service cloud.firestore {
         && data.status in ["checked-in", "completed"];
     }
 
+    // Spark-plan attendance verification. Firestore Rules can enforce event,
+    // audience, face-registration, and server-time checks. The geofence check
+    // uses a conservative square inside the configured radius because Rules
+    // cannot perform Haversine distance calculations.
+    function attendanceMatchesEvent(data, event) {
+      return data.eventName == event.name
+        && data.eventType == event.type
+        && data.eventDescription == event.description
+        && data.eventDate == event.date
+        && data.timeIn == event.timeIn
+        && data.timeOut == event.timeOut
+        && data.location == event.location
+        && data.audience == event.audience;
+    }
+
+    function withinSparkGeofence(data, eventId, event) {
+      // 157,430 m per degree is deliberately conservative: any accepted point
+      // is within the radius even without longitude/cosine calculations.
+      return event.requiresGeofence != true || (
+        exists(/databases/$(database)/documents/eventGeofences/$(eventId))
+        && get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.enabled == true
+        && data.keys().hasAll(["checkInLocation"])
+        && data.checkInLocation.latitude >= get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.latitude - (get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.radiusMeters / 157430)
+        && data.checkInLocation.latitude <= get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.latitude + (get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.radiusMeters / 157430)
+        && data.checkInLocation.longitude >= get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.longitude - (get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.radiusMeters / 157430)
+        && data.checkInLocation.longitude <= get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.longitude + (get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.radiusMeters / 157430)
+      );
+    }
+
+    function studentCanCheckIn(attendanceId, data) {
+      let event = get(/databases/$(database)/documents/events/$(data.eventId)).data;
+      let student = get(/databases/$(database)/documents/students/$(request.auth.uid)).data;
+      return isStudent()
+        && attendanceId == request.auth.uid + "_" + data.eventId
+        && exists(/databases/$(database)/documents/events/$(data.eventId))
+        && exists(/databases/$(database)/documents/faceRegistrations/$(request.auth.uid))
+        && get(/databases/$(database)/documents/faceRegistrations/$(request.auth.uid)).data.registered == true
+        && data.studentUid == request.auth.uid
+        && data.studentId == student.accountId
+        && attendanceMatchesEvent(data, event)
+        && (event.audience == "All students" || event.audience == "Section " + student.section)
+        && request.time >= event.openAt && request.time <= event.checkInClosesAt
+        && data.attendedAt == request.time && data.checkedInAt == request.time
+        && data.status == "checked-in"
+        && !data.keys().hasAny(["checkedOutAt", "checkOutLocation"])
+        && withinSparkGeofence(data, data.eventId, event);
+    }
+
+    function studentCanCheckOut(data, previous) {
+      let event = get(/databases/$(database)/documents/events/$(data.eventId)).data;
+      return isStudent()
+        && previous.studentUid == request.auth.uid
+        && data.studentUid == request.auth.uid
+        && previous.status == "checked-in" && data.status == "completed"
+        && data.checkedOutAt == request.time
+        && request.time >= event.closeAt && request.time <= event.checkOutClosesAt
+        && data.diff(previous).affectedKeys().hasOnly(["checkOutLocation", "checkedOutAt", "status"])
+        && (event.requiresGeofence != true || data.keys().hasAll(["checkOutLocation"]))
+        && (!event.requiresGeofence || withinSparkGeofence({ "checkInLocation": data.checkOutLocation }, data.eventId, event));
+    }
+
     match /students/{studentUid} {
       allow get: if isAdmin()
         || (signedIn() && request.auth.uid == studentUid && resource.data.active == true);
@@ -253,10 +314,10 @@ service cloud.firestore {
     match /attendance/{attendanceId} {
       allow read: if canViewAttendanceReports()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
-      // Student attendance changes are only made by callable functions, whose
-      // Admin SDK writes bypass these rules after server-side verification.
-      allow create: if canManageAttendance() && validAttendance(request.resource.data);
-      allow update: if canManageAttendance() && validAttendance(request.resource.data);
+      allow create: if (canManageAttendance() && validAttendance(request.resource.data))
+        || (validAttendance(request.resource.data) && studentCanCheckIn(attendanceId, request.resource.data));
+      allow update: if (canManageAttendance() && validAttendance(request.resource.data))
+        || (validAttendance(request.resource.data) && studentCanCheckOut(request.resource.data, resource.data));
       allow delete: if canManageAttendance();
     }
 
