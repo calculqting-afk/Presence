@@ -736,11 +736,11 @@ function initializeStudent() {
         const attended = Boolean(attendanceRecord);
         const completed = attendanceRecord?.status === "completed" || Boolean(attendanceRecord?.checkedOutAt);
         const checkoutOpen = attended && !completed && isCheckoutAvailable(event);
-        const disabled = attended || status !== "open";
+        const disabled = completed || (attended ? !checkoutOpen : status !== "open");
         const buttonText = completed
           ? "✓ Attendance completed"
           : attended
-            ? checkoutOpen ? "Check out in My Attendances" : "✓ Checked in"
+            ? checkoutOpen ? "Check out" : "✓ Checked in"
             : status === "open" ? "Check in" : status === "closed" ? "Check-in closed" : "Not open yet";
         const attendanceBadge = completed
           ? '<span class="badge green">Completed</span>'
@@ -750,7 +750,9 @@ function initializeStudent() {
         const description = event.description || event.notes || `Attendance event for ${event.audience}.`;
         const checkInCutoff = event.checkInCutoff || event.timeOut;
         const checkOutCutoff = event.checkOutCutoff || "";
-        return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div><div class="event-meta"><span class="event-check-time"><b>IN</b>${escapeHtml(formatEventTime(event.timeIn))} – ${escapeHtml(formatEventTime(checkInCutoff))}</span><span class="event-check-time"><b>OUT</b>${escapeHtml(formatEventTime(event.timeOut))}${checkOutCutoff ? ` – ${escapeHtml(formatEventTime(checkOutCutoff))}` : ""}</span><span class="event-location">${escapeHtml(event.location)}</span></div><div class="event-card-actions">${attendanceBadge}<button class="${attended ? "outline-button" : "primary-button"}" type="button" data-attend-event="${escapeHtml(event.id)}" ${disabled ? "disabled" : ""}>${buttonText}</button></div></div></article>`;
+        const action = checkoutOpen ? `data-check-out-event="${escapeHtml(event.id)}"` : `data-attend-event="${escapeHtml(event.id)}"`;
+        const buttonClass = checkoutOpen || (!attended && status === "open") ? "primary-button" : "outline-button";
+        return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div><div class="event-meta"><span class="event-check-time"><b>IN</b>${escapeHtml(formatEventTime(event.timeIn))} – ${escapeHtml(formatEventTime(checkInCutoff))}</span><span class="event-check-time"><b>OUT</b>${escapeHtml(formatEventTime(event.timeOut))}${checkOutCutoff ? ` – ${escapeHtml(formatEventTime(checkOutCutoff))}` : ""}</span><span class="event-location">${escapeHtml(event.location)}</span></div><div class="event-card-actions">${attendanceBadge}<button class="${buttonClass}" type="button" ${action} ${disabled ? "disabled" : ""}>${buttonText}</button></div></div></article>`;
       }).join("");
       timeline.innerHTML = `<div class="timeline">${activeEvents.slice(0, 4).map((event) => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${attendanceByEventId.has(event.id) ? '<span class="badge green">Attended</span>' : eventStatusBadge(getEventStatus(event))}</div>`).join("")}</div>`;
     }
@@ -1047,7 +1049,43 @@ function initializeStudent() {
       reject(locationError);
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }));
   }
+  async function checkOutAttendance(record, event, button) {
+    if (!record || !event || !isCheckoutAvailable(event)) {
+      showDashboardToast("Checkout unavailable", "Checkout is available from Time Out until the event's checkout cutoff.");
+      return;
+    }
+    button.disabled = true;
+    try {
+      let checkOutLocation;
+      if (event.requiresGeofence) {
+        const position = await getCurrentCheckInLocation();
+        checkOutLocation = { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: Math.round(position.coords.accuracy), distanceMeters: 0 };
+      }
+      await setDoc(doc(db, "attendance", `${currentUser.uid}_${record.eventId}`), {
+        ...(checkOutLocation ? { checkOutLocation } : {}),
+        checkedOutAt: serverTimestamp(),
+        status: "completed"
+      }, { merge: true });
+      showDashboardToast("Checkout recorded", "Your attendance record now includes your checkout time.");
+    } catch (error) {
+      if (error.geofenceIssue === "location") {
+        showGeofenceError("Allow location for Presence", "Your device location may be on, but this browser has not allowed this site to use it. Click the site controls icon to the left of the address bar, set Location to Allow, then reload this page and try again.");
+      } else if (event.requiresGeofence && firebaseErrorCode(error) === "permission-denied") {
+        showGeofenceError("You are outside the attendance area", "You must be within the event attendance area to check out. Allow location access and move closer to the venue, then try again.");
+      } else {
+        showDashboardToast("Unable to check out", error.message || "Try again while you are in the attendance area.");
+      }
+      button.disabled = false;
+    }
+  }
   document.querySelector("#studentEventGrid").addEventListener("click", async (clickEvent) => {
+    const checkOutButton = clickEvent.target.closest("[data-check-out-event]");
+    if (checkOutButton) {
+      const event = events.find((item) => item.id === checkOutButton.dataset.checkOutEvent);
+      const record = attendance.find((item) => item.eventId === event?.id && item.studentUid === currentUser.uid);
+      await checkOutAttendance(record, event, checkOutButton);
+      return;
+    }
     const button = clickEvent.target.closest("[data-attend-event]");
     if (!button) return;
     const selectedEvent = events.find((event) => event.id === button.dataset.attendEvent);
@@ -1120,33 +1158,7 @@ function initializeStudent() {
     if (!button) return;
     const record = attendance.find((item) => item.id === button.dataset.checkOutAttendance);
     const event = events.find((item) => item.id === record?.eventId);
-    if (!record || !event || !isCheckoutAvailable(event)) {
-      showDashboardToast("Checkout unavailable", "Checkout is available from Time Out until the event's checkout cutoff.");
-      return;
-    }
-    button.disabled = true;
-    try {
-      let checkOutLocation;
-      if (event.requiresGeofence) {
-        const position = await getCurrentCheckInLocation();
-        checkOutLocation = { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: Math.round(position.coords.accuracy), distanceMeters: 0 };
-      }
-      await setDoc(doc(db, "attendance", `${currentUser.uid}_${record.eventId}`), {
-        ...(checkOutLocation ? { checkOutLocation } : {}),
-        checkedOutAt: serverTimestamp(),
-        status: "completed"
-      }, { merge: true });
-      showDashboardToast("Checkout recorded", "Your attendance record now includes your checkout time.");
-    } catch (error) {
-      if (error.geofenceIssue === "location") {
-        showGeofenceError("Allow location for Presence", "Your device location may be on, but this browser has not allowed this site to use it. Click the site controls icon to the left of the address bar, set Location to Allow, then reload this page and try again.");
-      } else if (event.requiresGeofence && firebaseErrorCode(error) === "permission-denied") {
-        showGeofenceError("You are outside the attendance area", "You must be within the event attendance area to check out. Allow location access and move closer to the venue, then try again.");
-      } else {
-        showDashboardToast("Unable to check out", error.message || "Try again while you are in the attendance area.");
-      }
-      button.disabled = false;
-    }
+    await checkOutAttendance(record, event, button);
   });
 
   const startCameraButton = document.querySelector("#startCamera");
@@ -1434,6 +1446,7 @@ function initializeAdmin() {
   let selectedFaceResetStudent;
   let selectedManagedStudentUid;
   let pendingRoleChange;
+  const pendingRoleWrites = new Map();
   let removalCountdownTimer;
   let pendingAdminProfilePhoto = "";
   let addingCommunityService = false;
@@ -2677,6 +2690,12 @@ function initializeAdmin() {
     if (!selector || currentUserRole !== "head_admin") return;
     const student = students.find((item) => item.uid === selector.dataset.roleSelect);
     if (!student) return;
+    const pendingWrite = pendingRoleWrites.get(student.uid);
+    if (pendingWrite) {
+      selector.value = pendingWrite.role;
+      showDashboardToast("Role update still syncing", `${student.accountId}'s role change is still waiting for Firestore confirmation. Do not submit it again yet.`);
+      return;
+    }
     const previousRole = student.role || "student";
     const role = selector.value;
     openRoleChangeModal(student, role, selector);
@@ -2688,12 +2707,32 @@ function initializeAdmin() {
     selector.disabled = true;
     confirmRoleChange.disabled = true;
     confirmRoleChange.textContent = "Updating role…";
+    const roleWrite = setDoc(doc(db, "students", student.uid), {
+      role,
+      roleUpdatedAt: serverTimestamp(),
+      roleUpdatedBy: currentUser.uid
+    }, { merge: true });
+    let syncTimer;
     try {
-      await setDoc(doc(db, "students", student.uid), {
-        role,
-        roleUpdatedAt: serverTimestamp(),
-        roleUpdatedBy: currentUser.uid
-      }, { merge: true });
+      const acknowledged = await Promise.race([
+        roleWrite.then(() => true),
+        new Promise((resolve) => { syncTimer = window.setTimeout(() => resolve(false), 10000); })
+      ]);
+      if (!acknowledged) {
+        pendingRoleWrites.set(student.uid, { role, previousRole, selector });
+        pendingRoleChange = undefined;
+        roleChangeModal.hidden = true;
+        showDashboardToast("Role update still syncing", `${student.accountId}'s change was queued locally and is waiting for Firestore. Do not submit it again; Presence will confirm once the server responds.`);
+        roleWrite.then(() => {
+          pendingRoleWrites.delete(student.uid);
+          showDashboardToast("Role updated", `${student.accountId} is now ${roleLabel(role)}. They must sign out and sign back in for the new access to apply.`);
+        }).catch((error) => {
+          pendingRoleWrites.delete(student.uid);
+          if (selector.value === role) selector.value = previousRole;
+          showDashboardToast("Unable to update role", roleChangeErrorMessage(error));
+        });
+        return;
+      }
       pendingRoleChange = undefined;
       roleChangeModal.hidden = true;
       showDashboardToast("Role updated", `${student.accountId} is now ${roleLabel(role)}. They must sign out and sign back in for the new access to apply.`);
@@ -2703,6 +2742,7 @@ function initializeAdmin() {
       roleChangeModal.hidden = true;
       showDashboardToast("Unable to update role", roleChangeErrorMessage(error));
     } finally {
+      window.clearTimeout(syncTimer);
       selector.disabled = false;
       confirmRoleChange.disabled = false;
       confirmRoleChange.textContent = "Update role";
