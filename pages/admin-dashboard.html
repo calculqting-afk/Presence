@@ -229,6 +229,16 @@
       <div class="modal-actions"><button class="outline-button" type="button" data-close-admin-fines>Close</button><button class="primary-button" type="button" id="manageStudentFines">Manage fines</button></div>
     </section>
   </div>
+  <div class="dashboard-modal-backdrop" id="adminAbsenceModal" hidden>
+    <section class="dashboard-modal community-service-modal" role="dialog" aria-modal="true" aria-labelledby="adminAbsenceModalTitle" aria-describedby="adminAbsenceModalDescription">
+      <button class="modal-close" type="button" data-close-admin-absences aria-label="Close absence records">×</button>
+      <span class="modal-icon danger">−</span>
+      <h2 id="adminAbsenceModalTitle">Student absences</h2>
+      <p id="adminAbsenceModalDescription">Review completed events without an attendance record.</p>
+      <div id="adminAbsenceModalContent"></div>
+      <div class="modal-actions"><button class="outline-button" type="button" data-close-admin-absences>Close</button></div>
+    </section>
+  </div>
   <div class="dashboard-modal-backdrop" id="pastEventRemovalModal" hidden>
     <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="pastEventRemovalTitle" aria-describedby="pastEventRemovalMessage">
       <button class="modal-close" type="button" data-close-past-event-removal aria-label="Close">×</button>

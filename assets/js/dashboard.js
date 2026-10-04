@@ -111,6 +111,7 @@ class FineModalController {
     this.content = content;
     this.title = title;
     this.description = description;
+    this.closeSelector = closeSelector;
     this.trigger = null;
     document.querySelectorAll(closeSelector).forEach((button) => button.addEventListener("click", () => this.close()));
     modal.addEventListener("click", (event) => { if (event.target === modal) this.close(); });
@@ -122,7 +123,7 @@ class FineModalController {
     this.description.textContent = description;
     this.content.innerHTML = markup;
     this.modal.hidden = false;
-    this.modal.querySelector("[data-close-community-service], [data-close-admin-fines]")?.focus();
+    this.modal.querySelector(this.closeSelector)?.focus();
   }
 
   close() {
@@ -1486,6 +1487,7 @@ function initializeAdmin() {
   fineStudentSearch.insertAdjacentHTML("afterend", '<div class="fine-student-search-results" id="fineStudentSearchResults" role="listbox" hidden></div>');
   const fineStudentSearchResults = document.querySelector("#fineStudentSearchResults");
   const adminFineModalController = new FineModalController({ modal: document.querySelector("#adminFineModal"), content: document.querySelector("#adminFineModalContent"), title: document.querySelector("#adminFineModalTitle"), description: document.querySelector("#adminFineModalDescription"), closeSelector: "[data-close-admin-fines]" });
+  const adminAbsenceModalController = new FineModalController({ modal: document.querySelector("#adminAbsenceModal"), content: document.querySelector("#adminAbsenceModalContent"), title: document.querySelector("#adminAbsenceModalTitle"), description: document.querySelector("#adminAbsenceModalDescription"), closeSelector: "[data-close-admin-absences]" });
   const fineEvent = document.querySelector("#fineEvent");
   const addCommunityService = document.querySelector("#addCommunityService");
   const fineExtensionControls = document.querySelector("#fineExtensionControls");
@@ -2278,15 +2280,36 @@ function initializeAdmin() {
     const studentAttendance = attendance
       .filter((record) => record.studentUid === student.uid)
       .sort((a, b) => (b.attendedAt?.seconds || 0) - (a.attendedAt?.seconds || 0));
+    const absenceCount = currentUserRole === "super_admin" ? getStudentAbsences(student).length : 0;
     const attendedCards = studentAttendance.length
       ? studentAttendance.map((record) => `<article class="attended-event-box"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><span>${escapeHtml(record.eventDate || "Date unavailable")} · ${escapeHtml(record.location || "Location not provided")}</span><span>${escapeHtml(record.timeIn || "")} ${record.timeOut ? `– ${escapeHtml(record.timeOut)}` : ""}</span></article>`).join("")
       : '<div class="empty-state">This student has not attended an event yet.</div>';
     const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
     adminStudentDetail.innerHTML = `<article class="panel admin-student-overview"><button class="modal-close" type="button" data-close-student-detail aria-label="Close student details">×</button><div class="profile-avatar">${avatar}</div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(student.accountId)}</p><p class="profile-course-line" style="margin-top:-4px;color:var(--muted);font-size:.82rem;">Course Registered · <strong>${escapeHtml(student.course || "Not assigned")}</strong></p><span class="badge ${presence.isOnline ? "green" : "gray"}"><i class="presence-dot"></i>${presence.label}</span><small class="presence-profile-time">${escapeHtml(presence.detail)}</small><div class="admin-student-actions"><button class="primary-button" type="button" data-edit-student="${student.uid}">Edit information</button>${hasFaceRegistration && currentUserRole === "super_admin" ? `<button class="outline-button" type="button" data-reset-face="${student.uid}">Reset face registration</button>` : ""}<button class="outline-button" type="button" data-password-student="${student.uid}">Change password</button><button class="small-button danger modal-danger-button" type="button" data-delete-student="${student.uid}">Clear account</button></div></article><article class="panel admin-student-information"><div class="panel-head"><div><h3>Student information</h3><p>Profile details and recorded attendance.</p></div><span class="badge blue">${studentAttendance.length} attended</span></div><div class="student-info-boxes"><div class="student-info-box"><span>Student ID</span><strong>${escapeHtml(student.accountId)}</strong></div><div class="student-info-box"><span>Course Registered</span><strong>${escapeHtml(student.course || "Not assigned")}</strong></div><div class="student-info-box"><span>Section</span><strong>${escapeHtml(student.section)}</strong></div><div class="student-info-box"><span>Face registration</span><strong>${hasFaceRegistration ? "Registered" : "Not registered"}</strong></div><div class="student-info-box"><span>Email address</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div><div class="student-info-box"><span>Phone number</span><strong>${escapeHtml(student.phone || "Not provided")}</strong></div><div class="student-info-box"><span>Live status</span><strong>${presence.label}</strong><small>${escapeHtml(presence.detail)}</small></div><div class="student-info-box"><span>Account access</span><strong>${student.active === false ? "Inactive" : "Active"}</strong></div></div><div class="panel-head"><div><h3>Attended events</h3><p>All attendance records saved for this student.</p></div></div><div class="attended-event-grid">${attendedCards}</div></article>`;
     const fineCount = fines.filter((fine) => fine.studentUid === student.uid).length;
-    adminStudentDetail.querySelector(".admin-student-actions")?.insertAdjacentHTML("afterbegin", `<button class="outline-button" type="button" data-check-student-fines="${escapeHtml(student.uid)}">Check attendance fines${fineCount ? ` (${fineCount})` : ""}</button>`);
+    const profileActions = adminStudentDetail.querySelector(".admin-student-actions");
+    profileActions?.insertAdjacentHTML("afterbegin", `<button class="outline-button" type="button" data-check-student-fines="${escapeHtml(student.uid)}">Check attendance fines${fineCount ? ` (${fineCount})` : ""}</button>`);
+    if (currentUserRole === "super_admin") profileActions?.insertAdjacentHTML("afterbegin", `<button class="outline-button" type="button" data-view-student-absences="${escapeHtml(student.uid)}">View absences${absenceCount ? ` (${absenceCount})` : ""}</button>`);
     adminStudentDetail.querySelector(".student-info-boxes")?.insertAdjacentHTML("afterbegin", `<div class="student-info-box"><span>Birthday</span><strong>${escapeHtml(formatBirthday(student.birthday))}</strong></div>`);
     adminStudentDetail.hidden = false;
+  }
+
+  function getStudentAbsences(student) {
+    const attendedEventIds = new Set(attendance.filter((record) => record.studentUid === student.uid).map((record) => record.eventId));
+    const studentAudience = `Section ${student.section || ""}`;
+    return events
+      .filter((event) => isEventFinished(event) && (event.audience === "All students" || !event.audience || event.audience === studentAudience) && !attendedEventIds.has(event.id))
+      .sort((first, second) => eventCloseDate(second).getTime() - eventCloseDate(first).getTime());
+  }
+
+  function openAdminAbsenceModal(student, trigger) {
+    if (currentUserRole !== "super_admin" || !student) return;
+    const studentName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ") || "Student";
+    const absences = getStudentAbsences(student);
+    const records = absences.length
+      ? absences.map((event) => `<article class="community-service-record"><div class="community-service-record-top"><strong>${escapeHtml(event.name || "Attendance event")}</strong><span class="badge orange">Absent</span></div><div class="fine-detail-grid"><div><span>Date</span><strong>${escapeHtml(formatEventDate(event.date))}</strong></div><div><span>Time</span><strong>${escapeHtml(formatTimeWindow(event))}</strong></div><div><span>Location</span><strong>${escapeHtml(event.location || "Not specified")}</strong></div><div><span>Audience</span><strong>${escapeHtml(event.audience || "All students")}</strong></div></div></article>`).join("")
+      : '<div class="community-service-empty">No recorded absences for this student.</div>';
+    adminAbsenceModalController.open({ title: `${studentName}'s absences`, description: `${absences.length} completed event${absences.length === 1 ? "" : "s"} without an attendance record.`, markup: `<section class="community-service-section"><div class="community-service-section-heading"><h3>Missed events</h3><p>Only completed events assigned to this student's section are included.</p></div>${records}</section>`, trigger });
   }
 
   function fineRecordModalMarkup(fine) {
@@ -2828,12 +2851,14 @@ function initializeAdmin() {
     const remove = clickEvent.target.closest("[data-delete-student]");
     const resetFace = clickEvent.target.closest("[data-reset-face]");
     const checkFines = clickEvent.target.closest("[data-check-student-fines]");
+    const viewAbsences = clickEvent.target.closest("[data-view-student-absences]");
     if (close) {
       selectedManagedStudentUid = undefined;
       renderSelectedStudent();
     }
     if (edit) editStudent(edit.dataset.editStudent);
     if (checkFines) openAdminFineModal(students.find((student) => student.uid === checkFines.dataset.checkStudentFines), checkFines);
+    if (viewAbsences) openAdminAbsenceModal(students.find((student) => student.uid === viewAbsences.dataset.viewStudentAbsences), viewAbsences);
     if (passwordButton) openPasswordModal(students.find((student) => student.uid === passwordButton.dataset.passwordStudent));
     if (resetFace) openResetFaceModal(students.find((student) => student.uid === resetFace.dataset.resetFace));
     if (remove) openRemoveModal(students.find((student) => student.uid === remove.dataset.deleteStudent));
@@ -2848,6 +2873,7 @@ function initializeAdmin() {
     renderAdminFines();
   });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !document.querySelector("#adminFineModal").hidden) adminFineModalController.close(); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !document.querySelector("#adminAbsenceModal").hidden) adminAbsenceModalController.close(); });
 
   document.querySelector("#passwordChangeForm").addEventListener("submit", async (submitEvent) => {
     submitEvent.preventDefault();
