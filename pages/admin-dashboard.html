@@ -101,8 +101,8 @@
               <div class="form-actions"><button class="outline-button" type="button" data-go-back>← Back</button><button class="outline-button" id="cancelStudentForm" type="button">Reset form</button><button class="primary-button" id="studentSubmitButton" type="submit">Add student</button></div>
             </form>
           </article>
-          <article class="panel data-cleanup-panel" data-head-admin-only>
-            <div class="panel-head"><div><h3>Data Cleanup</h3><p>Remove event and fine records without changing student accounts or face registrations.</p></div><span class="badge orange">Admin only</span></div>
+          <article class="panel data-cleanup-panel" data-super-admin-only>
+            <div class="panel-head"><div><h3>Data Cleanup</h3><p>Remove event and fine records without changing student accounts or face registrations.</p></div><span class="badge orange">Super Admin only</span></div>
             <button class="small-button danger modal-danger-button" id="openDataCleanup" type="button">Clear event or fine data</button>
           </article>
         </section>
@@ -261,6 +261,6 @@
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
   <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script type="module" src="../assets/js/dashboard.js?v=20261004-checkout-message"></script>
+  <script type="module" src="../assets/js/dashboard.js?v=20261004-super-admin"></script>
 </body>
 </html>

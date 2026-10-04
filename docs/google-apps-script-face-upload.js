@@ -1,4 +1,4 @@
-const ADMIN_EMAIL = "mikhailovna2007@gmail.com";
+const SUPER_ADMIN_EMAIL = "mikhailovna2007@gmail.com";
 const FIREBASE_PROJECT_ID = "presence-a873f";
 
 function getConfig_(key) {
@@ -92,7 +92,7 @@ function doPost(e) {
     const requester = verifyFirebaseUser_(payload.idToken);
 
     if (payload.action === "reset") {
-      if (requester.email?.toLowerCase() !== ADMIN_EMAIL) throw new Error("Only the Presence administrator can reset face registration.");
+      if (requester.email?.toLowerCase() !== SUPER_ADMIN_EMAIL) throw new Error("Only the Presence Super Admin can reset face registration.");
       if (!payload.studentUid) throw new Error("Missing student UID.");
       const registration = getFaceRegistration_(payload.studentUid, payload.idToken);
       if (!registration) throw new Error("This student has no active face registration.");

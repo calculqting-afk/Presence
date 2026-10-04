@@ -1,4 +1,4 @@
-import { ADMIN_EMAIL, auth, db, studentIdToEmail } from "../../config/firebase-config.js";
+import { SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail } from "../../config/firebase-config.js";
 import {
   browserLocalPersistence,
   browserSessionPersistence,
@@ -66,13 +66,14 @@ form.addEventListener("submit", async (event) => {
     await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
     const email = accountId.includes("@") ? accountId : studentIdToEmail(accountId);
     const credential = await signInWithEmailAndPassword(auth, email, password);
-    const isBootstrapHeadAdmin = credential.user.email?.toLowerCase() === ADMIN_EMAIL;
+    const isSuperAdmin = credential.user.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
     let role;
     let studentRecord;
-    if (!isBootstrapHeadAdmin) {
+    if (!isSuperAdmin) {
       studentRecord = await getDoc(doc(db, "students", credential.user.uid));
-      const assignedRole = studentRecord.data()?.role || "student";
-      if (["head_admin", "attendance_admin", "student_manager", "viewer"].includes(assignedRole)) {
+      const storedRole = studentRecord.data()?.role || "student";
+      const assignedRole = storedRole === "viewer" ? "student" : storedRole;
+      if (["head_admin", "attendance_admin", "student_manager"].includes(assignedRole)) {
         role = "admin";
       } else if (studentRecord.exists() && studentRecord.data().active === true) {
         role = "student";
@@ -88,7 +89,7 @@ form.addEventListener("submit", async (event) => {
       role,
       uid: credential.user.uid,
       accountId: role === "student" ? studentRecord.data().accountId : credential.user.email,
-      assignedRole: studentRecord?.data()?.role || (isBootstrapHeadAdmin ? "head_admin" : "student")
+      assignedRole: isSuperAdmin ? "super_admin" : (studentRecord?.data()?.role === "viewer" ? "student" : studentRecord?.data()?.role || "student")
     }));
     showToast(role === "admin" ? "Admin access verified" : "Welcome to Presence", "Your account was verified successfully.");
     window.setTimeout(() => {

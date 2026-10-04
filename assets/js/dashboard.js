@@ -1,4 +1,4 @@
-import { ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js";
+import { SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js";
 import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
   Timestamp,
@@ -59,19 +59,19 @@ let currentUserRole = "student";
 let currentUserProfile = {};
 let geofencesByEventId = new Map();
 const ROLE_VIEWS = {
-  head_admin: ["dashboard", "add-student", "modify-students", "create", "modify-events", "past-events", "attendance-line", "assign-fine", "assigned-fines", "geofence", "profile"],
+  super_admin: ["dashboard", "add-student", "modify-students", "create", "modify-events", "past-events", "attendance-line", "assign-fine", "assigned-fines", "geofence", "profile"],
+  head_admin: ["dashboard", "add-student", "modify-students", "create", "modify-events", "past-events", "attendance-line", "assign-fine", "assigned-fines", "geofence"],
   attendance_admin: ["dashboard", "create", "modify-events", "past-events", "attendance-line", "assign-fine", "assigned-fines", "geofence"],
   student_manager: ["dashboard", "add-student", "modify-students"],
-  viewer: ["dashboard", "modify-events", "past-events", "attendance-line", "assigned-fines"],
   student: ["dashboard", "events", "attendances", "history", "fines", "face", "profile"]
 };
-const ROLE_ACCESS_LABELS = { head_admin: "Full access", attendance_admin: "Attendance access", student_manager: "Student management", viewer: "Read-only access" };
+const ROLE_ACCESS_LABELS = { super_admin: "Full access", head_admin: "Operational admin", attendance_admin: "Attendance access", student_manager: "Student management" };
 const NOTIFICATION_CATEGORIES_BY_ROLE = {
   student: new Set(["attendance", "face"]),
+  super_admin: new Set(["attendance", "service", "face", "system"]),
   head_admin: new Set(["attendance", "service", "face", "system"]),
   attendance_admin: new Set(["attendance", "system"]),
-  student_manager: new Set(["face", "system"]),
-  viewer: new Set(["attendance", "system"])
+  student_manager: new Set(["face", "system"])
 };
 
 function canReceiveNotification(role, category) {
@@ -82,7 +82,8 @@ function escapeHtml(value = "") {
   return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
 }
 
-const ROLE_LABELS = { head_admin: "Head Admin", attendance_admin: "Attendance Admin", student_manager: "Student Manager", viewer: "Viewer", student: "Student" };
+const ROLE_LABELS = { super_admin: "Super Admin", head_admin: "Head Admin", attendance_admin: "Attendance Admin", student_manager: "Student Manager", student: "Student" };
+const ASSIGNABLE_ROLE_LABELS = { head_admin: "Head Admin", attendance_admin: "Attendance Admin", student_manager: "Student Manager", student: "Student" };
 function firebaseErrorCode(error) {
   return String(error?.code || "").replace(/^(?:firestore|functions)\//, "");
 }
@@ -92,7 +93,7 @@ function roleLabel(role) {
 
 function roleChangeErrorMessage(error) {
   const code = String(error?.code || "").replace(/^functions\//, "");
-  if (code === "permission-denied") return "Only a Head Admin can assign roles. Sign out and sign in again, then retry.";
+  if (code === "permission-denied") return "Only the Super Admin can assign roles. Sign out and sign in again, then retry.";
   if (code === "unauthenticated") return "Your session has expired. Sign in again and retry.";
   return error?.message || "The role could not be updated.";
 }
@@ -373,12 +374,12 @@ function applyRoleNavigation() {
   document.querySelectorAll("[data-go-back]").forEach((button) => {
     button.hidden = !allowedViews.has(previousView);
   });
-  document.querySelector("[data-go-view=profile]")?.toggleAttribute("hidden", currentUserRole !== "head_admin");
+  document.querySelector("[data-go-view=profile]")?.toggleAttribute("hidden", currentUserRole !== "super_admin");
   document.querySelectorAll("[data-role-console]").forEach((element) => { element.textContent = `${roleLabel(currentUserRole)} console`; });
   document.querySelectorAll("[data-admin-role]").forEach((element) => { element.textContent = ROLE_ACCESS_LABELS[currentUserRole] || "Student"; });
   const displayName = [currentUserProfile.firstName, currentUserProfile.lastName].filter(Boolean).join(" ");
   if (displayName) document.querySelectorAll("[data-admin-name]").forEach((element) => { element.textContent = displayName; });
-  document.querySelectorAll("[data-head-admin-only]").forEach((element) => { element.hidden = currentUserRole !== "head_admin"; });
+  document.querySelectorAll("[data-super-admin-only]").forEach((element) => { element.hidden = currentUserRole !== "super_admin"; });
 }
 
 function initializeDashboardHistory() {
@@ -552,13 +553,14 @@ async function waitForUser() {
 
 async function verifyRole(user) {
   if (!user) return false;
-  const isBootstrapHeadAdmin = user.email?.toLowerCase() === ADMIN_EMAIL;
-  const profile = isBootstrapHeadAdmin ? null : await getDoc(doc(db, "students", user.uid));
+  const isSuperAdmin = user.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
+  const profile = isSuperAdmin ? null : await getDoc(doc(db, "students", user.uid));
   currentUserProfile = profile?.data() || {};
-  const role = isBootstrapHeadAdmin ? "head_admin" : profile?.data()?.role || "student";
+  const storedRole = profile?.data()?.role || "student";
+  const role = isSuperAdmin ? "super_admin" : (storedRole === "viewer" ? "student" : storedRole);
   currentUserRole = role;
   if (dashboardRole === "admin") {
-    return ["head_admin", "attendance_admin", "student_manager", "viewer"].includes(role);
+    return ["super_admin", "head_admin", "attendance_admin", "student_manager"].includes(role);
   }
   if (role !== "student") return false;
   const record = await getDoc(doc(db, "students", user.uid));
@@ -1051,6 +1053,65 @@ function initializeStudent() {
       reject(locationError);
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }));
   }
+
+  const GEOFENCE_GPS_ALLOWANCE_CAP_METERS = 20;
+
+  function distanceInMeters(latitudeA, longitudeA, latitudeB, longitudeB) {
+    const toRadians = (value) => value * Math.PI / 180;
+    const earthRadiusMeters = 6371000;
+    const latitudeDelta = toRadians(latitudeB - latitudeA);
+    const longitudeDelta = toRadians(longitudeB - longitudeA);
+    const a = Math.sin(latitudeDelta / 2) ** 2
+      + Math.cos(toRadians(latitudeA)) * Math.cos(toRadians(latitudeB)) * Math.sin(longitudeDelta / 2) ** 2;
+    return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  async function verifiedGeofenceLocation(event) {
+    let geofenceSnapshot;
+    try {
+      geofenceSnapshot = await getDocFromServer(doc(db, "eventGeofences", event.id));
+    } catch (error) {
+      const locationError = new Error("The attendance area could not be loaded. Please try again.");
+      locationError.geofenceIssue = "configuration";
+      locationError.cause = error;
+      throw locationError;
+    }
+
+    const geofence = geofenceSnapshot.data();
+    const centerLatitude = Number(geofence?.latitude);
+    const centerLongitude = Number(geofence?.longitude);
+    const radiusMeters = Number(geofence?.radiusMeters);
+    if (!geofenceSnapshot.exists || geofence?.enabled !== true
+      || !Number.isFinite(centerLatitude) || centerLatitude < -90 || centerLatitude > 90
+      || !Number.isFinite(centerLongitude) || centerLongitude < -180 || centerLongitude > 180
+      || !Number.isFinite(radiusMeters) || radiusMeters <= 0) {
+      const locationError = new Error("This event's attendance area needs to be configured by an administrator.");
+      locationError.geofenceIssue = "configuration";
+      throw locationError;
+    }
+
+    const position = await getCurrentCheckInLocation();
+    const { latitude, longitude } = position.coords;
+    const reportedAccuracy = Number(position.coords.accuracy);
+    const accuracyMeters = Number.isFinite(reportedAccuracy) && reportedAccuracy >= 0 ? Math.round(reportedAccuracy) : 0;
+    const allowanceMeters = Math.min(accuracyMeters, GEOFENCE_GPS_ALLOWANCE_CAP_METERS);
+    const distanceMeters = distanceInMeters(latitude, longitude, centerLatitude, centerLongitude);
+    if (distanceMeters > radiusMeters + allowanceMeters) {
+      const locationError = new Error("You are outside the attendance area.");
+      locationError.geofenceIssue = "outside";
+      locationError.distanceMeters = Math.round(distanceMeters);
+      locationError.radiusMeters = Math.round(radiusMeters);
+      locationError.accuracyMeters = accuracyMeters;
+      throw locationError;
+    }
+
+    return { latitude, longitude, accuracy: accuracyMeters, distanceMeters: Math.round(distanceMeters) };
+  }
+
+  function outsideGeofenceMessage(error, action) {
+    return `You are ${error.distanceMeters} m from the attendance area. The allowed radius is ${error.radiusMeters} m; your GPS accuracy is ±${error.accuracyMeters} m. Move closer to the venue and try to ${action} again.`;
+  }
+
   async function checkOutAttendance(record, event, button) {
     if (!record || !event || !isCheckoutAvailable(event)) {
       showDashboardToast("Checkout unavailable", "Checkout is available from Time Out until the event's checkout cutoff.");
@@ -1060,8 +1121,7 @@ function initializeStudent() {
     try {
       let checkOutLocation;
       if (event.requiresGeofence) {
-        const position = await getCurrentCheckInLocation();
-        checkOutLocation = { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: Math.round(position.coords.accuracy), distanceMeters: 0 };
+        checkOutLocation = await verifiedGeofenceLocation(event);
       }
       await setDoc(doc(db, "attendance", `${currentUser.uid}_${record.eventId}`), {
         ...(checkOutLocation ? { checkOutLocation } : {}),
@@ -1072,8 +1132,10 @@ function initializeStudent() {
     } catch (error) {
       if (error.geofenceIssue === "location") {
         showGeofenceError("Allow location for Presence", "Your device location may be on, but this browser has not allowed this site to use it. Click the site controls icon to the left of the address bar, set Location to Allow, then reload this page and try again.");
-      } else if (event.requiresGeofence && firebaseErrorCode(error) === "permission-denied") {
-        showGeofenceError("You are outside the attendance area", "You must be within the event attendance area to check out. Allow location access and move closer to the venue, then try again.");
+      } else if (error.geofenceIssue === "outside") {
+        showGeofenceError("You are outside the attendance area", outsideGeofenceMessage(error, "check out"));
+      } else if (error.geofenceIssue === "configuration") {
+        showGeofenceError("Attendance area unavailable", error.message);
       } else {
         showDashboardToast("Unable to check out", error.message || "Try again while you are in the attendance area.");
       }
@@ -1111,9 +1173,7 @@ function initializeStudent() {
       let checkInLocation;
       if (selectedEvent.requiresGeofence) {
         showDashboardToast("Checking your location", "Allow location access to confirm you are in the attendance area.");
-        const position = await getCurrentCheckInLocation();
-        const { latitude, longitude, accuracy } = position.coords;
-        checkInLocation = { latitude, longitude, accuracy: Math.round(accuracy), distanceMeters: 0 };
+        checkInLocation = await verifiedGeofenceLocation(selectedEvent);
       }
       await setDoc(doc(db, "attendance", `${currentUser.uid}_${selectedEvent.id}`), {
         studentUid: currentUser.uid,
@@ -1136,8 +1196,10 @@ function initializeStudent() {
     } catch (error) {
       if (error.geofenceIssue === "location") {
         showGeofenceError("Allow location for Presence", "Your device location may be on, but this browser has not allowed this site to use it. Click the site controls icon to the left of the address bar, set Location to Allow, then reload this page and try again.");
-      } else if (selectedEvent.requiresGeofence && firebaseErrorCode(error) === "permission-denied") {
-        showGeofenceError("You are outside the attendance area", "You must be within the event attendance area to check in. Allow location access and move closer to the venue, then try again.");
+      } else if (error.geofenceIssue === "outside") {
+        showGeofenceError("You are outside the attendance area", outsideGeofenceMessage(error, "check in"));
+      } else if (error.geofenceIssue === "configuration") {
+        showGeofenceError("Attendance area unavailable", error.message);
       } else {
         const message = error.code === "permission-denied"
           ? "Attendance was rejected. Confirm that you are within the event area and that the attendance window is open."
@@ -1506,7 +1568,7 @@ function initializeAdmin() {
   document.querySelector("#eventLocation").closest(".field").insertAdjacentHTML("beforebegin", '<div class="field"><label for="eventType">Event type</label><select id="eventType" required><option value="Assembly">Assembly</option><option value="Meeting">Meeting</option><option value="Seminar">Seminar</option><option value="Workshop">Workshop</option><option value="School Activity">School Activity</option><option value="Ceremony">Ceremony</option><option value="Sports">Sports</option><option value="Other">Other</option></select></div>');
   document.querySelector("#eventNotes").closest(".field").insertAdjacentHTML("beforebegin", `<fieldset class="geofence-editor field full"><legend>Attendance area</legend><label class="geofence-toggle"><input id="eventGeofenceEnabled" type="checkbox"> <span>Require location to check in</span></label><p>Choose the center of the allowed attendance area and set its radius.</p><div class="map-search-row"><input id="eventGeofenceSearch" type="search" placeholder="Search an address or place"><button id="eventGeofenceSearchButton" class="outline-button" type="button">Search</button></div><div id="eventGeofenceMap" class="geofence-map" aria-label="Event attendance area map"></div><div class="geofence-fields"><div class="field"><label for="eventGeofenceRadius">Allowed radius (meters)</label><input id="eventGeofenceRadius" type="number" min="25" max="5000" step="5" value="100"></div><div class="field"><label for="eventGeofenceAddress">Selected address</label><input id="eventGeofenceAddress" type="text" readonly placeholder="Click the map or search for a place"></div><div class="field"><label for="eventGeofenceLatitude">Latitude</label><input id="eventGeofenceLatitude" type="number" step="any" readonly></div><div class="field"><label for="eventGeofenceLongitude">Longitude</label><input id="eventGeofenceLongitude" type="number" step="any" readonly></div></div><small class="geofence-help">Click anywhere on the map to set the pin. A student must allow location access and be inside this circle to check in.</small></fieldset>`);
   document.querySelector(".content").insertAdjacentHTML("beforeend", `<section class="view-section" data-section="geofence" hidden><div class="section-head"><div><p class="eyebrow">Attendance setup</p><h2>Geofence Locations</h2><p>Select an event and update the area where students may check in.</p></div></div><article class="panel geofence-manager-panel"><div class="field"><label for="geofenceEventSelect">Event</label><select id="geofenceEventSelect"><option value="">Select an event</option></select></div><div id="geofenceManagerContent" hidden><div class="geofence-manager-head"><div><strong id="geofenceManagerEventName"></strong><small id="geofenceManagerEventDetails"></small></div><label class="geofence-toggle"><input id="managerGeofenceEnabled" type="checkbox"> <span>Require location to check in</span></label></div><div class="map-search-row"><input id="managerGeofenceSearch" type="search" placeholder="Search an address or place"><button id="managerGeofenceSearchButton" class="outline-button" type="button">Search</button></div><div id="managerGeofenceMap" class="geofence-map" aria-label="Selected event attendance area map"></div><div class="geofence-fields"><div class="field"><label for="managerGeofenceRadius">Allowed radius (meters)</label><input id="managerGeofenceRadius" type="number" min="25" max="5000" step="5" value="100"></div><div class="field"><label for="managerGeofenceAddress">Selected address</label><input id="managerGeofenceAddress" type="text" readonly></div><div class="field"><label for="managerGeofenceLatitude">Latitude</label><input id="managerGeofenceLatitude" type="number" step="any" readonly></div><div class="field"><label for="managerGeofenceLongitude">Longitude</label><input id="managerGeofenceLongitude" type="number" step="any" readonly></div></div><div class="form-actions"><button id="geofenceEditEvent" class="outline-button" type="button">Edit full event</button><button id="saveManagerGeofence" class="primary-button" type="button">Save attendance area</button></div></div><div id="geofenceManagerEmpty" class="empty-state">Select an event to view or change its attendance area.</div></article></section>`);
-  document.querySelector("#adminProfileEmail").value = currentUser.email || ADMIN_EMAIL;
+  document.querySelector("#adminProfileEmail").value = currentUser.email || SUPER_ADMIN_EMAIL;
 
   function makeGeofenceEditor(prefix) {
     const enabled = document.querySelector(`#${prefix}GeofenceEnabled`);
@@ -1981,7 +2043,7 @@ function initializeAdmin() {
           updatedAt: serverTimestamp(),
           updatedBy: currentUser.uid
         }, { merge: true });
-        notifyRoles(["head_admin", "attendance_admin"], { category: "service", title: "Community service updated", message: `${student.accountId}'s service requirement was updated.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
+        notifyRoles(["super_admin", "head_admin", "attendance_admin"], { category: "service", title: "Community service updated", message: `${student.accountId}'s service requirement was updated.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
         showDashboardToast(addingCommunityService ? "Community service added" : "Fine updated", addingCommunityService ? `${formatServiceMinutes(enteredServiceMinutes)} was added to this fine.` : `${student.accountId}'s fine was updated.`);
       } else {
         await addDoc(collection(db, "fines"), {
@@ -1990,7 +2052,7 @@ function initializeAdmin() {
           assignedAt: serverTimestamp(),
           assignedBy: currentUser.uid
         });
-        notifyRoles(["head_admin", "attendance_admin"], { category: "service", title: "Community service assigned", message: `${student.accountId} was assigned a community-service requirement.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
+        notifyRoles(["super_admin", "head_admin", "attendance_admin"], { category: "service", title: "Community service assigned", message: `${student.accountId} was assigned a community-service requirement.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
         showDashboardToast("Fine assigned", `${student.accountId} was assigned a new community-service requirement.`);
       }
       resetFineForm();
@@ -2179,11 +2241,11 @@ function initializeAdmin() {
       const avatar = student.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student.firstName, student.lastName));
       const presence = getStudentPresence(student.uid);
       const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
-      const role = student.role || "student";
-      const roleControl = currentUserRole === "head_admin"
-        ? `<select class="role-select" data-role-select="${escapeHtml(student.uid)}" aria-label="Role for ${escapeHtml(student.accountId)}">${Object.entries(ROLE_LABELS).map(([value, label]) => `<option value="${value}"${value === role ? " selected" : ""}>${label}</option>`).join("")}</select>`
+      const role = student.role === "viewer" ? "student" : student.role || "student";
+      const roleControl = currentUserRole === "super_admin"
+        ? `<select class="role-select" data-role-select="${escapeHtml(student.uid)}" aria-label="Role for ${escapeHtml(student.accountId)}">${Object.entries(ASSIGNABLE_ROLE_LABELS).map(([value, label]) => `<option value="${value}"${value === role ? " selected" : ""}>${label}</option>`).join("")}</select>`
         : `<span class="badge blue">${escapeHtml(roleLabel(role))}</span>`;
-      return `<tr><td><div class="student-cell"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))}</strong><small>${escapeHtml(student.accountId)}</small></div></div></td><td><strong>${escapeHtml(student.course || "Not assigned")}</strong><br><small>Section ${escapeHtml(student.section)}</small></td><td><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span><small class="presence-time presence-status is-${presence.status}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</small></td><td>${escapeHtml(student.email || "Not provided")}</td><td>${roleControl}</td><td><div class="table-actions"><button class="small-button" type="button" data-view-student="${student.uid}">Profile</button>${hasFaceRegistration ? `<button class="small-button danger" type="button" data-reset-face="${student.uid}">Reset face</button>` : ""}<button class="small-button" type="button" data-password-student="${student.uid}">Password</button><button class="small-button danger" type="button" data-delete-student="${student.uid}">Clear account</button></div></td></tr>`;
+      return `<tr><td><div class="student-cell"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))}</strong><small>${escapeHtml(student.accountId)}</small></div></div></td><td><strong>${escapeHtml(student.course || "Not assigned")}</strong><br><small>Section ${escapeHtml(student.section)}</small></td><td><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span><small class="presence-time presence-status is-${presence.status}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</small></td><td>${escapeHtml(student.email || "Not provided")}</td><td>${roleControl}</td><td><div class="table-actions"><button class="small-button" type="button" data-view-student="${student.uid}">Profile</button>${hasFaceRegistration && currentUserRole === "super_admin" ? `<button class="small-button danger" type="button" data-reset-face="${student.uid}">Reset face</button>` : ""}<button class="small-button" type="button" data-password-student="${student.uid}">Password</button><button class="small-button danger" type="button" data-delete-student="${student.uid}">Clear account</button></div></td></tr>`;
     }).join("");
     const studentMobileMarkup = visibleStudents.map((student) => {
       const fullName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ");
@@ -2220,7 +2282,7 @@ function initializeAdmin() {
       ? studentAttendance.map((record) => `<article class="attended-event-box"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><span>${escapeHtml(record.eventDate || "Date unavailable")} · ${escapeHtml(record.location || "Location not provided")}</span><span>${escapeHtml(record.timeIn || "")} ${record.timeOut ? `– ${escapeHtml(record.timeOut)}` : ""}</span></article>`).join("")
       : '<div class="empty-state">This student has not attended an event yet.</div>';
     const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
-    adminStudentDetail.innerHTML = `<article class="panel admin-student-overview"><button class="modal-close" type="button" data-close-student-detail aria-label="Close student details">×</button><div class="profile-avatar">${avatar}</div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(student.accountId)}</p><p class="profile-course-line" style="margin-top:-4px;color:var(--muted);font-size:.82rem;">Course Registered · <strong>${escapeHtml(student.course || "Not assigned")}</strong></p><span class="badge ${presence.isOnline ? "green" : "gray"}"><i class="presence-dot"></i>${presence.label}</span><small class="presence-profile-time">${escapeHtml(presence.detail)}</small><div class="admin-student-actions"><button class="primary-button" type="button" data-edit-student="${student.uid}">Edit information</button>${hasFaceRegistration ? `<button class="outline-button" type="button" data-reset-face="${student.uid}">Reset face registration</button>` : ""}<button class="outline-button" type="button" data-password-student="${student.uid}">Change password</button><button class="small-button danger modal-danger-button" type="button" data-delete-student="${student.uid}">Clear account</button></div></article><article class="panel admin-student-information"><div class="panel-head"><div><h3>Student information</h3><p>Profile details and recorded attendance.</p></div><span class="badge blue">${studentAttendance.length} attended</span></div><div class="student-info-boxes"><div class="student-info-box"><span>Student ID</span><strong>${escapeHtml(student.accountId)}</strong></div><div class="student-info-box"><span>Course Registered</span><strong>${escapeHtml(student.course || "Not assigned")}</strong></div><div class="student-info-box"><span>Section</span><strong>${escapeHtml(student.section)}</strong></div><div class="student-info-box"><span>Face registration</span><strong>${hasFaceRegistration ? "Registered" : "Not registered"}</strong></div><div class="student-info-box"><span>Email address</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div><div class="student-info-box"><span>Phone number</span><strong>${escapeHtml(student.phone || "Not provided")}</strong></div><div class="student-info-box"><span>Live status</span><strong>${presence.label}</strong><small>${escapeHtml(presence.detail)}</small></div><div class="student-info-box"><span>Account access</span><strong>${student.active === false ? "Inactive" : "Active"}</strong></div></div><div class="panel-head"><div><h3>Attended events</h3><p>All attendance records saved for this student.</p></div></div><div class="attended-event-grid">${attendedCards}</div></article>`;
+    adminStudentDetail.innerHTML = `<article class="panel admin-student-overview"><button class="modal-close" type="button" data-close-student-detail aria-label="Close student details">×</button><div class="profile-avatar">${avatar}</div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(student.accountId)}</p><p class="profile-course-line" style="margin-top:-4px;color:var(--muted);font-size:.82rem;">Course Registered · <strong>${escapeHtml(student.course || "Not assigned")}</strong></p><span class="badge ${presence.isOnline ? "green" : "gray"}"><i class="presence-dot"></i>${presence.label}</span><small class="presence-profile-time">${escapeHtml(presence.detail)}</small><div class="admin-student-actions"><button class="primary-button" type="button" data-edit-student="${student.uid}">Edit information</button>${hasFaceRegistration && currentUserRole === "super_admin" ? `<button class="outline-button" type="button" data-reset-face="${student.uid}">Reset face registration</button>` : ""}<button class="outline-button" type="button" data-password-student="${student.uid}">Change password</button><button class="small-button danger modal-danger-button" type="button" data-delete-student="${student.uid}">Clear account</button></div></article><article class="panel admin-student-information"><div class="panel-head"><div><h3>Student information</h3><p>Profile details and recorded attendance.</p></div><span class="badge blue">${studentAttendance.length} attended</span></div><div class="student-info-boxes"><div class="student-info-box"><span>Student ID</span><strong>${escapeHtml(student.accountId)}</strong></div><div class="student-info-box"><span>Course Registered</span><strong>${escapeHtml(student.course || "Not assigned")}</strong></div><div class="student-info-box"><span>Section</span><strong>${escapeHtml(student.section)}</strong></div><div class="student-info-box"><span>Face registration</span><strong>${hasFaceRegistration ? "Registered" : "Not registered"}</strong></div><div class="student-info-box"><span>Email address</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div><div class="student-info-box"><span>Phone number</span><strong>${escapeHtml(student.phone || "Not provided")}</strong></div><div class="student-info-box"><span>Live status</span><strong>${presence.label}</strong><small>${escapeHtml(presence.detail)}</small></div><div class="student-info-box"><span>Account access</span><strong>${student.active === false ? "Inactive" : "Active"}</strong></div></div><div class="panel-head"><div><h3>Attended events</h3><p>All attendance records saved for this student.</p></div></div><div class="attended-event-grid">${attendedCards}</div></article>`;
     const fineCount = fines.filter((fine) => fine.studentUid === student.uid).length;
     adminStudentDetail.querySelector(".admin-student-actions")?.insertAdjacentHTML("afterbegin", `<button class="outline-button" type="button" data-check-student-fines="${escapeHtml(student.uid)}">Check attendance fines${fineCount ? ` (${fineCount})` : ""}</button>`);
     adminStudentDetail.querySelector(".student-info-boxes")?.insertAdjacentHTML("afterbegin", `<div class="student-info-box"><span>Birthday</span><strong>${escapeHtml(formatBirthday(student.birthday))}</strong></div>`);
@@ -2249,7 +2311,7 @@ function initializeAdmin() {
       const registration = await waitForFaceRegistration(student.uid, false);
       if (!registration) throw new Error("Drive did not confirm removal. The student remains registered.");
       await createNotification({ recipientUid: student.uid, recipientRole: "student", category: "face", title: "Face registration reset", message: "Your administrator reset your face registration. You may now register one new photo.", targetView: "face", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section });
-      await notifyRoles(["head_admin", "student_manager"], { category: "face", title: "Face registration reset", message: `${student.accountId}'s face registration was reset.`, targetView: "modify-students", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section });
+      await notifyRoles(["super_admin", "head_admin", "student_manager"], { category: "face", title: "Face registration reset", message: `${student.accountId}'s face registration was reset.`, targetView: "modify-students", studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section });
       showDashboardToast("Face registration reset", `${student.accountId} can now register one new photo.`);
       return true;
     } catch (error) {
@@ -2397,7 +2459,7 @@ function initializeAdmin() {
         if (!isEventFinished(record)) {
           const recipients = students.filter((student) => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
           Promise.allSettled(recipients.map((student) => createNotification({ recipientUid: student.uid, recipientRole: "student", category: "attendance", title: "Event updated", message: `${record.name} was updated. Review the latest event details.`, targetView: "events", eventId: id, studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section }))).catch(() => {});
-          notifyRoles(["head_admin", "attendance_admin", "viewer"], { category: "system", title: "Event updated", message: `${record.name} was updated. Review the latest event details.`, targetView: "modify-events", eventId: id }).catch(() => {});
+          notifyRoles(["super_admin", "head_admin", "attendance_admin"], { category: "system", title: "Event updated", message: `${record.name} was updated. Review the latest event details.`, targetView: "modify-events", eventId: id }).catch(() => {});
         }
       } else {
         const eventReference = doc(collection(db, "events"));
@@ -2408,7 +2470,7 @@ function initializeAdmin() {
         if (!isEventFinished(record)) {
           const recipients = students.filter((student) => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
           Promise.allSettled(recipients.map((student) => createNotification({ recipientUid: student.uid, recipientRole: "student", category: "attendance", title: "New event published", message: `${record.name} is scheduled for ${formatEventDate(record.date)}.`, targetView: "events", eventId: eventReference.id, studentName: [student.firstName, student.lastName].filter(Boolean).join(" "), studentId: student.accountId, section: student.section }))).catch(() => {});
-          notifyRoles(["head_admin", "attendance_admin", "viewer"], { category: "system", title: "New event published", message: `${record.name} is scheduled for ${formatEventDate(record.date)}.`, targetView: "modify-events", eventId: eventReference.id }).catch(() => {});
+          notifyRoles(["super_admin", "head_admin", "attendance_admin"], { category: "system", title: "New event published", message: `${record.name} is scheduled for ${formatEventDate(record.date)}.`, targetView: "modify-events", eventId: eventReference.id }).catch(() => {});
         }
       }
       const returnView = eventForm.dataset.returnView || "modify-events";
@@ -2689,7 +2751,7 @@ function initializeAdmin() {
 
   studentTableBody.addEventListener("change", async (changeEvent) => {
     const selector = changeEvent.target.closest("[data-role-select]");
-    if (!selector || currentUserRole !== "head_admin") return;
+    if (!selector || currentUserRole !== "super_admin") return;
     const student = students.find((item) => item.uid === selector.dataset.roleSelect);
     if (!student) return;
     const pendingWrite = pendingRoleWrites.get(student.uid);
@@ -2959,14 +3021,14 @@ function initializeAdmin() {
     if (viewName === "assign-fine") renderFineOptions();
     if (viewName === "assigned-fines") renderAdminFines();
   });
-  if (["head_admin", "attendance_admin"].includes(currentUserRole)) onSnapshot(collection(db, "eventGeofences"), (snapshot) => {
+  if (["super_admin", "head_admin", "attendance_admin"].includes(currentUserRole)) onSnapshot(collection(db, "eventGeofences"), (snapshot) => {
     geofencesByEventId = new Map(snapshot.docs.map((item) => [item.id, item.data()]));
     events = events.map((event) => ({ ...event, geofence: geofencesByEventId.get(event.id) || { enabled: false } }));
     if (activeView === "geofence") loadGeofenceManager();
     if (["dashboard", "modify-events", "past-events"].includes(activeView)) renderAdminEvents();
   });
   onSnapshot(query(collection(db, "events"), orderBy("openAt", "asc")), (snapshot) => {
-    events = snapshot.docs.map((item) => ({ id: item.id, ...item.data(), ...(["head_admin", "attendance_admin"].includes(currentUserRole) ? { geofence: geofencesByEventId.get(item.id) || { enabled: false } } : {}) }));
+    events = snapshot.docs.map((item) => ({ id: item.id, ...item.data(), ...(["super_admin", "head_admin", "attendance_admin"].includes(currentUserRole) ? { geofence: geofencesByEventId.get(item.id) || { enabled: false } } : {}) }));
     if (["dashboard", "modify-events"].includes(activeView)) renderAdminEvents();
     if (activeView === "past-events") renderPastEvents();
     renderGeofenceEventOptions();
@@ -3000,7 +3062,7 @@ function initializeAdmin() {
     if (activeView === "modify-students" && selectedManagedStudentUid) renderSelectedStudent();
   });
   onSnapshot(collection(db, "faceRegistrations"), (snapshot) => { faceRegistrationsByUid = new Map(snapshot.docs.map((item) => [item.id, item.data()])); scheduleStudentsRender(); });
-  if (currentUserRole === "head_admin") onSnapshot(doc(db, "adminProfiles", currentUser.uid), (snapshot) => { renderAdminProfile(snapshot.data()); });
+  if (currentUserRole === "super_admin") onSnapshot(doc(db, "adminProfiles", currentUser.uid), (snapshot) => { renderAdminProfile(snapshot.data()); });
   resetStudentForm();
   resetEventForm();
 }

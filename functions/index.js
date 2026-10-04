@@ -5,15 +5,15 @@ const { getAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 
 initializeApp();
-const ADMIN_EMAIL = "mikhailovna2007@gmail.com";
+const SUPER_ADMIN_EMAIL = "mikhailovna2007@gmail.com";
 const ROLE = Object.freeze({
+  SUPER_ADMIN: "super_admin",
   HEAD_ADMIN: "head_admin",
   ATTENDANCE_ADMIN: "attendance_admin",
   STUDENT_MANAGER: "student_manager",
-  VIEWER: "viewer",
   STUDENT: "student"
 });
-const ASSIGNABLE_ROLES = new Set(Object.values(ROLE));
+const ASSIGNABLE_ROLES = new Set([ROLE.HEAD_ADMIN, ROLE.ATTENDANCE_ADMIN, ROLE.STUDENT_MANAGER, ROLE.STUDENT]);
 
 function studentMatchesEventAudience(student, audience) {
   return student.active !== false
@@ -41,9 +41,9 @@ async function notifyRoles(firestore, roles, notification) {
   const recipients = profiles.docs
     .map((snapshot) => ({ uid: snapshot.id, ...snapshot.data() }))
     .filter((profile) => roles.includes(profile.role));
-  if (roles.includes(ROLE.HEAD_ADMIN)) {
-    const bootstrap = await getAuth().getUserByEmail(ADMIN_EMAIL).catch((error) => error.code === "auth/user-not-found" ? null : Promise.reject(error));
-    if (bootstrap && !recipients.some((recipient) => recipient.uid === bootstrap.uid)) recipients.push({ uid: bootstrap.uid, role: ROLE.HEAD_ADMIN });
+  if (roles.includes(ROLE.SUPER_ADMIN)) {
+    const bootstrap = await getAuth().getUserByEmail(SUPER_ADMIN_EMAIL).catch((error) => error.code === "auth/user-not-found" ? null : Promise.reject(error));
+    if (bootstrap && !recipients.some((recipient) => recipient.uid === bootstrap.uid)) recipients.push({ uid: bootstrap.uid, role: ROLE.SUPER_ADMIN });
   }
   await Promise.all(recipients.map((recipient) => firestore.collection("notifications").add(notificationData(recipient, notification))));
 }
@@ -184,7 +184,7 @@ exports.notifyFaceRegistration = onCall(async (request) => {
     throw new HttpsError("permission-denied", "Face registration has not been verified.");
   }
   const student = studentSnapshot.data();
-  await notifyRoles(firestore, [ROLE.HEAD_ADMIN, ROLE.STUDENT_MANAGER], {
+  await notifyRoles(firestore, [ROLE.SUPER_ADMIN, ROLE.HEAD_ADMIN, ROLE.STUDENT_MANAGER], {
     category: "face",
     title: "Face registration completed",
     message: `${[student.firstName, student.lastName].filter(Boolean).join(" ") || "A student"} completed face registration.`,
@@ -196,10 +196,10 @@ exports.notifyFaceRegistration = onCall(async (request) => {
   return { ok: true };
 });
 
-// One-time, Head Admin-only migration for event documents created before
+// One-time, Super Admin-only migration for event documents created before
 // geofence coordinates were moved out of student-readable event records.
 exports.migrateEventGeofences = onCall(async (request) => {
-  await requireHeadAdmin(request);
+  await requireSuperAdmin(request);
   const firestore = getFirestore();
   const events = await firestore.collection("events").get();
   let migrated = 0;
@@ -290,18 +290,21 @@ function studentIdToEmail(studentId) {
 async function requireAdmin(request) {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in is required.");
   const role = request.auth.token.role;
-  const isBootstrapHeadAdmin = request.auth.token.email?.toLowerCase() === ADMIN_EMAIL;
-  if (role !== ROLE.HEAD_ADMIN && !isBootstrapHeadAdmin) {
+  const isSuperAdmin = request.auth.token.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
+  if (role !== ROLE.HEAD_ADMIN && !isSuperAdmin) {
     throw new HttpsError("permission-denied", "Only the Head Admin can manage student accounts.");
   }
 }
 
-function requireHeadAdmin(request) {
-  return requireAdmin(request);
+function requireSuperAdmin(request) {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in is required.");
+  if (request.auth.token.email?.toLowerCase() !== SUPER_ADMIN_EMAIL) {
+    throw new HttpsError("permission-denied", "Only the Super Admin can manage roles.");
+  }
 }
 
 exports.assignUserRole = onCall(async (request) => {
-  await requireHeadAdmin(request);
+  await requireSuperAdmin(request);
   const uid = String(request.data?.uid || "").trim();
   const role = String(request.data?.role || "").trim();
   if (!uid || !ASSIGNABLE_ROLES.has(role)) {
@@ -341,8 +344,8 @@ function validateStudent(data) {
   if (!/^[A-Za-z0-9._-]+$/.test(data.accountId)) {
     throw new HttpsError("invalid-argument", "Student ID may only use letters, numbers, dots, dashes, and underscores.");
   }
-  if (typeof data.email === "string" && data.email.trim().toLowerCase() === ADMIN_EMAIL) {
-    throw new HttpsError("invalid-argument", "The protected Head Admin email cannot be registered as a student email.");
+  if (typeof data.email === "string" && data.email.trim().toLowerCase() === SUPER_ADMIN_EMAIL) {
+    throw new HttpsError("invalid-argument", "The protected Super Admin email cannot be registered as a student email.");
   }
   if (!allowedSections.has(data.section)) {
     throw new HttpsError("invalid-argument", "Choose a valid section from 1A through 4B.");

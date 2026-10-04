@@ -7,12 +7,12 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isHeadAdmin() || isAttendanceAdmin() || isStudentManager() || isViewer();
+      return isSuperAdmin() || isHeadAdmin() || isAttendanceAdmin() || isStudentManager();
     }
 
-    // The bootstrap email is the protected root account. Other roles are kept
+    // The bootstrap email is the protected Super Admin account. Other roles are kept
     // on each user's student profile so this works without Cloud Functions.
-    function isBootstrapHeadAdmin() {
+    function isSuperAdmin() {
       return signedIn()
         && request.auth.token.email is string
         && request.auth.token.email.matches("(?i)^mikhailovna2007@gmail\\.com$");
@@ -26,7 +26,7 @@ service cloud.firestore {
     }
 
     function isHeadAdmin() {
-      return isBootstrapHeadAdmin() || hasStoredRole("head_admin");
+      return hasStoredRole("head_admin");
     }
 
     function isAttendanceAdmin() {
@@ -37,20 +37,16 @@ service cloud.firestore {
       return hasStoredRole("student_manager");
     }
 
-    function isViewer() {
-      return hasStoredRole("viewer");
-    }
-
     function canManageStudents() {
-      return isHeadAdmin() || isStudentManager();
+      return isSuperAdmin() || isHeadAdmin() || isStudentManager();
     }
 
     function canManageAttendance() {
-      return isHeadAdmin() || isAttendanceAdmin();
+      return isSuperAdmin() || isHeadAdmin() || isAttendanceAdmin();
     }
 
     function canViewAttendanceReports() {
-      return isHeadAdmin() || isAttendanceAdmin() || isViewer();
+      return isSuperAdmin() || isHeadAdmin() || isAttendanceAdmin();
     }
 
     function isStudent() {
@@ -112,13 +108,13 @@ service cloud.firestore {
         && optionalShortText(data, "lastName", 80) && optionalShortText(data, "birthday", 10)
         && optionalShortText(data, "course", 120) && optionalShortText(data, "email", 320)
         && optionalShortText(data, "phone", 24)
-        // The bootstrap Head Admin account must never be represented as a student.
+        // The bootstrap Super Admin account must never be represented as a student.
         && (!("email" in data) || !data.email.matches("(?i)^mikhailovna2007@gmail\\.com$"))
         && (!("authEmail" in data) || !data.authEmail.matches("(?i)^mikhailovna2007@gmail\\.com$"))
         && (!("photoDataUrl" in data) || (shortText(data.photoDataUrl, 350000) && data.photoDataUrl.matches('^data:image/(jpeg|png|webp);base64,.+$')))
         && (!("section" in data) || data.section in ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"])
         && (!("active" in data) || data.active is bool)
-        && (!("role" in data) || data.role in ["head_admin", "attendance_admin", "student_manager", "viewer", "student"])
+        && (!("role" in data) || data.role in ["head_admin", "attendance_admin", "student_manager", "student"])
         && (!("roleUpdatedAt" in data) || data.roleUpdatedAt is timestamp)
         && optionalShortText(data, "roleUpdatedBy", 128)
         && (!("createdAt" in data) || data.createdAt is timestamp)
@@ -187,10 +183,10 @@ service cloud.firestore {
         && data.status in ["checked-in", "completed"];
     }
 
-    // Spark-plan attendance verification. Firestore Rules can enforce event,
-    // audience, face-registration, and server-time checks. The geofence check
-    // uses a conservative square inside the configured radius because Rules
-    // cannot perform Haversine distance calculations.
+    // Spark-plan attendance verification. Rules enforce authorization and data
+    // integrity. Exact geofence distance is calculated by the client: Rules
+    // cannot do trigonometry, and the previous coordinate-square approximation
+    // rejected valid locations inside the configured circle.
     function attendanceMatchesEvent(data, event) {
       return data.eventName == event.name
         && data.eventType == event.type
@@ -203,17 +199,19 @@ service cloud.firestore {
     }
 
     function withinSparkGeofence(data, eventId, event) {
-      // 157,430 m per degree is deliberately conservative: any accepted point
-      // is within the radius even without longitude/cosine calculations.
       return event.requiresGeofence != true || (
         exists(/databases/$(database)/documents/eventGeofences/$(eventId))
         && get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.enabled == true
         && data.keys().hasAll(["checkInLocation"])
-        && data.checkInLocation.latitude >= get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.latitude - (get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.radiusMeters / 157430)
-        && data.checkInLocation.latitude <= get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.latitude + (get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.radiusMeters / 157430)
-        && data.checkInLocation.longitude >= get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.longitude - (get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.radiusMeters / 157430)
-        && data.checkInLocation.longitude <= get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.longitude + (get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.radiusMeters / 157430)
+        && validLocation(data.checkInLocation)
       );
+    }
+
+    function studentCanReadEventGeofence(eventId) {
+      return isStudent()
+        && exists(/databases/$(database)/documents/events/$(eventId))
+        && (get(/databases/$(database)/documents/events/$(eventId)).data.audience == "All students"
+          || get(/databases/$(database)/documents/events/$(eventId)).data.audience == "Section " + get(/databases/$(database)/documents/students/$(request.auth.uid)).data.section);
     }
 
     function studentCanCheckIn(attendanceId, data) {
@@ -256,9 +254,9 @@ service cloud.firestore {
         && validStudent(request.resource.data)
         && !request.resource.data.keys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy"]);
       allow delete: if canManageStudents();
-      allow update: if (isHeadAdmin()
+      allow update: if (isSuperAdmin()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["role", "roleUpdatedAt", "roleUpdatedBy"])
-          && request.resource.data.role in ["head_admin", "attendance_admin", "student_manager", "viewer", "student"]
+          && request.resource.data.role in ["head_admin", "attendance_admin", "student_manager", "student"]
           && request.resource.data.roleUpdatedAt is timestamp
           && request.resource.data.roleUpdatedBy == request.auth.uid)
         || (canManageStudents()
@@ -279,7 +277,7 @@ service cloud.firestore {
     }
 
     match /adminProfiles/{adminUid} {
-      allow read, create, update: if isHeadAdmin() && request.auth.uid == adminUid;
+      allow read, create, update: if isSuperAdmin() && request.auth.uid == adminUid;
       allow delete: if false;
     }
 
@@ -295,10 +293,9 @@ service cloud.firestore {
     }
 
     match /events/{eventId} {
-      // Viewer and student event reads exclude legacy documents until the
-      // Head Admin migration removes their embedded geofence coordinates.
-      allow read: if isHeadAdmin() || isAttendanceAdmin()
-        || ((isViewer() || isStudent()) && !resource.data.keys().hasAll(["geofence"]));
+      // Students cannot read legacy events that embed geofence coordinates.
+      allow read: if isSuperAdmin() || isHeadAdmin() || isAttendanceAdmin()
+        || (isStudent() && !resource.data.keys().hasAll(["geofence"]));
       allow create, update: if canManageAttendance()
         && validEvent(request.resource.data)
         && request.resource.data.openAt is timestamp
@@ -348,8 +345,10 @@ service cloud.firestore {
     }
 
     match /eventGeofences/{eventId} {
-      // Exact event coordinates are private to attendance administrators.
-      allow read: if canManageAttendance();
+      // Eligible students need a single geofence document to calculate the
+      // exact client-side distance. Listing all attendance areas stays denied.
+      allow get: if canManageAttendance() || studentCanReadEventGeofence(eventId);
+      allow list: if canManageAttendance();
       allow create, update: if canManageAttendance() && validGeofence(request.resource.data);
       allow delete: if canManageAttendance();
     }
@@ -382,7 +381,7 @@ service cloud.firestore {
         && request.resource.data.lastSeen is timestamp
         && (!("offlineAt" in request.resource.data)
           || request.resource.data.offlineAt is timestamp);
-      allow delete: if isHeadAdmin();
+      allow delete: if isSuperAdmin();
     }
 
     match /presenceSessions/{sessionId} {
@@ -407,11 +406,11 @@ service cloud.firestore {
         && request.resource.data.lastSeen is timestamp
         && (!("offlineAt" in request.resource.data)
           || request.resource.data.offlineAt is timestamp);
-      allow delete: if isHeadAdmin();
+      allow delete: if isSuperAdmin();
     }
 
     match /auditLogs/{auditId} {
-      allow read: if isHeadAdmin();
+      allow read: if isSuperAdmin();
       allow write: if false;
     }
 

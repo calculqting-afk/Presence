@@ -19,7 +19,7 @@ export const db = initializeFirestore(app, {
 });
 const studentProvisioningApp = initializeApp(firebaseConfig, "student-provisioning");
 export const studentProvisioningAuth = getAuth(studentProvisioningApp);
-export const ADMIN_EMAIL = "mikhailovna2007@gmail.com";
+export const SUPER_ADMIN_EMAIL = "mikhailovna2007@gmail.com";
 
 window.addEventListener("load", () => {
   import("https://www.gstatic.com/firebasejs/12.16.0/firebase-analytics.js")
