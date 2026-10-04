@@ -736,23 +736,25 @@ function initializeStudent() {
         const attended = Boolean(attendanceRecord);
         const completed = attendanceRecord?.status === "completed" || Boolean(attendanceRecord?.checkedOutAt);
         const checkoutOpen = attended && !completed && isCheckoutAvailable(event);
+        const missedCheckIn = !attended && isCheckoutAvailable(event);
         const disabled = completed || (attended ? !checkoutOpen : status !== "open");
         const buttonText = completed
           ? "✓ Attendance completed"
           : attended
             ? checkoutOpen ? "Check out" : "✓ Checked in"
-            : status === "open" ? "Check in" : status === "closed" ? "Check-in closed" : "Not open yet";
+            : missedCheckIn ? "Check-out unavailable" : status === "open" ? "Check in" : status === "closed" ? "Check-in closed" : "Not open yet";
         const attendanceBadge = completed
           ? '<span class="badge green">Completed</span>'
           : attended
             ? `<span class="badge green">${checkoutOpen ? "Checkout available" : "Checked in"}</span>`
-            : eventStatusBadge(status);
+            : missedCheckIn ? '<span class="badge orange">Check-in missed</span>' : eventStatusBadge(status);
         const description = event.description || event.notes || `Attendance event for ${event.audience}.`;
         const checkInCutoff = event.checkInCutoff || event.timeOut;
         const checkOutCutoff = event.checkOutCutoff || "";
+        const missedCheckInMessage = missedCheckIn ? `<p class="event-card-notice">You cannot check out because you did not check in before the ${escapeHtml(formatEventTime(checkInCutoff))} cutoff.</p>` : "";
         const action = checkoutOpen ? `data-check-out-event="${escapeHtml(event.id)}"` : `data-attend-event="${escapeHtml(event.id)}"`;
         const buttonClass = checkoutOpen || (!attended && status === "open") ? "primary-button" : "outline-button";
-        return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div><div class="event-meta"><span class="event-check-time"><b>IN</b>${escapeHtml(formatEventTime(event.timeIn))} – ${escapeHtml(formatEventTime(checkInCutoff))}</span><span class="event-check-time"><b>OUT</b>${escapeHtml(formatEventTime(event.timeOut))}${checkOutCutoff ? ` – ${escapeHtml(formatEventTime(checkOutCutoff))}` : ""}</span><span class="event-location">${escapeHtml(event.location)}</span></div><div class="event-card-actions">${attendanceBadge}<button class="${buttonClass}" type="button" ${action} ${disabled ? "disabled" : ""}>${buttonText}</button></div></div></article>`;
+        return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div><div class="event-meta"><span class="event-check-time"><b>IN</b>${escapeHtml(formatEventTime(event.timeIn))} – ${escapeHtml(formatEventTime(checkInCutoff))}</span><span class="event-check-time"><b>OUT</b>${escapeHtml(formatEventTime(event.timeOut))}${checkOutCutoff ? ` – ${escapeHtml(formatEventTime(checkOutCutoff))}` : ""}</span><span class="event-location">${escapeHtml(event.location)}</span></div>${missedCheckInMessage}<div class="event-card-actions">${attendanceBadge}<button class="${buttonClass}" type="button" ${action} ${disabled ? "disabled" : ""}>${buttonText}</button></div></div></article>`;
       }).join("");
       timeline.innerHTML = `<div class="timeline">${activeEvents.slice(0, 4).map((event) => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${attendanceByEventId.has(event.id) ? '<span class="badge green">Attended</span>' : eventStatusBadge(getEventStatus(event))}</div>`).join("")}</div>`;
     }
