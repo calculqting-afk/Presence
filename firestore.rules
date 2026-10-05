@@ -99,7 +99,7 @@ service cloud.firestore {
     function validStudent(data) {
       return data.keys().hasOnly([
           "uid", "accountId", "accountIdKey", "authEmail", "firstName", "middleName", "lastName", "birthday",
-          "course", "section", "email", "phone", "photoDataUrl", "active", "role", "roleUpdatedAt",
+          "course", "section", "email", "phone", "photoDataUrl", "profilePhotoStorage", "profilePhotoDriveFileId", "profilePhotoDriveFileName", "profilePhotoUpdatedAt", "active", "role", "roleUpdatedAt",
           "roleUpdatedBy", "createdAt", "updatedAt"
         ])
         && optionalShortText(data, "uid", 128) && optionalShortText(data, "accountId", 64)
@@ -112,6 +112,12 @@ service cloud.firestore {
         && (!("email" in data) || !data.email.matches("(?i)^mikhailovna2007@gmail\\.com$"))
         && (!("authEmail" in data) || !data.authEmail.matches("(?i)^mikhailovna2007@gmail\\.com$"))
         && (!("photoDataUrl" in data) || (shortText(data.photoDataUrl, 350000) && data.photoDataUrl.matches('^data:image/(jpeg|png|webp);base64,.+$')))
+        // Kept for existing records created before the Google Drive photo feature
+        // was rolled back. Students cannot modify these fields from this version.
+        && (!("profilePhotoStorage" in data) || data.profilePhotoStorage == "Google Drive")
+        && optionalShortText(data, "profilePhotoDriveFileId", 160)
+        && optionalShortText(data, "profilePhotoDriveFileName", 240)
+        && (!("profilePhotoUpdatedAt" in data) || data.profilePhotoUpdatedAt is timestamp)
         && (!("section" in data) || data.section in ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"])
         && (!("active" in data) || data.active is bool)
         && (!("role" in data) || data.role in ["head_admin", "attendance_admin", "student_manager", "student"])
