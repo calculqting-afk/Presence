@@ -101,10 +101,6 @@
               <div class="form-actions"><button class="outline-button" type="button" data-go-back>← Back</button><button class="outline-button" id="cancelStudentForm" type="button">Reset form</button><button class="primary-button" id="studentSubmitButton" type="submit">Add student</button></div>
             </form>
           </article>
-          <article class="panel data-cleanup-panel" data-super-admin-only>
-            <div class="panel-head"><div><h3>Data Cleanup</h3><p>Remove event and fine records without changing student accounts or face registrations.</p></div><span class="badge orange">Super Admin only</span></div>
-            <button class="small-button danger modal-danger-button" id="openDataCleanup" type="button">Clear event or fine data</button>
-          </article>
         </section>
 
         <section class="view-section" data-section="modify-students" hidden>
@@ -182,6 +178,10 @@
               <div class="form-actions"><button class="outline-button" type="button" data-go-back>← Back</button><button class="primary-button" type="submit">Save profile</button></div>
             </form>
           </article>
+          <article class="panel data-cleanup-panel" data-super-admin-only>
+            <div class="panel-head"><div><h3>Reset operational data</h3><p>Permanently remove selected event, attendance, and fine records. Accounts and profile settings are kept.</p></div><span class="badge orange">Super Admin only</span></div>
+            <button class="small-button danger modal-danger-button" id="openDataCleanup" type="button">Reset operational data</button>
+          </article>
         </section>
       </div>
     </main>
@@ -252,12 +252,12 @@
     <section class="dashboard-modal data-cleanup-modal" role="dialog" aria-modal="true" aria-labelledby="dataCleanupTitle" aria-describedby="dataCleanupMessage">
       <button class="modal-close" type="button" data-close-data-cleanup aria-label="Close">×</button>
       <span class="modal-icon danger">!</span>
-      <h2 id="dataCleanupTitle">Clear student records?</h2>
-      <p id="dataCleanupMessage">Choose exactly what to remove. Student accounts, profiles, passwords, and face registrations will remain unchanged.</p>
+      <h2 id="dataCleanupTitle">Reset operational data?</h2>
+      <p id="dataCleanupMessage">This permanently removes the selected records. Student accounts, administrator profiles, passwords, face registrations, and settings will remain unchanged.</p>
       <div class="cleanup-counts" id="dataCleanupCounts"></div>
-      <div class="cleanup-options" aria-label="Data to clear"><label><input id="clearEventData" type="checkbox"> <span><strong>Attendance events</strong><small>Events, student attendance records, and dismissed event history.</small></span></label><label><input id="clearFineData" type="checkbox"> <span><strong>Assigned fines</strong><small>All community-service and fine records.</small></span></label></div>
-      <div class="field"><label for="dataCleanupConfirm">Type CLEAR to confirm</label><input id="dataCleanupConfirm" autocomplete="off" placeholder="CLEAR"></div>
-      <div class="modal-actions"><button class="outline-button" type="button" data-close-data-cleanup>Cancel</button><button class="small-button danger modal-danger-button" id="confirmDataCleanup" type="button" disabled>Clear selected data</button></div>
+      <div class="cleanup-options" aria-label="Data to clear"><label><input id="clearEventData" type="checkbox"> <span><strong>Attendance events</strong><small>Events, student attendance, dismissed-event history, and saved event areas.</small></span></label><label><input id="clearFineData" type="checkbox"> <span><strong>Assigned fines</strong><small>All community-service and fine records.</small></span></label></div>
+      <div class="field"><label for="dataCleanupConfirm">Type RESET DATA to confirm</label><input id="dataCleanupConfirm" autocomplete="off" placeholder="RESET DATA"></div>
+      <div class="modal-actions"><button class="outline-button" type="button" data-close-data-cleanup>Cancel</button><button class="small-button danger modal-danger-button" id="confirmDataCleanup" type="button" disabled>Reset selected data</button></div>
     </section>
   </div>
   <div class="dashboard-modal-backdrop" id="roleChangeModal" hidden>
@@ -271,6 +271,6 @@
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
   <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script type="module" src="../assets/js/dashboard.js?v=20261004-super-admin"></script>
+  <script type="module" src="../assets/js/dashboard.js?v=20261005-rules-reset"></script>
 </body>
 </html>
