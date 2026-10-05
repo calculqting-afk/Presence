@@ -311,7 +311,9 @@ service cloud.firestore {
         && request.resource.data.openAt < request.resource.data.checkInClosesAt
         && request.resource.data.checkInClosesAt <= request.resource.data.closeAt
         && request.resource.data.closeAt < request.resource.data.checkOutClosesAt;
-      allow delete: if canManageAttendance();
+      // Deletion is deliberately stricter than event editing. This protects
+      // the operational-data reset from being triggered by other admin roles.
+      allow delete: if isSuperAdmin();
     }
 
     match /attendance/{attendanceId} {
@@ -321,7 +323,7 @@ service cloud.firestore {
         || (validAttendance(request.resource.data) && studentCanCheckIn(attendanceId, request.resource.data));
       allow update: if (canManageAttendance() && validAttendance(request.resource.data))
         || (validAttendance(request.resource.data) && studentCanCheckOut(request.resource.data, resource.data));
-      allow delete: if canManageAttendance();
+      allow delete: if isSuperAdmin();
     }
 
     match /fines/{fineId} {
@@ -329,13 +331,13 @@ service cloud.firestore {
         || (isStudent() && resource.data.studentUid == request.auth.uid);
       allow create: if canManageAttendance() && validFine(request.resource.data);
       allow update: if canManageAttendance() && validFine(request.resource.data);
-      allow delete: if canManageAttendance();
+      allow delete: if isSuperAdmin();
     }
 
     match /dismissedHistory/{dismissalId} {
       allow read: if isAdmin()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
-      allow delete: if canManageAttendance()
+      allow delete: if isSuperAdmin()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
       allow create: if isStudent()
         && request.resource.data.studentUid == request.auth.uid;
@@ -356,7 +358,7 @@ service cloud.firestore {
       allow get: if canManageAttendance() || studentCanReadEventGeofence(eventId);
       allow list: if canManageAttendance();
       allow create, update: if canManageAttendance() && validGeofence(request.resource.data);
-      allow delete: if canManageAttendance();
+      allow delete: if isSuperAdmin();
     }
 
     match /notifications/{notificationId} {

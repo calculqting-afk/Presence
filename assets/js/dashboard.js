@@ -1,4 +1,4 @@
-import { SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js";
+import { SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js?v=20261005-operational-reset";
 import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
   Timestamp,
@@ -1774,7 +1774,7 @@ function initializeAdmin() {
 
   function updateDataCleanupState() {
     const selected = clearEventData.checked || clearFineData.checked;
-    confirmDataCleanup.disabled = !selected || dataCleanupConfirm.value.trim() !== "CLEAR";
+    confirmDataCleanup.disabled = !selected || dataCleanupConfirm.value.trim() !== "RESET DATA";
   }
 
   function renderDataCleanupCounts() {
@@ -1802,32 +1802,34 @@ function initializeAdmin() {
   confirmDataCleanup.addEventListener("click", async () => {
     if (confirmDataCleanup.disabled) return;
     confirmDataCleanup.disabled = true;
-    confirmDataCleanup.textContent = "Clearing data…";
+    confirmDataCleanup.textContent = "Resetting data…";
     try {
-      await currentUser.getIdToken(true);
       const clearEvents = clearEventData.checked;
       const clearFines = clearFineData.checked;
-      const snapshots = await Promise.all([
+      const [eventSnapshot, attendanceSnapshot, dismissedSnapshot, geofenceSnapshot, fineSnapshot] = await Promise.all([
         clearEvents ? getDocs(collection(db, "events")) : Promise.resolve(null),
         clearEvents ? getDocs(collection(db, "attendance")) : Promise.resolve(null),
         clearEvents ? getDocs(collection(db, "dismissedHistory")) : Promise.resolve(null),
+        clearEvents ? getDocs(collection(db, "eventGeofences")) : Promise.resolve(null),
         clearFines ? getDocs(collection(db, "fines")) : Promise.resolve(null)
       ]);
-      const [eventSnapshot, attendanceSnapshot, dismissedSnapshot, fineSnapshot] = snapshots;
       await Promise.all([
         eventSnapshot ? writeInBatches(eventSnapshot.docs, (batch, item) => batch.delete(item.ref)) : Promise.resolve(),
         attendanceSnapshot ? writeInBatches(attendanceSnapshot.docs, (batch, item) => batch.delete(item.ref)) : Promise.resolve(),
         dismissedSnapshot ? writeInBatches(dismissedSnapshot.docs, (batch, item) => batch.delete(item.ref)) : Promise.resolve(),
+        geofenceSnapshot ? writeInBatches(geofenceSnapshot.docs, (batch, item) => batch.delete(item.ref)) : Promise.resolve(),
         fineSnapshot ? writeInBatches(fineSnapshot.docs, (batch, item) => batch.delete(item.ref)) : Promise.resolve()
       ]);
       const counts = { events: eventSnapshot?.size || 0, attendance: attendanceSnapshot?.size || 0, fines: fineSnapshot?.size || 0 };
       closeDataCleanupModal();
-      showDashboardToast("Selected data cleared", `${counts.events || 0} event${counts.events === 1 ? "" : "s"}, ${counts.attendance || 0} attendance record${counts.attendance === 1 ? "" : "s"}, and ${counts.fines || 0} fine${counts.fines === 1 ? "" : "s"} were removed.`);
+      const eventFollowUp = clearEvents ? " Linked event areas and dismissed-event history were also removed." : "";
+      showDashboardToast("Operational data reset", `${counts.events || 0} event${counts.events === 1 ? "" : "s"}, ${counts.attendance || 0} attendance record${counts.attendance === 1 ? "" : "s"}, and ${counts.fines || 0} fine${counts.fines === 1 ? "" : "s"} were removed.${eventFollowUp}`);
     } catch (error) {
-      showDashboardToast("Unable to clear data", error.code === "permission-denied" ? "Your account is not allowed to clear these records." : error.message || "Try again after refreshing the dashboard.");
+      const code = firebaseErrorCode(error);
+      showDashboardToast("Unable to reset data", code === "permission-denied" ? "Only the Super Admin can reset operational data. Deploy the latest Firestore Rules, then sign in again." : error.message || "Try again after refreshing the dashboard.");
       updateDataCleanupState();
     } finally {
-      confirmDataCleanup.textContent = "Clear selected data";
+      confirmDataCleanup.textContent = "Reset selected data";
     }
   });
 
