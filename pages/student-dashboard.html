@@ -131,6 +131,18 @@
       </form>
     </section>
   </div>
+  <div class="dashboard-modal-backdrop" id="requiredPasswordChangeModal" hidden>
+    <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="requiredPasswordChangeTitle" aria-describedby="requiredPasswordChangeMessage">
+      <span class="modal-icon">◇</span>
+      <h2 id="requiredPasswordChangeTitle">Create your new password</h2>
+      <p id="requiredPasswordChangeMessage">You signed in with a temporary password. Create a new password before continuing.</p>
+      <form id="requiredPasswordChangeForm">
+        <div class="field"><label for="requiredNewPassword">New password</label><input id="requiredNewPassword" type="text" required minlength="6" maxlength="8" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password"><small>Use 6 to 8 digits. Do not reuse the temporary password.</small></div>
+        <div class="field"><label for="requiredConfirmPassword">Confirm new password</label><input id="requiredConfirmPassword" type="text" required minlength="6" maxlength="8" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password"></div>
+        <div class="modal-actions"><button class="primary-button" id="completeRequiredPasswordChange" type="submit">Save new password</button></div>
+      </form>
+    </section>
+  </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
   <script type="module" src="../assets/js/dashboard.js?v=20261004-super-admin"></script>
 </body>

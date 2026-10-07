@@ -115,6 +115,7 @@ async function main() {
       await firebaseAuth.updateUser(user.uid, { password: temporaryPassword });
       await firebaseAuth.revokeRefreshTokens(user.uid);
     }
+    await studentReference.set({ mustChangePassword: true }, { merge: true });
     try {
       await firestore.collection("auditLogs").add({
         action: authenticationAccountMissing ? "student_auth_account_restored_locally" : "student_password_recovered_locally",

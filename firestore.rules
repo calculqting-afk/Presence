@@ -100,7 +100,7 @@ service cloud.firestore {
       return data.keys().hasOnly([
           "uid", "accountId", "accountIdKey", "authEmail", "firstName", "middleName", "lastName", "birthday",
           "course", "section", "email", "phone", "photoDataUrl", "profilePhotoStorage", "profilePhotoDriveFileId", "profilePhotoDriveFileName", "profilePhotoUpdatedAt", "active", "role", "roleUpdatedAt",
-          "roleUpdatedBy", "createdAt", "updatedAt"
+          "roleUpdatedBy", "mustChangePassword", "createdAt", "updatedAt"
         ])
         && optionalShortText(data, "uid", 128) && optionalShortText(data, "accountId", 64)
         && optionalShortText(data, "accountIdKey", 64) && optionalShortText(data, "authEmail", 320)
@@ -123,6 +123,7 @@ service cloud.firestore {
         && (!("role" in data) || data.role in ["head_admin", "attendance_admin", "student_manager", "student"])
         && (!("roleUpdatedAt" in data) || data.roleUpdatedAt is timestamp)
         && optionalShortText(data, "roleUpdatedBy", 128)
+        && (!("mustChangePassword" in data) || data.mustChangePassword is bool)
         && (!("createdAt" in data) || data.createdAt is timestamp)
         && (!("updatedAt" in data) || data.updatedAt is timestamp);
     }
@@ -279,7 +280,14 @@ service cloud.firestore {
           && (!("photoDataUrl" in request.resource.data)
             || (request.resource.data.photoDataUrl is string
               && request.resource.data.photoDataUrl.size() <= 350000))
-          && request.resource.data.section in ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"]);
+          && request.resource.data.section in ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"])
+        || (isStudent()
+          && request.auth.uid == studentUid
+          && validStudent(request.resource.data)
+          && resource.data.mustChangePassword == true
+          && request.resource.data.mustChangePassword == false
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["mustChangePassword", "updatedAt"])
+          && request.resource.data.updatedAt is timestamp);
     }
 
     match /adminProfiles/{adminUid} {

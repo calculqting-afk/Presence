@@ -28,6 +28,7 @@ Remove-Item Env:PRESENCE_SERVICE_ACCOUNT_KEY
 
 3. Enter your administrator email, the Student ID, and type `VERIFY` only after checking the physical ID.
 4. Enter a unique 6-8 digit temporary password twice and provide the final confirmation phrase.
-5. Give the temporary password to the student privately. The tool immediately replaces the old Firebase Authentication password, revokes existing sessions, and writes an audit event without recording the password. If the matching Authentication account was previously deleted while the Firestore profile remains, the tool clearly warns you and can restore that account with the same UID after an additional `RESTORE <Student ID>` confirmation.
+5. Give the temporary password to the student privately. The tool immediately replaces the old Firebase Authentication password, revokes existing sessions, marks the account as requiring a password change, and writes an audit event without recording the password. If the matching Authentication account was previously deleted while the Firestore profile remains, the tool clearly warns you and can restore that account with the same UID after an additional `RESTORE <Student ID>` confirmation.
+6. On the student's next sign-in, Presence shows a required password-change modal. They create their own new password before using the dashboard.
 
 Never place the service-account JSON key in this repository, Firebase Hosting files, Firestore, Git, email, or a shared cloud folder.

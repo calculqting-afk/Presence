@@ -639,6 +639,9 @@ function initializeStudent() {
   let eventStatusTimer;
   studentLoggedOut = false;
   const studentProfileModal = document.querySelector("#studentProfileModal");
+  const requiredPasswordChangeModal = document.querySelector("#requiredPasswordChangeModal");
+  const requiredPasswordChangeForm = document.querySelector("#requiredPasswordChangeForm");
+  const completeRequiredPasswordChange = document.querySelector("#completeRequiredPasswordChange");
   let storedPresenceSession = "";
   try { storedPresenceSession = sessionStorage.getItem("presenceDeviceSession") || ""; } catch {}
   presenceSessionId = storedPresenceSession || `${currentUser.uid}_${createDeviceSessionToken()}`;
@@ -722,6 +725,18 @@ function initializeStudent() {
 
   function closeStudentProfileModal() {
     studentProfileModal.hidden = true;
+  }
+
+  function openRequiredPasswordChangeModal() {
+    if (!requiredPasswordChangeModal.hidden) return;
+    requiredPasswordChangeForm.reset();
+    requiredPasswordChangeModal.hidden = false;
+    document.querySelector("#requiredNewPassword").focus();
+  }
+
+  function closeRequiredPasswordChangeModal() {
+    requiredPasswordChangeModal.hidden = true;
+    requiredPasswordChangeForm.reset();
   }
 
   function renderEvents() {
@@ -983,6 +998,47 @@ function initializeStudent() {
   document.querySelectorAll("[data-close-student-profile]").forEach((button) => button.addEventListener("click", closeStudentProfileModal));
   studentProfileModal.addEventListener("click", (event) => { if (event.target === studentProfileModal) closeStudentProfileModal(); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !studentProfileModal.hidden) closeStudentProfileModal(); });
+
+  requiredPasswordChangeForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const newPassword = document.querySelector("#requiredNewPassword").value;
+    const confirmPassword = document.querySelector("#requiredConfirmPassword").value;
+    if (!/^\d{6,8}$/.test(newPassword)) {
+      showDashboardToast("Invalid password", "Use a new password containing 6 to 8 digits.");
+      document.querySelector("#requiredNewPassword").focus();
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showDashboardToast("Passwords do not match", "Enter the same new password in both fields.");
+      document.querySelector("#requiredConfirmPassword").focus();
+      return;
+    }
+    completeRequiredPasswordChange.disabled = true;
+    completeRequiredPasswordChange.textContent = "Saving password…";
+    let passwordUpdated = false;
+    try {
+      await updatePassword(currentUser, newPassword);
+      passwordUpdated = true;
+      await setDoc(doc(db, "students", currentUser.uid), {
+        mustChangePassword: false,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      closeRequiredPasswordChangeModal();
+      showDashboardToast("Password changed", "Your new password is now active.");
+    } catch (error) {
+      const message = passwordUpdated
+        ? "Your password was changed, but Presence could not unlock the dashboard. Refresh after the latest Firestore Rules are published."
+        : error.code === "auth/requires-recent-login"
+          ? "Please sign out and sign in again with the temporary password, then create your new password immediately."
+          : error.code === "auth/weak-password"
+            ? "The new password must contain at least 6 characters."
+            : error.message || "Your password could not be changed.";
+      showDashboardToast("Unable to finish password change", message);
+    } finally {
+      completeRequiredPasswordChange.disabled = false;
+      completeRequiredPasswordChange.textContent = "Save new password";
+    }
+  });
 
   const communityServiceModal = document.querySelector("#studentCommunityServiceModal");
   const communityServiceModalContent = document.querySelector("#studentCommunityServiceModalContent");
@@ -1413,6 +1469,8 @@ function initializeStudent() {
     }
     studentProfile = snapshot.data();
     renderProfile();
+    if (studentProfile.mustChangePassword === true) openRequiredPasswordChangeModal();
+    else closeRequiredPasswordChangeModal();
   });
   onSnapshot(query(collection(db, "events"), orderBy("openAt", "asc")), (snapshot) => { events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); scheduleEventRender(); renderMyAttendances(); scheduleEventStatusRefresh(); });
   onSnapshot(query(collection(db, "attendance"), where("studentUid", "==", currentUser.uid)), (snapshot) => { attendance = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); scheduleEventRender(); renderMyAttendances(); });
