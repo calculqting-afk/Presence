@@ -1,0 +1,6 @@
+# Firebase Admin credentials must never be committed.
+service-account*.json
+firebase-service-account*.json
+*firebase-adminsdk-*.json
+*.firebase-admin.json
+functions/node_modules/
