@@ -14,8 +14,10 @@ service cloud.firestore {
     // on each user's student profile so this works without Cloud Functions.
     function isSuperAdmin() {
       return signedIn()
-        && request.auth.token.email is string
-        && request.auth.token.email.matches("(?i)^mikhailovna2007@gmail\\.com$");
+        && (
+          request.auth.uid == "8uEjAk72BLWKjvnQJEatBdeVAi02"
+          || request.auth.token.email == "mikhailovna2007@gmail.com"
+        );
     }
 
     function hasStoredRole(role) {
@@ -175,7 +177,7 @@ service cloud.firestore {
     function validAttendance(data) {
       return data.keys().hasOnly([
           "studentUid", "studentId", "eventId", "eventName", "eventType", "eventDescription", "eventDate",
-          "timeIn", "timeOut", "location", "audience", "checkInLocation", "checkOutLocation", "attendedAt",
+          "timeIn", "timeOut", "location", "audience", "checkInLocation", "checkOutLocation", "attendedAt", "arrivalStatus",
           "checkedInAt", "checkedOutAt", "status"
         ])
         && data.keys().hasAll(["studentUid", "studentId", "eventId", "eventName", "eventType", "eventDescription", "eventDate", "timeIn", "timeOut", "location", "audience", "attendedAt", "checkedInAt", "status"])
@@ -187,6 +189,7 @@ service cloud.firestore {
         && (!("checkOutLocation" in data) || validLocation(data.checkOutLocation))
         && data.attendedAt is timestamp && data.checkedInAt is timestamp
         && (!("checkedOutAt" in data) || data.checkedOutAt is timestamp)
+        && (!("arrivalStatus" in data) || data.arrivalStatus in ["present", "late"])
         && data.status in ["checked-in", "completed"];
     }
 
@@ -233,8 +236,11 @@ service cloud.firestore {
         && data.studentId == student.accountId
         && attendanceMatchesEvent(data, event)
         && (event.audience == "All students" || event.audience == "Section " + student.section)
-        && request.time >= event.openAt && request.time <= event.checkInClosesAt
+        && request.time >= event.openAt && request.time < event.closeAt
         && data.attendedAt == request.time && data.checkedInAt == request.time
+        && data.keys().hasAll(["arrivalStatus"])
+        && ((request.time <= event.checkInClosesAt && data.arrivalStatus == "present")
+          || (request.time > event.checkInClosesAt && data.arrivalStatus == "late"))
         && data.status == "checked-in"
         && !data.keys().hasAny(["checkedOutAt", "checkOutLocation"])
         && withinSparkGeofence(data, data.eventId, event);

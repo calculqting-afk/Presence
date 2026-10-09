@@ -1,0 +1,10 @@
+{
+  "name": "presence-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "serve": "node tools/serve.cjs",
+    "test": "node --experimental-vm-modules --test tests/*.test.cjs",
+    "check": "node tools/check-modules.cjs"
+  }
+}

@@ -12,8 +12,7 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261002-data-cleanup">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261009-performance">
 </head>
 <body data-dashboard="admin">
   <div class="app-shell">
@@ -59,7 +58,7 @@
         </section>
 
         <section class="view-section" data-section="attendance-line" hidden>
-          <div class="section-head"><div><p class="eyebrow">Real-time attendance</p><h2>Attendance Line</h2><p>See student check-ins and check-outs as they are recorded.</p></div><select id="adminAttendanceEventFilter" aria-label="Filter attendance by event"><option value="all">All events</option></select></div>
+          <div class="section-head"><div><p class="eyebrow">Real-time attendance</p><h2>Attendance Line</h2><p>See student check-ins and check-outs as they are recorded.</p></div><div class="button-row"><span class="badge gray" id="attendanceSyncStatus" role="status" aria-live="polite">Connecting…</span><button class="outline-button" id="syncAttendanceNow" type="button">↻ Sync now</button><select id="adminAttendanceEventFilter" aria-label="Filter attendance by event"><option value="all">All events</option></select></div></div>
           <article class="panel"><div class="attendance-line" id="adminAttendanceLine"><div class="empty-state">No attendance records yet.</div></div></article>
         </section>
 
@@ -270,7 +269,6 @@
     </section>
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
-  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script type="module" src="../assets/js/dashboard.js?v=20261005-rules-reset"></script>
+  <script type="module" src="../assets/js/dashboard.js?v=20261009-oop"></script>
 </body>
 </html>

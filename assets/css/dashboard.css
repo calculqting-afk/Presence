@@ -311,6 +311,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .community-service-card-action span { font-size: 1rem; transition: transform .2s ease; }
 .community-service-card:hover .community-service-card-action span { transform: translateX(3px); }
 .history-card-top, .admin-event-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.attendance-record-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; margin-left: auto; }
 .history-event-card h3, .admin-event-card h3 { margin: 16px 0 8px; font-size: 1rem; line-height: 1.35; }
 .history-event-card > p, .admin-event-card > p { min-height: 46px; margin: 0 0 17px; color: var(--muted); font-size: .74rem; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .event-detail-boxes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
