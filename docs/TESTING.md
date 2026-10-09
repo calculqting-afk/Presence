@@ -80,6 +80,8 @@ For boundary testing, create short test windows a few minutes apart. The emulato
 
 ## Firestore rule testing
 
+For the fixed administrator role policy, publishing steps, manual correction audit checks, and Auth limitations, follow [ROLE-PERMISSIONS.md](ROLE-PERMISSIONS.md).
+
 Run security-rule tests in Firebase's Local Emulator Suite using a `demo-*` project ID and `@firebase/rules-unit-testing`. Explicitly load this repository's `firestore.rules`. The current automated suite mocks Firebase; it does not start the emulator, install that library, or connect this browser build to emulators.
 
 Build an emulator test matrix that asserts:

@@ -50,6 +50,15 @@ function getFaceRegistration_(studentUid, idToken) {
   return JSON.parse(response.getContentText());
 }
 
+function canResetFace_(requester, idToken) {
+  if (requester.localId === "8uEjAk72BLWKjvnQJEatBdeVAi02" || requester.email?.toLowerCase() === SUPER_ADMIN_EMAIL) return true;
+  // Never trust a role supplied by the browser. Read the authenticated caller's
+  // stored role through Firestore, which also applies its deployed rules.
+  const profile = firestoreRequest_("get", `students/${encodeURIComponent(requester.localId)}`, idToken);
+  return profile?.fields?.active?.booleanValue === true
+    && ["head_admin", "student_manager"].includes(profile?.fields?.role?.stringValue);
+}
+
 function createFaceRegistration_(studentUid, idToken, file) {
   return firestoreRequest_("patch", `faceRegistrations/${studentUid}`, idToken, {
     fields: {
@@ -92,8 +101,8 @@ function doPost(e) {
     const requester = verifyFirebaseUser_(payload.idToken);
 
     if (payload.action === "reset") {
-      if (requester.email?.toLowerCase() !== SUPER_ADMIN_EMAIL) throw new Error("Only the Presence Super Admin can reset face registration.");
-      if (!payload.studentUid) throw new Error("Missing student UID.");
+      if (!canResetFace_(requester, payload.idToken)) throw new Error("Your role cannot reset face registration.");
+      if (typeof payload.studentUid !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(payload.studentUid)) throw new Error("Invalid student UID.");
       const registration = getFaceRegistration_(payload.studentUid, payload.idToken);
       if (!registration) throw new Error("This student has no active face registration.");
 

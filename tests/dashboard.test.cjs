@@ -21,7 +21,11 @@ async function isolatedModule(relative, shared = {}, globals = {}) {
   await module.link((specifier, referencing) => {
     if (specifier.includes('dashboard.js')) return mock('shared', shared);
     if (specifier.includes('firebase-config.js')) return mock('config', { db: {} });
-    if (specifier.startsWith('https:')) return mock('sdk', { collection: () => ({}), onSnapshot: () => () => {}, getDocsFromServer: async () => ({ docs: [] }) });
+    if (specifier.startsWith('https:')) return mock('sdk', {
+      collection: (...args) => ({ path: args.join('/') }), doc: (...args) => ({ path: args.join('/'), id: args.length === 1 ? 'audit-1' : args.at(-1) }),
+      Timestamp: { fromDate: date => date }, serverTimestamp: () => 'server-time', runTransaction: async () => {},
+      onSnapshot: () => () => {}, getDocsFromServer: async () => ({ docs: [] })
+    });
     return load(path.resolve(path.dirname(referencing.identifier), specifier.split('?')[0]));
   });
   await module.evaluate();
@@ -212,7 +216,7 @@ function fakeBrowser() {
     }
     return nodes.get(selector);
   };
-  const document = { querySelector: element, querySelectorAll: () => [], body: element('body'), addEventListener() {} };
+  const document = { querySelector: element, querySelectorAll: () => [], body: element('body'), addEventListener() {}, removeEventListener() {} };
   const window = { addEventListener: (name, callback) => { if (!listeners.has(name)) listeners.set(name, new Set()); listeners.get(name).add(callback); }, removeEventListener: (name, callback) => listeners.get(name)?.delete(callback), emit: viewName => { for (const callback of listeners.get('presence:viewchange') || []) callback({ detail: { viewName } }); }, matchMedia: () => ({ matches: false, addEventListener() {} }), setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {}, requestAnimationFrame: () => 1, cancelAnimationFrame() {} };
   return { document, window, sessionStorage: { getItem: () => null, setItem() {} } };
 }
@@ -249,4 +253,67 @@ test('dashboard entry points use the same shared-module version', () => {
     const html = fs.readFileSync(path.join(root, `pages/${role}-dashboard.html`), 'utf8');
     assert.ok(html.includes('dashboard.js?v=20261009-oop'));
   }
+});
+
+test('fixed role permissions deny unknown roles/actions and keep Student Manager read-only reports', async () => {
+  const { hasPermission: can, requirePermission, ROLE_VIEWS } = await import(pathToFileURL(path.join(root, 'assets/js/core/permissions.js')));
+  for (const action of ['viewStudents', 'addStudents', 'editStudents', 'resetFace', 'viewFines', 'viewAbsences']) assert.equal(can('student_manager', action), true, action);
+  for (const action of ['changePasswords', 'deleteStudents', 'changeRoles', 'manageFines', 'correctAttendance', 'manageEvents']) assert.equal(can('student_manager', action), false, action);
+  for (const action of ['manageEvents', 'manageGeofences', 'correctAttendance']) assert.equal(can('attendance_admin', action), true, action);
+  for (const action of ['viewFines', 'manageFines', 'editStudents', 'resetFace', 'changePasswords', 'changeRoles', 'resetData']) assert.equal(can('attendance_admin', action), false, action);
+  for (const action of ['manageFines', 'changePasswords', 'correctAttendance', 'resetFace']) assert.equal(can('head_admin', action), true, action);
+  for (const action of ['deleteStudents', 'deleteEvents', 'deleteFines', 'changeRoles', 'resetData']) assert.equal(can('head_admin', action), false, action);
+  assert.equal(can('unknown', 'changeRoles'), false); assert.equal(can('super_admin', 'unknown'), false);
+  assert.throws(() => requirePermission('student_manager', 'correctAttendance'), { code: 'permission-denied' });
+  assert.ok(ROLE_VIEWS.student_manager.includes('assigned-fines')); assert.ok(!ROLE_VIEWS.student_manager.includes('assign-fine'));
+  assert.ok(!ROLE_VIEWS.attendance_admin.includes('assigned-fines'));
+});
+
+test('manual corrections reject missing reasons, invalid dates and reversed checkout', async () => {
+  const { correctionValues } = await isolatedModule('assets/js/controllers/AttendanceCorrectionController.js');
+  const input = { checkIn: '2026-10-01T09:00', checkOut: '2026-10-01T10:00', arrival: 'present', reason: ' Verified attendance ' };
+  assert.equal(correctionValues(input).reason, 'Verified attendance');
+  for (const invalid of [{ reason: '   ' }, { reason: 'x'.repeat(1001) }, { checkIn: '' }, { checkIn: 'invalid' }, { checkIn: '2999-01-01T09:00' }, { checkOut: '2026-10-01T08:00' }, { arrival: 'fake' }]) {
+    assert.throws(() => correctionValues({ ...input, ...invalid }));
+  }
+});
+
+for (const role of ['head_admin', 'attendance_admin', 'student_manager']) {
+  test(`${role} initializes only authorized report/directory listeners`, async () => {
+    const names = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+    const shared = Object.fromEntries(names.map(name => [name, () => '']));
+    const active = new Map();
+    Object.assign(shared, { currentUser: { uid: 'manager-1' }, currentUserProfile: {}, currentUserRole: role, activeView: 'dashboard', ASSIGNABLE_ROLE_LABELS: {}, db: {},
+      collection: (_, name) => name, doc: (_, name, id) => `${name}/${id}`, query: value => value,
+      onSnapshot: (reference, callback) => { active.set(reference, callback); return () => active.delete(reference); }, FineModalController: class {}, Timestamp: { fromMillis: value => new Date(value) } });
+    const browser = fakeBrowser();
+    const { AdminDashboard } = await isolatedModule('assets/js/admin/AdminDashboard.js', shared, browser);
+    const dashboard = new AdminDashboard(); dashboard.initialize();
+    browser.window.emit('modify-students');
+    assert.equal(active.has('fines'), role !== 'attendance_admin');
+    assert.equal(active.has('faceRegistrations'), role !== 'attendance_admin');
+    assert.equal(browser.document.querySelector('#addAttendanceCorrection').hidden, role === 'student_manager');
+    assert.equal(active.has('adminProfiles/manager-1'), false);
+    browser.window.emit('dashboard'); assert.equal(active.has('fines'), false);
+    dashboard.dispose(); assert.equal(active.size, 0);
+  });
+}
+
+test('attendance corrections atomically preserve the previous record and identify the actor', async () => {
+  const { AttendanceCorrectionController } = await isolatedModule('assets/js/controllers/AttendanceCorrectionController.js');
+  const writes = []; const before = { studentUid: 'student-1', eventId: 'event-1', status: 'checked-in', checkedOutAt: new Date('2026-10-01T11:00'), checkOutLocation: {} };
+  const controller = new AttendanceCorrectionController({ db: {}, user: { uid: 'manager-1' }, role: 'attendance_admin',
+    getStudents: () => [{ uid: 'student-1', accountId: '123', section: '2A', active: true }],
+    getEvents: () => [{ id: 'event-1', name: 'Event', type: 'School Event', description: '', date: '2026-10-01', timeIn: '09:00', timeOut: '10:00', location: 'School', audience: 'Section 2A' }],
+    transaction: async (_, run) => run({ get: async () => ({ exists: () => true, data: () => before }), set: (ref, data) => writes.push({ ref, data }) }) });
+  const input = { studentUid: 'student-1', eventId: 'event-1', checkIn: '2026-10-01T09:00', checkOut: '', arrival: 'present', reason: 'Verified with event staff' };
+  await controller.save(input);
+  assert.equal(writes.length, 2); assert.equal(writes[0].data.correctedBy, 'manager-1'); assert.equal(writes[0].data.recordSource, 'admin-corrected');
+  assert.equal(writes[1].data.before, before); assert.equal(writes[1].data.after, writes[0].data);
+  assert.equal(writes[1].data.reason, input.reason); assert.equal(writes[1].data.at, 'server-time');
+  assert.equal('checkedOutAt' in writes[0].data, false); assert.equal('checkOutLocation' in writes[0].data, false);
+  controller.role = 'student_manager'; await assert.rejects(controller.save(input), { code: 'permission-denied' });
+  assert.equal(writes.length, 2);
+  controller.role = 'attendance_admin'; controller.getEvents = () => [{ id: 'event-1', audience: 'Section 1A' }];
+  await assert.rejects(controller.save(input), /not assigned/); assert.equal(writes.length, 2);
 });

@@ -430,6 +430,9 @@ exports.manageStudent = onCall(async (request) => {
     const firestore = getFirestore();
 
     if (action === "delete") {
+      if (request.auth.token.email?.toLowerCase() !== SUPER_ADMIN_EMAIL) {
+        throw new HttpsError("permission-denied", "Only the Super Admin can delete student accounts.");
+      }
       if (!data.uid) throw new HttpsError("invalid-argument", "Student UID is required.");
       const studentSnapshot = await firestore.doc(`students/${data.uid}`).get();
       const accountIdKey = String(studentSnapshot.data()?.accountIdKey || studentSnapshot.data()?.accountId || "").trim().toLowerCase();

@@ -59,7 +59,7 @@
 
         <section class="view-section" data-section="attendance-line" hidden>
           <div class="section-head"><div><p class="eyebrow">Real-time attendance</p><h2>Attendance Line</h2><p>See student check-ins and check-outs as they are recorded.</p></div><div class="button-row"><span class="badge gray" id="attendanceSyncStatus" role="status" aria-live="polite">Connecting…</span><button class="outline-button" id="syncAttendanceNow" type="button">↻ Sync now</button><select id="adminAttendanceEventFilter" aria-label="Filter attendance by event"><option value="all">All events</option></select></div></div>
-          <article class="panel"><div class="attendance-line" id="adminAttendanceLine"><div class="empty-state">No attendance records yet.</div></div></article>
+          <article class="panel"><button class="outline-button" type="button" id="addAttendanceCorrection">Set attendance / manual correction</button><div class="attendance-line" id="adminAttendanceLine"><div class="empty-state">No attendance records yet.</div></div></article>
         </section>
 
         <section class="view-section" data-section="create" hidden>
@@ -270,5 +270,20 @@
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
   <script type="module" src="../assets/js/dashboard.js?v=20261009-oop"></script>
+<div class="dashboard-modal-backdrop" id="attendanceCorrectionModal" hidden>
+    <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="correctionTitle">
+      <button class="modal-close" type="button" data-close-correction aria-label="Close">×</button>
+      <h2 id="correctionTitle">Manual attendance correction</h2>
+      <p>Use for a verified correction, not a student check-in. The previous values, your account and reason are kept in an immutable history.</p>
+      <form id="attendanceCorrectionForm"><div class="form-grid">
+        <div class="field"><label for="correctionStudent">Student</label><select id="correctionStudent" required></select></div>
+        <div class="field"><label for="correctionEvent">Event</label><select id="correctionEvent" required></select></div>
+        <div class="field"><label for="correctionCheckIn">Check-in time</label><input type="datetime-local" id="correctionCheckIn" required></div>
+        <div class="field"><label for="correctionCheckOut">Check-out time (optional)</label><input type="datetime-local" id="correctionCheckOut"></div>
+        <div class="field"><label for="correctionArrival">Arrival</label><select id="correctionArrival"><option value="present">Present</option><option value="late">Late</option></select></div>
+        <div class="field full"><label for="correctionReason">Required reason</label><textarea id="correctionReason" minlength="5" maxlength="1000" required></textarea></div>
+      </div><div class="form-actions"><button type="button" class="outline-button" data-close-correction>Cancel</button><button type="submit" class="primary-button" id="saveAttendanceCorrection">Save audited correction</button></div></form>
+    </section>
+  </div>
 </body>
 </html>

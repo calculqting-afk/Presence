@@ -2,11 +2,27 @@ import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_L
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
 import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js';
 import { GeofenceController } from '../controllers/GeofenceController.js';
+import { hasPermission } from '../core/permissions.js';
+import { AttendanceCorrectionController } from '../controllers/AttendanceCorrectionController.js';
 
 export class AdminDashboard {
 initialize() {
+  const can = action => hasPermission(currentUserRole, action);
+  const actionSelectors = {
+    changePasswords: '[data-password-student]', deleteStudents: '[data-delete-student]',
+    resetFace: '[data-reset-face]', editStudents: '[data-edit-student]',
+    manageFines: '[data-edit-fine], #manageStudentFines', deleteFines: '[data-delete-fine]',
+    deleteEvents: '[data-delete-event], [data-remove-event]', resetData: '#openDataCleanup'
+  };
+  const applyActionPermissions = () => Object.entries(actionSelectors).forEach(([action, selector]) => {
+    document.querySelectorAll(selector).forEach(button => { button.hidden = !can(action); });
+  });
+  applyActionPermissions();
   const subscriptions = new ScopedSubscriptions({ onError: (error, key) => { console.error(key, error); showDashboardToast('Data sync unavailable', 'Check your connection and reload to retry.'); } });
-  const listen = (key, views, reference, callback) => subscriptions.register(key, views, (guard, onError) => onSnapshot(reference, guard(callback), onError));
+  const listen = (key, views, reference, callback) => {
+    if (['presence-sessions', 'legacy-presence', 'faces'].includes(key) && !can('viewStudents')) return;
+    subscriptions.register(key, views, (guard, onError) => onSnapshot(reference, guard(callback), onError));
+  };
   const changeSubscriptions = event => subscriptions.setView(event.detail.viewName);
   window.addEventListener('presence:viewchange', changeSubscriptions);
   this.dispose = () => { subscriptions.stop(); window.removeEventListener('presence:viewchange', changeSubscriptions); };
@@ -21,6 +37,23 @@ initialize() {
   let faceRegistrationsByUid = new Map();
   let presenceByUid = new Map();
   let legacyPresenceByUid = new Map();
+  const correctionController = new AttendanceCorrectionController({ db, user: currentUser, role: currentUserRole,
+    getStudents: () => students, getEvents: () => events, escapeHtml, notify: showDashboardToast });
+  correctionController.initialize();
+  const disposeSubscriptions = this.dispose;
+  this.dispose = () => { correctionController.dispose(); disposeSubscriptions(); };
+  const handleCorrection = event => {
+    const button = event.target.closest('[data-correct-attendance]');
+    if (button) correctionController.open(attendance.find(item => item.id === button.dataset.correctAttendance));
+  };
+  document.querySelector('#adminAttendanceLine').addEventListener('click', handleCorrection);
+  document.querySelector('#adminDashboardAttendanceLine').addEventListener('click', handleCorrection);
+  const disposeCorrections = this.dispose;
+  this.dispose = () => {
+    document.querySelector('#adminAttendanceLine').removeEventListener('click', handleCorrection);
+    document.querySelector('#adminDashboardAttendanceLine').removeEventListener('click', handleCorrection);
+    disposeCorrections();
+  };
   async function notifyRoles(roles, notification) {
     const recipients = students
       .filter((student) => student.active !== false && roles.includes(student.role))
@@ -39,7 +72,7 @@ initialize() {
   const eventForm = document.querySelector("#eventForm");
   const attendanceSyncStatus = document.querySelector("#attendanceSyncStatus");
   const syncAttendanceNow = document.querySelector("#syncAttendanceNow");
-  const canManuallySyncAttendance = ["super_admin", "head_admin"].includes(currentUserRole);
+  const canManuallySyncAttendance = can('correctAttendance');
   attendanceSyncStatus.hidden = !canManuallySyncAttendance;
   syncAttendanceNow.hidden = !canManuallySyncAttendance;
   function updateAttendanceSyncStatus({ state, syncedAt, error }) {
@@ -146,6 +179,7 @@ initialize() {
   }
 
   function openRoleChangeModal(student, role, selector) {
+    if (!can('changeRoles')) return;
     const previousRole = student.role || "student";
     pendingRoleChange = { student, role, previousRole, selector };
     roleChangeMessage.textContent = `Change ${student.accountId}'s role from ${roleLabel(previousRole)} to ${roleLabel(role)}? They will need to sign out and sign back in before the new access takes effect.`;
@@ -212,6 +246,7 @@ initialize() {
   }
   geofenceEventSelect.addEventListener("change", () => loadGeofenceManager());
   document.querySelector("#saveManagerGeofence").addEventListener("click", async () => {
+    if (!can('manageGeofences')) return;
     const selectedEvent = events.find((event) => event.id === geofenceEventSelect.value);
     if (!selectedEvent) return;
     const geofence = managerGeofenceEditor.value();
@@ -286,6 +321,7 @@ initialize() {
   }
 
   document.querySelector("#adminProfileForm").addEventListener("submit", async (event) => {
+    if (!can('adminProfile')) { event.preventDefault(); return; }
     event.preventDefault();
     try {
       await setDoc(doc(db, "adminProfiles", currentUser.uid), {
@@ -344,6 +380,7 @@ initialize() {
   }
 
   document.querySelector("#openDataCleanup").addEventListener("click", () => {
+    if (!can('resetData')) return;
     renderDataCleanupCounts();
     dataCleanupModal.hidden = false;
     clearEventData.focus();
@@ -354,6 +391,7 @@ initialize() {
   dataCleanupModal.addEventListener("click", (event) => { if (event.target === dataCleanupModal) closeDataCleanupModal(); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !dataCleanupModal.hidden) closeDataCleanupModal(); });
   confirmDataCleanup.addEventListener("click", async () => {
+    if (!can('resetData')) return;
     if (confirmDataCleanup.disabled) return;
     confirmDataCleanup.disabled = true;
     confirmDataCleanup.textContent = "Resetting data…";
@@ -412,7 +450,7 @@ initialize() {
       const avatar = student?.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student?.firstName || studentName, student?.lastName || ""));
       const checkedInAt = record.checkedInAt || record.attendedAt;
       const completed = Boolean(record.checkedOutAt);
-      return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || record.studentId || "Student ID unavailable")}${student?.section ? ` · ${escapeHtml(student.section)}` : ""}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><small>${escapeHtml(record.eventDate || "Date unavailable")}</small></div><div class="attendance-line-times"><div><span>IN</span><strong>${escapeHtml(formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>OUT</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Duration</span><strong>${escapeHtml(attendanceDuration(checkedInAt, record.checkedOutAt))}</strong></div></div>${arrivalStatusBadge(record.arrivalStatus)}<span class="badge ${completed ? "green" : "blue"}">${completed ? "Completed" : "Checked in"}</span></article>`;
+      return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || record.studentId || "Student ID unavailable")}${student?.section ? ` · ${escapeHtml(student.section)}` : ""}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><small>${escapeHtml(record.eventDate || "Date unavailable")}</small></div><div class="attendance-line-times"><div><span>IN</span><strong>${escapeHtml(formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>OUT</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Duration</span><strong>${escapeHtml(attendanceDuration(checkedInAt, record.checkedOutAt))}</strong></div></div>${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}${can("correctAttendance") ? `<button class="small-button" type="button" data-correct-attendance="${escapeHtml(record.id)}">Correct</button>` : ""}${arrivalStatusBadge(record.arrivalStatus)}<span class="badge ${completed ? "green" : "blue"}">${completed ? "Completed" : "Checked in"}</span></article>`;
     }).join("");
   }
 
@@ -439,7 +477,7 @@ initialize() {
       showDashboardToast("Attendance synced", "The Attendance Line was refreshed from Firestore.");
     } catch (error) {
       const message = firebaseErrorCode(error) === "permission-denied"
-        ? "Firestore denied this server refresh. Sync now is for Super Admin and Head Admin; confirm the deployed Rules recognize this signed-in account, then sign out and sign in again."
+        ? "Firestore denied this server refresh. Confirm the deployed rules recognize your active attendance-management role, then sign out and sign in again."
         : "Firestore could not refresh attendance. Check your connection and try again.";
       showDashboardToast("Attendance sync failed", message);
     } finally {
@@ -463,7 +501,7 @@ initialize() {
   function eventCardMarkup(event, past) {
     const checkInWindow = `${formatEventTime(event.timeIn)} – ${formatEventTime(event.checkInCutoff || event.timeOut)}`;
     const checkOutWindow = `${formatEventTime(event.timeOut)} – ${formatEventTime(event.checkOutCutoff || timePlusMinutes(event.timeOut) || event.timeOut)}`;
-    return `<article class="event-card admin-event-card admin-event-card-student-style"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(event.description || event.notes || "No description provided.")}</div><div class="event-meta"><span class="event-check-time"><b>IN</b>${escapeHtml(checkInWindow)}</span><span class="event-check-time"><b>OUT</b>${escapeHtml(checkOutWindow)}</span><span class="event-location">${escapeHtml(event.location)}</span></div><div class="event-card-actions">${eventStatusBadge(getEventStatus(event))}<div class="admin-event-card-actions">${past ? "" : `<button class="outline-button" type="button" data-manage-geofence="${event.id}">Attendance area</button>`}<button class="outline-button" type="button" data-edit-event="${event.id}">Edit event</button><button class="small-button danger modal-danger-button" type="button" data-delete-event="${event.id}">Remove</button></div></div></div></article>`;
+    return `<article class="event-card admin-event-card admin-event-card-student-style"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(event.description || event.notes || "No description provided.")}</div><div class="event-meta"><span class="event-check-time"><b>IN</b>${escapeHtml(checkInWindow)}</span><span class="event-check-time"><b>OUT</b>${escapeHtml(checkOutWindow)}</span><span class="event-location">${escapeHtml(event.location)}</span></div><div class="event-card-actions">${eventStatusBadge(getEventStatus(event))}<div class="admin-event-card-actions">${past ? "" : `<button class="outline-button" type="button" data-manage-geofence="${event.id}">Attendance area</button>`}<button class="outline-button" type="button" data-edit-event="${event.id}">Edit event</button><button class="small-button danger modal-danger-button" type="button" data-delete-event="${event.id}" ${can("deleteEvents") ? "" : "hidden"}>Remove</button></div></div></div></article>`;
   }
 
   function renderPastEvents() {
@@ -522,9 +560,10 @@ initialize() {
     adminFineList.innerHTML = filteredFines.map((fine) => {
       const sameReasonCount = fines.filter((item) => item.studentUid === fine.studentUid && String(item.eventName || "Attendance absence").trim().toLowerCase() === String(fine.eventName || "Attendance absence").trim().toLowerCase()).length;
       const actions = `<div class="history-card-actions"><button class="outline-button" type="button" data-edit-fine="${escapeHtml(fine.id)}">Modify</button><button class="small-button danger" type="button" data-delete-fine="${escapeHtml(fine.id)}">Remove</button></div>`;
-      const detailArea = sameReasonCount > 1 ? fineDetailsMarkup(fine, true) : actions;
+      const detailArea = sameReasonCount > 1 ? fineDetailsMarkup(fine, can('manageFines')) : can('manageFines') ? actions : '';
       return `<article class="fine-record-card"><div class="history-card-top"><span class="event-type-badge">${escapeHtml(fine.studentId || "Student")}</span><span class="badge orange">${escapeHtml(formatServiceMinutes(fine.serviceMinutes))}</span></div><h3>${escapeHtml(fine.studentName || "Student")}</h3><div class="fine-record-event"><span>Missed attendance</span><strong>${escapeHtml(fine.eventName || "Attendance absence")}</strong></div><p>${escapeHtml(fine.reason || "No reason provided.")}</p><div class="fine-record-meta"><div><span>Status</span><strong class="${fine.status === "Completed" ? "is-completed" : ""}">${escapeHtml(fine.status || "Pending")}</strong></div><div><span>Assigned</span><strong>${escapeHtml(formatFineDate(fine.assignedAt))}</strong></div></div>${detailArea}</article>`;
     }).join("");
+    applyActionPermissions();
   }
 
   function resetFineForm() {
@@ -548,6 +587,7 @@ initialize() {
   }
 
   function editFine(fine) {
+    if (!can('manageFines')) return;
     if (!fine) return;
     openView("assign-fine");
     document.querySelector("#editingFineId").value = fine.id;
@@ -571,6 +611,7 @@ initialize() {
   }
 
   fineForm.addEventListener("submit", async (event) => {
+    if (!can('manageFines')) { event.preventDefault(); return; }
     event.preventDefault();
     const student = students.find((item) => item.uid === fineStudent.value);
     if (!student) {
@@ -617,7 +658,7 @@ initialize() {
           updatedAt: serverTimestamp(),
           updatedBy: currentUser.uid
         }, { merge: true });
-        notifyRoles(["super_admin", "head_admin", "attendance_admin"], { category: "service", title: "Community service updated", message: `${student.accountId}'s service requirement was updated.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
+        notifyRoles(["super_admin", "head_admin", "student_manager"], { category: "service", title: "Community service updated", message: `${student.accountId}'s service requirement was updated.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
         showDashboardToast(addingCommunityService ? "Community service added" : "Fine updated", addingCommunityService ? `${formatServiceMinutes(enteredServiceMinutes)} was added to this fine.` : `${student.accountId}'s fine was updated.`);
       } else {
         await addDoc(collection(db, "fines"), {
@@ -626,7 +667,7 @@ initialize() {
           assignedAt: serverTimestamp(),
           assignedBy: currentUser.uid
         });
-        notifyRoles(["super_admin", "head_admin", "attendance_admin"], { category: "service", title: "Community service assigned", message: `${student.accountId} was assigned a community-service requirement.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
+        notifyRoles(["super_admin", "head_admin", "student_manager"], { category: "service", title: "Community service assigned", message: `${student.accountId} was assigned a community-service requirement.`, targetView: "assigned-fines", studentName: fineData.studentName, studentId: student.accountId, section: student.section }).catch(() => {});
         showDashboardToast("Fine assigned", `${student.accountId} was assigned a new community-service requirement.`);
       }
       resetFineForm();
@@ -695,7 +736,7 @@ initialize() {
       editFine(fines.find((fine) => fine.id === editButton.dataset.editFine));
       return;
     }
-    if (!button) return;
+    if (!button || !can("deleteFines")) return;
     try {
       await deleteDoc(doc(db, "fines", button.dataset.deleteFine));
       showDashboardToast("Fine removed", "The community-service requirement was removed.");
@@ -816,10 +857,10 @@ initialize() {
       const presence = getStudentPresence(student.uid);
       const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
       const role = student.role === "viewer" ? "student" : student.role || "student";
-      const roleControl = currentUserRole === "super_admin"
+      const roleControl = can('changeRoles')
         ? `<select class="role-select" data-role-select="${escapeHtml(student.uid)}" aria-label="Role for ${escapeHtml(student.accountId)}">${Object.entries(ASSIGNABLE_ROLE_LABELS).map(([value, label]) => `<option value="${value}"${value === role ? " selected" : ""}>${label}</option>`).join("")}</select>`
         : `<span class="badge blue">${escapeHtml(roleLabel(role))}</span>`;
-      return `<tr><td><div class="student-cell"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))}</strong><small>${escapeHtml(student.accountId)}</small></div></div></td><td><strong>${escapeHtml(student.course || "Not assigned")}</strong><br><small>Section ${escapeHtml(student.section)}</small></td><td><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span><small class="presence-time presence-status is-${presence.status}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</small></td><td>${escapeHtml(student.email || "Not provided")}</td><td>${roleControl}</td><td><div class="table-actions"><button class="small-button" type="button" data-view-student="${student.uid}">Profile</button>${hasFaceRegistration && currentUserRole === "super_admin" ? `<button class="small-button danger" type="button" data-reset-face="${student.uid}">Reset face</button>` : ""}<button class="small-button" type="button" data-password-student="${student.uid}">Password</button><button class="small-button danger" type="button" data-delete-student="${student.uid}">Clear account</button></div></td></tr>`;
+      return `<tr><td><div class="student-cell"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))}</strong><small>${escapeHtml(student.accountId)}</small></div></div></td><td><strong>${escapeHtml(student.course || "Not assigned")}</strong><br><small>Section ${escapeHtml(student.section)}</small></td><td><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span><small class="presence-time presence-status is-${presence.status}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</small></td><td>${escapeHtml(student.email || "Not provided")}</td><td>${roleControl}</td><td><div class="table-actions"><button class="small-button" type="button" data-view-student="${student.uid}">Profile</button>${hasFaceRegistration && can('resetFace') ? `<button class="small-button danger" type="button" data-reset-face="${student.uid}">Reset face</button>` : ""}<button class="small-button" type="button" data-password-student="${student.uid}">Password</button><button class="small-button danger" type="button" data-delete-student="${student.uid}">Clear account</button></div></td></tr>`;
     }).join("");
     const studentMobileMarkup = visibleStudents.map((student) => {
       const fullName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ");
@@ -852,18 +893,19 @@ initialize() {
     const studentAttendance = attendance
       .filter((record) => record.studentUid === student.uid)
       .sort((a, b) => (b.attendedAt?.seconds || 0) - (a.attendedAt?.seconds || 0));
-    const absenceCount = currentUserRole === "super_admin" ? getStudentAbsences(student).length : 0;
+    const absenceCount = can('viewAbsences') ? getStudentAbsences(student).length : 0;
     const attendedCards = studentAttendance.length
       ? studentAttendance.map((record) => `<article class="attended-event-box"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><span>${escapeHtml(record.eventDate || "Date unavailable")} · ${escapeHtml(record.location || "Location not provided")}</span><span>${escapeHtml(record.timeIn || "")} ${record.timeOut ? `– ${escapeHtml(record.timeOut)}` : ""}</span></article>`).join("")
       : '<div class="empty-state">This student has not attended an event yet.</div>';
     const hasFaceRegistration = faceRegistrationsByUid.get(student.uid)?.registered === true;
-    adminStudentDetail.innerHTML = `<article class="panel admin-student-overview"><button class="modal-close" type="button" data-close-student-detail aria-label="Close student details">×</button><div class="profile-avatar">${avatar}</div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(student.accountId)}</p><p class="profile-course-line" style="margin-top:-4px;color:var(--muted);font-size:.82rem;">Course Registered · <strong>${escapeHtml(student.course || "Not assigned")}</strong></p><span class="badge ${presence.isOnline ? "green" : "gray"}"><i class="presence-dot"></i>${presence.label}</span><small class="presence-profile-time">${escapeHtml(presence.detail)}</small><div class="admin-student-actions"><button class="primary-button" type="button" data-edit-student="${student.uid}">Edit information</button>${hasFaceRegistration && currentUserRole === "super_admin" ? `<button class="outline-button" type="button" data-reset-face="${student.uid}">Reset face registration</button>` : ""}<button class="outline-button" type="button" data-password-student="${student.uid}">Change password</button><button class="small-button danger modal-danger-button" type="button" data-delete-student="${student.uid}">Clear account</button></div></article><article class="panel admin-student-information"><div class="panel-head"><div><h3>Student information</h3><p>Profile details and recorded attendance.</p></div><span class="badge blue">${studentAttendance.length} attended</span></div><div class="student-info-boxes"><div class="student-info-box"><span>Student ID</span><strong>${escapeHtml(student.accountId)}</strong></div><div class="student-info-box"><span>Course Registered</span><strong>${escapeHtml(student.course || "Not assigned")}</strong></div><div class="student-info-box"><span>Section</span><strong>${escapeHtml(student.section)}</strong></div><div class="student-info-box"><span>Face registration</span><strong>${hasFaceRegistration ? "Registered" : "Not registered"}</strong></div><div class="student-info-box"><span>Email address</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div><div class="student-info-box"><span>Phone number</span><strong>${escapeHtml(student.phone || "Not provided")}</strong></div><div class="student-info-box"><span>Live status</span><strong>${presence.label}</strong><small>${escapeHtml(presence.detail)}</small></div><div class="student-info-box"><span>Account access</span><strong>${student.active === false ? "Inactive" : "Active"}</strong></div></div><div class="panel-head"><div><h3>Attended events</h3><p>All attendance records saved for this student.</p></div></div><div class="attended-event-grid">${attendedCards}</div></article>`;
+    adminStudentDetail.innerHTML = `<article class="panel admin-student-overview"><button class="modal-close" type="button" data-close-student-detail aria-label="Close student details">×</button><div class="profile-avatar">${avatar}</div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(student.accountId)}</p><p class="profile-course-line" style="margin-top:-4px;color:var(--muted);font-size:.82rem;">Course Registered · <strong>${escapeHtml(student.course || "Not assigned")}</strong></p><span class="badge ${presence.isOnline ? "green" : "gray"}"><i class="presence-dot"></i>${presence.label}</span><small class="presence-profile-time">${escapeHtml(presence.detail)}</small><div class="admin-student-actions"><button class="primary-button" type="button" data-edit-student="${student.uid}">Edit information</button>${hasFaceRegistration && can('resetFace') ? `<button class="outline-button" type="button" data-reset-face="${student.uid}">Reset face registration</button>` : ""}<button class="outline-button" type="button" data-password-student="${student.uid}">Change password</button><button class="small-button danger modal-danger-button" type="button" data-delete-student="${student.uid}">Clear account</button></div></article><article class="panel admin-student-information"><div class="panel-head"><div><h3>Student information</h3><p>Profile details and recorded attendance.</p></div><span class="badge blue">${studentAttendance.length} attended</span></div><div class="student-info-boxes"><div class="student-info-box"><span>Student ID</span><strong>${escapeHtml(student.accountId)}</strong></div><div class="student-info-box"><span>Course Registered</span><strong>${escapeHtml(student.course || "Not assigned")}</strong></div><div class="student-info-box"><span>Section</span><strong>${escapeHtml(student.section)}</strong></div><div class="student-info-box"><span>Face registration</span><strong>${hasFaceRegistration ? "Registered" : "Not registered"}</strong></div><div class="student-info-box"><span>Email address</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div><div class="student-info-box"><span>Phone number</span><strong>${escapeHtml(student.phone || "Not provided")}</strong></div><div class="student-info-box"><span>Live status</span><strong>${presence.label}</strong><small>${escapeHtml(presence.detail)}</small></div><div class="student-info-box"><span>Account access</span><strong>${student.active === false ? "Inactive" : "Active"}</strong></div></div><div class="panel-head"><div><h3>Attended events</h3><p>All attendance records saved for this student.</p></div></div><div class="attended-event-grid">${attendedCards}</div></article>`;
     const fineCount = fines.filter((fine) => fine.studentUid === student.uid).length;
     const profileActions = adminStudentDetail.querySelector(".admin-student-actions");
-    profileActions?.insertAdjacentHTML("afterbegin", `<button class="outline-button" type="button" data-check-student-fines="${escapeHtml(student.uid)}">Check attendance fines${fineCount ? ` (${fineCount})` : ""}</button>`);
-    if (currentUserRole === "super_admin") profileActions?.insertAdjacentHTML("afterbegin", `<button class="outline-button" type="button" data-view-student-absences="${escapeHtml(student.uid)}">View absences${absenceCount ? ` (${absenceCount})` : ""}</button>`);
+    if (can("viewFines")) profileActions?.insertAdjacentHTML("afterbegin", `<button class="outline-button" type="button" data-check-student-fines="${escapeHtml(student.uid)}">Check attendance fines${fineCount ? ` (${fineCount})` : ""}</button>`);
+    if (can('viewAbsences')) profileActions?.insertAdjacentHTML("afterbegin", `<button class="outline-button" type="button" data-view-student-absences="${escapeHtml(student.uid)}">View absences${absenceCount ? ` (${absenceCount})` : ""}</button>`);
     adminStudentDetail.querySelector(".student-info-boxes")?.insertAdjacentHTML("afterbegin", `<div class="student-info-box"><span>Birthday</span><strong>${escapeHtml(formatBirthday(student.birthday))}</strong></div>`);
     adminStudentDetail.hidden = false;
+    applyActionPermissions();
   }
 
   function getStudentAbsences(student) {
@@ -875,7 +917,7 @@ initialize() {
   }
 
   function openAdminAbsenceModal(student, trigger) {
-    if (currentUserRole !== "super_admin" || !student) return;
+    if (!can('viewAbsences') || !student) return;
     const studentName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ") || "Student";
     const absences = getStudentAbsences(student);
     const records = absences.length
@@ -890,16 +932,18 @@ initialize() {
   }
 
   function openAdminFineModal(student, trigger) {
+    if (!can('viewFines')) return;
     if (!student) return;
     selectedFineStudentUid = student.uid;
     const studentFines = fines.filter((fine) => fine.studentUid === student.uid);
     const currentRecords = studentFines.filter((fine) => fine.status !== "Completed");
     const reviewedRecords = studentFines.filter((fine) => fine.status === "Completed");
     const studentName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ") || "Student";
-    adminFineModalController.open({ title: `${studentName}'s attendance fines`, description: "Review attendance-fine records, then use Manage fines to update them.", markup: `<section class="community-service-section"><div class="community-service-section-heading"><h3>Current records</h3><p>Records that still need attention.</p></div>${currentRecords.length ? currentRecords.map(fineRecordModalMarkup).join("") : '<div class="community-service-empty">No current attendance fines recorded.</div>'}</section><section class="community-service-section"><div class="community-service-section-heading"><h3>Reviewed records</h3><p>Records marked as completed.</p></div>${reviewedRecords.length ? reviewedRecords.map(fineRecordModalMarkup).join("") : '<div class="community-service-empty">No reviewed attendance fines recorded.</div>'}</section>`, trigger });
+    adminFineModalController.open({ title: `${studentName}'s attendance fines`, description: can("manageFines") ? "Review attendance-fine records, then use Manage fines to update them." : "Read-only attendance-fine records.", markup: `<section class="community-service-section"><div class="community-service-section-heading"><h3>Current records</h3><p>Records that still need attention.</p></div>${currentRecords.length ? currentRecords.map(fineRecordModalMarkup).join("") : '<div class="community-service-empty">No current attendance fines recorded.</div>'}</section><section class="community-service-section"><div class="community-service-section-heading"><h3>Reviewed records</h3><p>Records marked as completed.</p></div>${reviewedRecords.length ? reviewedRecords.map(fineRecordModalMarkup).join("") : '<div class="community-service-empty">No reviewed attendance fines recorded.</div>'}</section>`, trigger });
   }
 
   async function resetStudentFaceRegistration(student) {
+    if (!can('resetFace')) return;
     if (!student || !faceRegistrationsByUid.get(student.uid)?.registered) return false;
     try {
       await resetFacePhotoInDrive(student.uid);
@@ -937,6 +981,7 @@ initialize() {
     ].map(normalized).join("\u001f");
   }
   async function editEvent(id) {
+    if (!can('manageEvents')) return;
     const event = events.find((item) => item.id === id);
     if (!event) return;
     try {
@@ -975,7 +1020,7 @@ initialize() {
   async function syncEventRecords(eventId, event) {
     const [attendanceSnapshot, fineSnapshot] = await Promise.all([
       getDocs(query(collection(db, "attendance"), where("eventId", "==", eventId))),
-      getDocs(query(collection(db, "fines"), where("eventId", "==", eventId)))
+      can('manageFines') ? getDocs(query(collection(db, "fines"), where("eventId", "==", eventId))) : Promise.resolve({ docs: [] })
     ]);
     const attendanceUpdate = {
       eventName: event.name,
@@ -1008,6 +1053,7 @@ initialize() {
   }
 
   function openPastEventRemovalModal(eventId) {
+    if (!can('deleteEvents')) return;
     const event = events.find((item) => item.id === eventId);
     if (!event) return;
     selectedPastEventForRemoval = event;
@@ -1033,6 +1079,7 @@ initialize() {
   }
 
   eventForm.addEventListener("submit", async (submitEvent) => {
+    if (!can('manageEvents')) { submitEvent.preventDefault(); return; }
     submitEvent.preventDefault();
     const timeIn = document.querySelector("#eventTimeIn").value;
     const timeOut = document.querySelector("#eventTimeOut").value;
@@ -1105,6 +1152,7 @@ initialize() {
   pastEventRemovalModal.addEventListener("click", (event) => { if (event.target === pastEventRemovalModal) closePastEventRemovalModal(); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !pastEventRemovalModal.hidden) closePastEventRemovalModal(); });
   document.querySelector("#confirmPastEventRemoval").addEventListener("click", async () => {
+    if (!can('deleteEvents')) return;
     if (!selectedPastEventForRemoval) return;
     const event = selectedPastEventForRemoval;
     const button = document.querySelector("#confirmPastEventRemoval");
@@ -1136,6 +1184,7 @@ initialize() {
     document.querySelector("#studentSubmitButton").textContent = "Add student";
   }
   function editStudent(uid) {
+    if (!can('editStudents')) return;
     const student = students.find((item) => item.uid === uid);
     if (!student) return;
     document.querySelector("#originalStudentId").value = student.uid;
@@ -1160,6 +1209,7 @@ initialize() {
     openView("add-student");
   }
   studentForm.addEventListener("submit", async (submitEvent) => {
+    if (!can('addStudents') || !can('editStudents')) { submitEvent.preventDefault(); return; }
     submitEvent.preventDefault();
     const uid = document.querySelector("#originalStudentId").value;
     const student = { accountId: document.querySelector("#managedStudentId").value.trim(), firstName: document.querySelector("#managedFirstName").value.trim(), middleName: document.querySelector("#managedMiddleName").value.trim(), lastName: document.querySelector("#managedLastName").value.trim(), birthday: document.querySelector("#managedBirthday").value, course: document.querySelector("#managedCourse").value, section: document.querySelector("#managedSection").value, password: document.querySelector("#managedPassword").value, email: document.querySelector("#managedEmail").value.trim(), phone: document.querySelector("#managedPhone").value.trim() };
@@ -1292,6 +1342,7 @@ initialize() {
   }
 
   function openPasswordModal(student) {
+    if (!can('changePasswords')) return;
     selectedPasswordStudent = student;
     if (!selectedPasswordStudent) return;
     document.querySelector("#passwordStudentName").textContent = `Change the password for ${selectedPasswordStudent.firstName} ${selectedPasswordStudent.lastName}. Enter the current password to continue.`;
@@ -1300,6 +1351,7 @@ initialize() {
   }
 
   function openRemoveModal(student) {
+    if (!can('deleteStudents')) return;
     selectedRemovalStudent = student;
     if (!selectedRemovalStudent) return;
     window.clearInterval(removalCountdownTimer);
@@ -1328,6 +1380,7 @@ initialize() {
   }
 
   function openResetFaceModal(student) {
+    if (!can('resetFace')) return;
     if (!student || !faceRegistrationsByUid.get(student.uid)?.registered) return;
     selectedFaceResetStudent = student;
     const studentName = [student.firstName, student.lastName].filter(Boolean).join(" ") || "this student";
@@ -1353,7 +1406,7 @@ initialize() {
 
   studentTableBody.addEventListener("change", async (changeEvent) => {
     const selector = changeEvent.target.closest("[data-role-select]");
-    if (!selector || currentUserRole !== "super_admin") return;
+    if (!selector || !can('changeRoles')) return;
     const student = students.find((item) => item.uid === selector.dataset.roleSelect);
     if (!student) return;
     const pendingWrite = pendingRoleWrites.get(student.uid);
@@ -1368,6 +1421,7 @@ initialize() {
   });
 
   confirmRoleChange.addEventListener("click", async () => {
+    if (!can('changeRoles')) return;
     if (!pendingRoleChange) return;
     const { student, role, previousRole, selector } = pendingRoleChange;
     selector.disabled = true;
@@ -1444,6 +1498,7 @@ initialize() {
   });
 
   document.querySelector("#manageStudentFines").addEventListener("click", () => {
+    if (!can("manageFines")) return;
     const student = students.find((item) => item.uid === selectedFineStudentUid);
     if (!student) return;
     fineSearch.value = [student.firstName, student.middleName, student.lastName, student.accountId].filter(Boolean).join(" ");
@@ -1455,6 +1510,7 @@ initialize() {
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !document.querySelector("#adminAbsenceModal").hidden) adminAbsenceModalController.close(); });
 
   document.querySelector("#passwordChangeForm").addEventListener("submit", async (submitEvent) => {
+    if (!can('changePasswords')) { submitEvent.preventDefault(); return; }
     submitEvent.preventDefault();
     if (!selectedPasswordStudent) return;
     const currentPassword = document.querySelector("#currentStudentPassword").value;
@@ -1480,6 +1536,7 @@ initialize() {
   });
 
   document.querySelector("#confirmRemoveStudent").addEventListener("click", async () => {
+    if (!can('deleteStudents')) return;
     if (!selectedRemovalStudent) return;
     const currentPassword = document.querySelector("#removeStudentPassword").value.trim();
     if (currentPassword.length < 6) {
@@ -1529,6 +1586,7 @@ initialize() {
   });
 
   document.querySelector("#confirmResetFace").addEventListener("click", async () => {
+    if (!can('resetFace')) return;
     if (!selectedFaceResetStudent) return;
     const studentToReset = selectedFaceResetStudent;
     const confirmButton = document.querySelector("#confirmResetFace");
@@ -1626,14 +1684,14 @@ initialize() {
     if (viewName === "assign-fine") renderFineOptions();
     if (viewName === "assigned-fines") renderAdminFines();
   });
-  if (["super_admin", "head_admin", "attendance_admin"].includes(currentUserRole)) listen('geofences', ["create","geofence","modify-events","past-events"], collection(db, "eventGeofences"), (snapshot) => {
+  if (can('manageGeofences')) listen('geofences', ["create","geofence","modify-events","past-events"], collection(db, "eventGeofences"), (snapshot) => {
     geofencesByEventId = new Map(snapshot.docs.map((item) => [item.id, item.data()]));
     events = events.map((event) => ({ ...event, geofence: geofencesByEventId.get(event.id) || { enabled: false } }));
     if (activeView === "geofence") loadGeofenceManager();
     if (["dashboard", "modify-events", "past-events"].includes(activeView)) renderAdminEvents();
   });
   listen('events', ["*"], query(collection(db, "events"), orderBy("openAt", "asc")), (snapshot) => {
-    events = snapshot.docs.map((item) => ({ id: item.id, ...item.data(), ...(["super_admin", "head_admin", "attendance_admin"].includes(currentUserRole) ? { geofence: geofencesByEventId.get(item.id) || { enabled: false } } : {}) }));
+    events = snapshot.docs.map((item) => ({ id: item.id, ...item.data(), ...(can('manageGeofences') ? { geofence: geofencesByEventId.get(item.id) || { enabled: false } } : {}) }));
     if (["dashboard", "modify-events"].includes(activeView)) renderAdminEvents();
     if (activeView === "past-events") renderPastEvents();
     renderGeofenceEventOptions();
@@ -1666,14 +1724,14 @@ initialize() {
   subscriptions.register('attendance', ['dashboard', 'attendance-line', 'modify-students', 'modify-events', 'past-events', 'profile'], () => { attendanceSyncService.start(); return () => attendanceSyncService.stop(); });
   const disposeListeners = this.dispose;
   this.dispose = () => { disposeListeners(); attendanceRealtimeBridge.close(); window.clearTimeout(adminEventStatusTimer); window.cancelAnimationFrame(studentRenderFrame); };
-  listen('fines', ["assign-fine","assigned-fines","modify-students","profile"], collection(db, "fines"), (snapshot) => {
+  if (can('viewFines')) listen('fines', ["assign-fine","assigned-fines","modify-students","profile"], collection(db, "fines"), (snapshot) => {
     fines = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     if (activeView === "assigned-fines") renderAdminFines();
     if (activeView === "modify-students") scheduleStudentsRender();
     if (activeView === "modify-students" && selectedManagedStudentUid) renderSelectedStudent();
   });
   listen('faces', ["modify-students"], collection(db, "faceRegistrations"), (snapshot) => { faceRegistrationsByUid = new Map(snapshot.docs.map((item) => [item.id, item.data()])); scheduleStudentsRender(); });
-  if (currentUserRole === "super_admin") listen('admin-profile', ["*"], doc(db, "adminProfiles", currentUser.uid), (snapshot) => { renderAdminProfile(snapshot.data()); });
+  if (can('adminProfile')) listen('admin-profile', ["*"], doc(db, "adminProfiles", currentUser.uid), (snapshot) => { renderAdminProfile(snapshot.data()); });
   resetStudentForm();
   resetEventForm();
 }

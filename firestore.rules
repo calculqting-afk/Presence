@@ -24,6 +24,7 @@ service cloud.firestore {
       return signedIn()
         && exists(/databases/$(database)/documents/students/$(request.auth.uid))
         && get(/databases/$(database)/documents/students/$(request.auth.uid)).data.keys().hasAll(["role"])
+        && get(/databases/$(database)/documents/students/$(request.auth.uid)).data.active == true
         && get(/databases/$(database)/documents/students/$(request.auth.uid)).data.role == role;
     }
 
@@ -48,7 +49,15 @@ service cloud.firestore {
     }
 
     function canViewAttendanceReports() {
-      return isSuperAdmin() || isHeadAdmin() || isAttendanceAdmin();
+      return isSuperAdmin() || isHeadAdmin() || isAttendanceAdmin() || isStudentManager();
+    }
+
+    function canViewFines() {
+      return isSuperAdmin() || isHeadAdmin() || isStudentManager();
+    }
+
+    function canManageFines() {
+      return isSuperAdmin() || isHeadAdmin();
     }
 
     function isStudent() {
@@ -178,7 +187,7 @@ service cloud.firestore {
       return data.keys().hasOnly([
           "studentUid", "studentId", "eventId", "eventName", "eventType", "eventDescription", "eventDate",
           "timeIn", "timeOut", "location", "audience", "checkInLocation", "checkOutLocation", "attendedAt", "arrivalStatus",
-          "checkedInAt", "checkedOutAt", "status"
+          "checkedInAt", "checkedOutAt", "status", "recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason"
         ])
         && data.keys().hasAll(["studentUid", "studentId", "eventId", "eventName", "eventType", "eventDescription", "eventDate", "timeIn", "timeOut", "location", "audience", "attendedAt", "checkedInAt", "status"])
         && shortText(data.studentUid, 128) && shortText(data.studentId, 64) && shortText(data.eventId, 128)
@@ -242,6 +251,7 @@ service cloud.firestore {
         && ((request.time <= event.checkInClosesAt && data.arrivalStatus == "present")
           || (request.time > event.checkInClosesAt && data.arrivalStatus == "late"))
         && data.status == "checked-in"
+        && !data.keys().hasAny(["recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason"])
         && !data.keys().hasAny(["checkedOutAt", "checkOutLocation"])
         && withinSparkGeofence(data, data.eventId, event);
     }
@@ -259,6 +269,29 @@ service cloud.firestore {
         && (!event.requiresGeofence || withinSparkGeofence({ "checkInLocation": data.checkOutLocation }, data.eventId, event));
     }
 
+    // A correction and its immutable before/after audit must be committed together.
+    function validAdminCorrection(attendanceId, data, before) {
+      let event = get(/databases/$(database)/documents/events/$(data.eventId)).data;
+      let student = get(/databases/$(database)/documents/students/$(data.studentUid)).data;
+      let audit = getAfter(/databases/$(database)/documents/attendance/$(attendanceId)/corrections/$(data.correctionId)).data;
+      return canManageAttendance() && validAttendance(data)
+        && attendanceId == data.studentUid + "_" + data.eventId
+        && student.active == true && data.studentId == student.accountId
+        && (event.audience == "All students" || event.audience == "Section " + student.section)
+        && attendanceMatchesEvent(data, event)
+        && data.recordSource == "admin-corrected" && data.correctedBy == request.auth.uid
+        && shortText(data.correctionId, 128) && data.correctionId.matches('^[A-Za-z0-9_-]+$')
+        && data.correctedAt == request.time
+        && shortText(data.correctionReason, 1000) && data.correctionReason.size() >= 5
+        && data.attendedAt == data.checkedInAt && data.checkedInAt <= request.time
+        && ((data.status == "completed" && data.checkedOutAt >= data.checkedInAt && data.checkedOutAt <= request.time)
+          || (data.status == "checked-in" && !data.keys().hasAny(["checkedOutAt", "checkOutLocation"])))
+        && data.keys().hasAll(["arrivalStatus"])
+        && audit.keys().hasOnly(["before", "after", "by", "at", "reason"])
+        && audit.before == before && audit.after == data
+        && audit.by == request.auth.uid && audit.at == request.time && audit.reason == data.correctionReason;
+    }
+
     match /students/{studentUid} {
       allow get: if isAdmin()
         || (signedIn() && request.auth.uid == studentUid && resource.data.active == true);
@@ -266,7 +299,7 @@ service cloud.firestore {
       allow create: if canManageStudents()
         && validStudent(request.resource.data)
         && !request.resource.data.keys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy"]);
-      allow delete: if canManageStudents();
+      allow delete: if isSuperAdmin();
       allow update: if (isSuperAdmin()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["role", "roleUpdatedAt", "roleUpdatedBy"])
           && request.resource.data.role in ["head_admin", "attendance_admin", "student_manager", "student"]
@@ -274,6 +307,9 @@ service cloud.firestore {
           && request.resource.data.roleUpdatedBy == request.auth.uid)
         || (canManageStudents()
           && validStudent(request.resource.data)
+          && (!isStudentManager() || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "accountId", "accountIdKey", "firstName", "middleName", "lastName", "birthday", "course", "section", "email", "phone", "photoDataUrl", "updatedAt", "grade", "adviser"
+          ]))
           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy"]))
         || (isStudent()
           && request.auth.uid == studentUid
@@ -313,7 +349,7 @@ service cloud.firestore {
 
     match /events/{eventId} {
       // Students cannot read legacy events that embed geofence coordinates.
-      allow read: if isSuperAdmin() || isHeadAdmin() || isAttendanceAdmin()
+      allow read: if isSuperAdmin() || isHeadAdmin() || isAttendanceAdmin() || isStudentManager()
         || (isStudent() && !resource.data.keys().hasAll(["geofence"]));
       allow create, update: if canManageAttendance()
         && validEvent(request.resource.data)
@@ -332,18 +368,38 @@ service cloud.firestore {
     match /attendance/{attendanceId} {
       allow read: if canViewAttendanceReports()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
-      allow create: if (canManageAttendance() && validAttendance(request.resource.data))
+      allow create: if (canManageAttendance()
+          && request.resource.data.keys().hasAll(["correctionId", "recordSource", "correctedBy", "correctedAt", "correctionReason"])
+          && validAdminCorrection(attendanceId, request.resource.data, null))
         || (validAttendance(request.resource.data) && studentCanCheckIn(attendanceId, request.resource.data));
-      allow update: if (canManageAttendance() && validAttendance(request.resource.data))
+      allow update: if (canManageAttendance()
+          && request.resource.data.keys().hasAll(["correctionId", "recordSource", "correctedBy", "correctedAt", "correctionReason"])
+          && request.resource.data.studentUid == resource.data.studentUid
+          && request.resource.data.eventId == resource.data.eventId
+          && validAdminCorrection(attendanceId, request.resource.data, resource.data))
+        || (canManageAttendance() && validAttendance(request.resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["eventName", "eventType", "eventDescription", "eventDate", "timeIn", "timeOut", "location", "audience"])
+          && attendanceMatchesEvent(request.resource.data, get(/databases/$(database)/documents/events/$(resource.data.eventId)).data))
         || (validAttendance(request.resource.data) && studentCanCheckOut(request.resource.data, resource.data));
       allow delete: if isSuperAdmin();
+
+      match /corrections/{correctionId} {
+        allow read: if canViewAttendanceReports()
+          || (isStudent() && get(/databases/$(database)/documents/attendance/$(attendanceId)).data.studentUid == request.auth.uid);
+        allow create: if canManageAttendance()
+          && request.resource.data.after.correctionId == correctionId
+          && request.resource.data.after == getAfter(/databases/$(database)/documents/attendance/$(attendanceId)).data
+          && validAdminCorrection(attendanceId, request.resource.data.after,
+            exists(/databases/$(database)/documents/attendance/$(attendanceId)) ? get(/databases/$(database)/documents/attendance/$(attendanceId)).data : null);
+        allow update, delete: if false;
+      }
     }
 
     match /fines/{fineId} {
-      allow read: if canViewAttendanceReports()
+      allow read: if canViewFines()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
-      allow create: if canManageAttendance() && validFine(request.resource.data);
-      allow update: if canManageAttendance() && validFine(request.resource.data);
+      allow create: if canManageFines() && validFine(request.resource.data);
+      allow update: if canManageFines() && validFine(request.resource.data);
       allow delete: if isSuperAdmin();
     }
 

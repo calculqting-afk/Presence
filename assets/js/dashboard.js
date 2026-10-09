@@ -1,4 +1,5 @@
 import { SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js?v=20261005-operational-reset";
+import { ROLE_VIEWS } from './core/permissions.js';
 import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
   Timestamp,
@@ -54,13 +55,6 @@ let activeView;
 let previousView = "dashboard";
 let currentUserRole = "student";
 let currentUserProfile = {};
-const ROLE_VIEWS = {
-  super_admin: ["dashboard", "add-student", "modify-students", "create", "modify-events", "past-events", "attendance-line", "assign-fine", "assigned-fines", "geofence", "profile"],
-  head_admin: ["dashboard", "add-student", "modify-students", "create", "modify-events", "past-events", "attendance-line", "assign-fine", "assigned-fines", "geofence"],
-  attendance_admin: ["dashboard", "create", "modify-events", "past-events", "attendance-line", "assign-fine", "assigned-fines", "geofence"],
-  student_manager: ["dashboard", "add-student", "modify-students"],
-  student: ["dashboard", "events", "attendances", "history", "fines", "face", "profile"]
-};
 const ROLE_ACCESS_LABELS = { super_admin: "Full access", head_admin: "Operational admin", attendance_admin: "Attendance access", student_manager: "Student management" };
 const NOTIFICATION_CATEGORIES_BY_ROLE = {
   student: new Set(["attendance", "face"]),
@@ -78,8 +72,8 @@ function escapeHtml(value = "") {
   return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
 }
 
-const ROLE_LABELS = { super_admin: "Super Admin", head_admin: "Head Admin", attendance_admin: "Attendance Admin", student_manager: "Student Manager", student: "Student" };
-const ASSIGNABLE_ROLE_LABELS = { head_admin: "Head Admin", attendance_admin: "Attendance Admin", student_manager: "Student Manager", student: "Student" };
+const ROLE_LABELS = { super_admin: "Super Admin", head_admin: "Head Admin", attendance_admin: "Attendance Manager", student_manager: "Student Manager", student: "Student" };
+const ASSIGNABLE_ROLE_LABELS = { head_admin: "Head Admin", attendance_admin: "Attendance Manager", student_manager: "Student Manager", student: "Student" };
 function firebaseErrorCode(error) {
   return String(error?.code || "").replace(/^(?:firestore|functions)\//, "");
 }
@@ -344,7 +338,7 @@ function wireNotificationCenter() {
 }
 
 function renderView(viewName) {
-  if (!pageCopy[dashboardRole][viewName]) return;
+  if (!pageCopy[dashboardRole][viewName] || !ROLE_VIEWS[currentUserRole]?.includes(viewName)) return;
   activeView = viewName;
   document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === viewName));
   document.querySelectorAll("[data-section]").forEach((section) => { section.hidden = section.dataset.section !== viewName; });
