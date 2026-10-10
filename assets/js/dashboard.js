@@ -1,5 +1,6 @@
 import { SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js?v=20261005-operational-reset";
 import { ROLE_VIEWS } from './core/permissions.js';
+import { AuthActionController } from './controllers/AuthActionController.js';
 import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
   Timestamp,
@@ -589,7 +590,9 @@ function wireCommonNavigation() {
       </section>
     </div>`);
   const logoutModal = document.querySelector("#logoutModal");
-  const closeLogoutModal = () => { logoutModal.hidden = true; };
+  const logoutAction = new AuthActionController();
+  window.addEventListener('pagehide', () => logoutAction.dispose(), { once: true });
+  const closeLogoutModal = () => { if (!logoutAction.busy) logoutModal.hidden = true; };
   document.querySelectorAll("[data-logout]").forEach((button) => button.addEventListener("click", () => {
     logoutModal.hidden = false;
     document.querySelector("#confirmLogout").focus();
@@ -598,27 +601,32 @@ function wireCommonNavigation() {
   logoutModal.addEventListener("click", (event) => { if (event.target === logoutModal) closeLogoutModal(); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !logoutModal.hidden) closeLogoutModal(); });
   document.querySelector("#confirmLogout").addEventListener("click", async () => {
-    if (sessionState.mediaStream) sessionState.mediaStream.getTracks().forEach((track) => track.stop());
-    window.clearInterval(sessionState.presenceHeartbeatTimer);
-    if (dashboardRole === "student" && currentUser && sessionState.presenceSessionId) {
-      sessionState.studentLoggedOut = true;
-      await Promise.allSettled([
-        setDoc(doc(db, "presenceSessions", sessionState.presenceSessionId), { studentUid: currentUser.uid, sessionId: sessionState.presenceSessionId, online: false, status: "logged-out", lastSeen: serverTimestamp(), offlineAt: serverTimestamp() }, { merge: true }),
-        setDoc(doc(db, "presence", currentUser.uid), { online: false, status: "logged-out", lastSeen: serverTimestamp(), offlineAt: serverTimestamp() }, { merge: true })
-      ]);
-    }
-    try {
-      sessionStorage.removeItem("presenceSession");
-      sessionStorage.removeItem("presenceDeviceSession");
-    } catch {}
-    try {
-      await signOut(auth);
-      sessionState.dashboard?.dispose();
-      window.location.replace("../index.html");
-    } catch (error) {
-      console.error("LOGOUT FAILED:", error);
-      showDashboardToast("Unable to log out", "Firebase could not end this session. Please try again.");
-    }
+    await logoutAction.run({
+      buttons: [document.querySelector('#confirmLogout'), ...document.querySelectorAll('[data-logout]')],
+      label: 'Logging out…', successLabel: 'Logged out', action: async () => {
+      try {
+        if (sessionState.mediaStream) sessionState.mediaStream.getTracks().forEach((track) => track.stop());
+        window.clearInterval(sessionState.presenceHeartbeatTimer);
+        if (dashboardRole === "student" && currentUser && sessionState.presenceSessionId) {
+          sessionState.studentLoggedOut = true;
+          await Promise.allSettled([
+            setDoc(doc(db, "presenceSessions", sessionState.presenceSessionId), { studentUid: currentUser.uid, sessionId: sessionState.presenceSessionId, online: false, status: "logged-out", lastSeen: serverTimestamp(), offlineAt: serverTimestamp() }, { merge: true }),
+            setDoc(doc(db, "presence", currentUser.uid), { online: false, status: "logged-out", lastSeen: serverTimestamp(), offlineAt: serverTimestamp() }, { merge: true })
+          ]);
+        }
+        await signOut(auth);
+        try {
+          sessionStorage.removeItem("presenceSession");
+          sessionStorage.removeItem("presenceDeviceSession");
+        } catch {}
+        sessionState.dashboard?.dispose();
+        window.location.replace("../index.html");
+      } catch (error) {
+        console.error("LOGOUT FAILED:", error);
+        showDashboardToast("Unable to log out", "Firebase could not end this session. Please try again.");
+        return false;
+      }
+    } });
   });
   const dateText = new Intl.DateTimeFormat("en", { weekday: "short", month: "short", day: "numeric", year: "numeric" }).format(new Date());
   document.querySelectorAll("[data-current-date]").forEach((element) => { element.textContent = dateText; });
@@ -639,8 +647,8 @@ async function initialize() {
     : "Student";
   updateDashboardGreeting(displayName);
   const module = dashboardRole === "student"
-    ? await import("./student/StudentDashboard.js?v=20261010-attendance-fix")
-    : await import("./admin/AdminDashboard.js?v=20261010-attendance-fix");
+    ? await import("./student/StudentDashboard.js?v=20261010-auth-progress")
+    : await import("./admin/AdminDashboard.js?v=20261010-auth-progress");
   const Dashboard = dashboardRole === "student" ? module.StudentDashboard : module.AdminDashboard;
   const dashboard = new Dashboard();
   sessionState.dashboard = dashboard;

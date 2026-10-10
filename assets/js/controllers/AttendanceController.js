@@ -1,6 +1,6 @@
 import { collection, onSnapshot, getDocsFromServer } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { db } from '../../../config/firebase-config.js?v=20261005-operational-reset';
-import { currentUser, currentUserRole, formatEventTime } from '../dashboard.js?v=20261010-attendance-fix';
+import { currentUser, currentUserRole, formatEventTime } from '../dashboard.js?v=20261010-auth-progress';
 
 export class AttendancePolicy {
   constructor(windows) { this.windows = windows; }

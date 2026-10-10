@@ -288,15 +288,20 @@ service cloud.firestore {
         && withinSparkGeofence(data, data.eventId, event);
     }
 
-    function studentCanCheckOut(data, previous) {
+    function studentCanCheckOut(attendanceId, data, previous) {
       let event = get(/databases/$(database)/documents/events/$(data.eventId)).data;
       return isStudent()
         && previous.studentUid == request.auth.uid
         && data.studentUid == request.auth.uid
+        && attendanceId == request.auth.uid + "_" + previous.eventId
+        && data.eventId == previous.eventId
+        && previous.checkedInAt is timestamp
+        && !previous.keys().hasAny(["checkedOutAt"])
         && previous.status == "checked-in" && data.status == "completed"
         && data.checkedOutAt == request.time
         && request.time >= event.closeAt && request.time <= event.checkOutClosesAt
         && data.diff(previous).affectedKeys().hasOnly(["checkOutLocation", "checkedOutAt", "status"])
+        && (!data.keys().hasAny(["checkOutLocation"]) || validLocation(data.checkOutLocation))
         && (event.requiresGeofence != true || data.keys().hasAll(["checkOutLocation"]))
         && (!event.requiresGeofence || withinSparkGeofence({ "checkInLocation": data.checkOutLocation }, data.eventId, event));
     }
@@ -429,7 +434,9 @@ service cloud.firestore {
         || (canManageAttendance() && validAttendance(request.resource.data)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["eventName", "eventType", "eventDescription", "eventDate", "timeIn", "timeOut", "location", "audience"])
           && attendanceMatchesEvent(request.resource.data, get(/databases/$(database)/documents/events/$(resource.data.eventId)).data))
-        || (validAttendance(request.resource.data) && studentCanCheckOut(request.resource.data, resource.data));
+        // Validate the checkout patch, not unrelated legacy check-in metadata.
+        // studentCanCheckOut keeps every original check-in field immutable.
+        || studentCanCheckOut(attendanceId, request.resource.data, resource.data);
       allow delete: if isSuperAdmin();
 
       match /corrections/{correctionId} {

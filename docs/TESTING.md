@@ -117,6 +117,10 @@ Current limitation to verify: the existing attendance rules require valid locati
 
 ### First check-in and rejection regression
 
+Loading UI: check-in/checkout should disable the action immediately, show Checking in/out, Verifying location (when required), and Saving attendance. Success shows a checkmark; failure and late-consent cancellation restore the original label and allow retry. During GPS/network waits, navigate between Events and My Attendances or allow a live re-render: new buttons for the same operation must remain disabled with current progress. Test reduced-motion mode, light/navy, narrow mobile layout, and screen-reader status announcements. An accepted save awaiting an extra confirmation read must say Saved · refresh, not claim a verified record or keep spinning forever.
+
+Checkout fix: republish the current rules, then test during a new event's checkout window. Checkout validates only its patch and preserves historical check-in metadata, including legacy fields. Verify only `status`, `checkedOutAt`, and optional `checkOutLocation` change. Missing/foreign check-ins, completed-record overwrites, changes to check-in fields, outside-window timestamps, invalid/missing required GPS, and foreign document IDs must remain denied. Repeated checkout must preserve the first checkout timestamp. The browser must refuse a missing or invalid server check-in before submitting. Rule tests here remain structural; emulator/live authorization testing is required.
+
 After publishing the current `firestore.rules`, use a new event with no attendance document for the test student. Verify its initial document GET succeeds with `exists() == false`, then check-in creates exactly one record. Reload/retry and verify the original timestamp is preserved; complete checkout and verify only checkout fields change.
 
 Rules-emulator/Playground cases: active student can GET their own missing `<uid>_<eventId>` document; another student's missing/existing document is denied; logged-out/inactive accounts are denied; owner-constrained attendance queries work, and unfiltered student queries remain denied. Existing records with another owner must stay denied even if their ID begins with the current student's UID. Check-in write restrictions for roster, face registration, server window, identity, timestamps and duplicate overwrites are unchanged.
@@ -148,3 +152,12 @@ Implementation uses the existing [Leaflet polygon API](https://leafletjs.com/ref
 - [Chrome DevTools: Network reference, cache controls, and throttling](https://developer.chrome.com/docs/devtools/network/reference/)
 
 Record the date, browser/device, account role, test event ID, steps, expected result, actual result, and any console/rules errors for each manual test. Commit/deploy only after the relevant role/device checks pass.
+
+# Login and logout progress
+
+- Hard refresh login, admin and student pages before testing.
+- Submit valid login credentials: the button shows a spinner and “Signing in…”, then “Signed in” while redirecting. Repeated clicks or Enter must not send another login request.
+- Submit an incorrect password: the original Continue button is restored and a second attempt works.
+- On each dashboard, open Logout and confirm: both the confirmation and menu buttons show “Logging out…”; repeated clicks do nothing. Cancel, backdrop and Escape cannot dismiss the dialog during logout.
+- Simulate a failed sign-out with a mocked Firebase rejection: buttons restore, an error appears, and retry is available. Session storage is only cleared after successful sign-out.
+- Check light/navy themes, mobile widths, screen-reader progress announcements and reduced-motion mode (static progress indicator).

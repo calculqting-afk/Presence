@@ -7,6 +7,7 @@ import {
   signOut
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+import { AuthActionController } from './controllers/AuthActionController.js';
 
 const form = document.querySelector("#loginForm");
 const accountInput = document.querySelector("#accountId");
@@ -20,6 +21,8 @@ const toastTitle = document.querySelector("#toastTitle");
 const toastMessage = document.querySelector("#toastMessage");
 const helpDialog = document.querySelector("#helpDialog");
 let toastTimer;
+const loginAction = new AuthActionController();
+window.addEventListener('pagehide', () => loginAction.dispose(), { once: true });
 
 function setFieldError(input, errorElement, message = "") {
   input.closest(".input-wrap").classList.toggle("invalid", Boolean(message));
@@ -35,12 +38,6 @@ function showToast(title, message) {
   toastTimer = setTimeout(() => toast.classList.remove("show"), 5000);
 }
 
-function setLoading(loading) {
-  submitButton.classList.toggle("loading", loading);
-  submitButton.disabled = loading;
-  submitButton.querySelector("span:first-child").textContent = loading ? "Checking account" : "Continue";
-}
-
 passwordToggle.addEventListener("click", () => {
   const shouldShow = passwordInput.type === "password";
   passwordInput.type = shouldShow ? "text" : "password";
@@ -54,62 +51,64 @@ passwordToggle.addEventListener("click", () => {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (loginAction.busy) return;
   const accountId = accountInput.value.trim();
   const password = passwordInput.value;
   if (!accountId) setFieldError(accountInput, accountError, "Please enter your student ID or admin email.");
   if (!password) setFieldError(passwordInput, passwordError, "Please enter your password.");
   if (!accountId || !password) return;
 
-  setLoading(true);
-  try {
-    const remember = form.elements.remember.checked;
-    await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
-    const email = accountId.includes("@") ? accountId : studentIdToEmail(accountId);
-    const credential = await signInWithEmailAndPassword(auth, email, password);
-    const isSuperAdmin = credential.user.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
-    let role;
-    let studentRecord;
-    if (!isSuperAdmin) {
-      studentRecord = await getDoc(doc(db, "students", credential.user.uid));
-      const storedRole = studentRecord.data()?.role || "student";
-      const assignedRole = storedRole === "viewer" ? "student" : storedRole;
-      if (["head_admin", "attendance_admin", "student_manager"].includes(assignedRole)) {
-        role = "admin";
-      } else if (studentRecord.exists() && studentRecord.data().active === true) {
-        role = "student";
-      } else {
-        await signOut(auth);
-        throw new Error("This account is not a registered student.");
-      }
-    } else {
-      role = "admin";
-    }
+  await loginAction.run({ buttons: [submitButton], label: 'Signing in…', successLabel: 'Signed in', action: async () => {
+      try {
+        const remember = form.elements.remember.checked;
+        await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
+        const email = accountId.includes("@") ? accountId : studentIdToEmail(accountId);
+        const credential = await signInWithEmailAndPassword(auth, email, password);
+        const isSuperAdmin = credential.user.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
+        let role;
+        let studentRecord;
+        if (!isSuperAdmin) {
+          studentRecord = await getDoc(doc(db, "students", credential.user.uid));
+          const storedRole = studentRecord.data()?.role || "student";
+          const assignedRole = storedRole === "viewer" ? "student" : storedRole;
+          if (["head_admin", "attendance_admin", "student_manager"].includes(assignedRole)) {
+            role = "admin";
+          } else if (studentRecord.exists() && studentRecord.data().active === true) {
+            role = "student";
+          } else {
+            await signOut(auth);
+            throw new Error("This account is not a registered student.");
+          }
+        } else {
+          role = "admin";
+        }
 
-    sessionStorage.setItem("presenceSession", JSON.stringify({
-      role,
-      uid: credential.user.uid,
-      accountId: role === "student" ? studentRecord.data().accountId : credential.user.email,
-      assignedRole: isSuperAdmin ? "super_admin" : (studentRecord?.data()?.role === "viewer" ? "student" : studentRecord?.data()?.role || "student")
-    }));
-    showToast(role === "admin" ? "Admin access verified" : "Welcome to Presence", "Your account was verified successfully.");
-    window.setTimeout(() => {
-      window.location.href = role === "admin" ? "pages/admin-dashboard.html" : "pages/student-dashboard.html";
-    }, 450);
-  } catch (error) {
-    const permissionDenied = error.code === "permission-denied"
-      || error.code === "firestore/permission-denied"
-      || error.message?.toLowerCase().includes("insufficient permissions");
-    const message = error.code === "auth/invalid-credential"
-      ? "The account or password is incorrect."
-      : error.code === "auth/too-many-requests"
-        ? "Too many attempts. Please wait and try again."
-        : permissionDenied
-          ? "Password accepted, but the latest Firestore rules have not been published yet."
-          : error.message || "Unable to sign in right now.";
-    setFieldError(passwordInput, passwordError, message);
-    passwordInput.focus();
-    setLoading(false);
-  }
+        sessionStorage.setItem("presenceSession", JSON.stringify({
+          role,
+          uid: credential.user.uid,
+          accountId: role === "student" ? studentRecord.data().accountId : credential.user.email,
+          assignedRole: isSuperAdmin ? "super_admin" : (studentRecord?.data()?.role === "viewer" ? "student" : studentRecord?.data()?.role || "student")
+        }));
+        showToast(role === "admin" ? "Admin access verified" : "Welcome to Presence", "Your account was verified successfully.");
+        window.setTimeout(() => {
+          window.location.href = role === "admin" ? "pages/admin-dashboard.html" : "pages/student-dashboard.html";
+        }, 450);
+      } catch (error) {
+        const permissionDenied = error.code === "permission-denied"
+          || error.code === "firestore/permission-denied"
+          || error.message?.toLowerCase().includes("insufficient permissions");
+        const message = error.code === "auth/invalid-credential"
+          ? "The account or password is incorrect."
+          : error.code === "auth/too-many-requests"
+            ? "Too many attempts. Please wait and try again."
+            : permissionDenied
+              ? "Password accepted, but the latest Firestore rules have not been published yet."
+              : error.message || "Unable to sign in right now.";
+        setFieldError(passwordInput, passwordError, message);
+        passwordInput.focus();
+        return false;
+      }
+  } });
 });
 
 function openHelpDialog() {

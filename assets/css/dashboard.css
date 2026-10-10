@@ -292,10 +292,27 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .event-check-time b { padding: 2px 5px; color: #2167cd; background: var(--blue-soft); border-radius: 4px; font-size: .57rem; letter-spacing: .05em; }
 .event-check-time:nth-child(2) b { color: #a65d1b; background: var(--orange-soft); }
 .event-location { min-width: 0; margin-left: auto; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.event-schedule { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.event-schedule-group { padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+.event-schedule-group h4 { margin: 0 0 10px; color: var(--ink); font-size: .82rem; }
+.event-schedule-group dl { display: grid; gap: 7px; margin: 0; }
+.event-schedule-group dl > div { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: .76rem; }
+.event-schedule-group dt { color: var(--muted); }
+.event-schedule-group dd { margin: 0; color: var(--ink); font-weight: 600; }
+.event-schedule-location { margin: 12px 0 0; color: var(--ink); font-size: .76rem; overflow-wrap: anywhere; }
+.event-schedule-location span { color: var(--muted); margin-right: 8px; }
+@media (max-width: 580px) { .event-schedule { grid-template-columns: minmax(0, 1fr); } }
 .event-card-notice { margin: 14px 0 -2px; padding: 10px 12px; color: #94561d; background: #fff7eb; border: 1px solid #f6dfbf; border-radius: 9px; font-size: .72rem; line-height: 1.5; }
 .event-card-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
 .event-card-actions .primary-button, .event-card-actions .outline-button { min-height: 36px; padding-inline: 13px; }
 .event-card-actions button:disabled { cursor: default; opacity: .72; transform: none; }
+.attendance-action-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 180px; min-height: 36px; }
+.attendance-action-button.attendance-button-loading { opacity: 1; cursor: wait; font-size: .75rem; }
+.attendance-button-spinner { display: inline-block; width: 14px; height: 14px; flex: 0 0 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: attendance-button-spin .8s linear infinite; }
+.attendance-progress-announcer { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@keyframes attendance-button-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .attendance-button-spinner { animation: none; } }
+@media (max-width: 580px) { .event-card-actions { flex-wrap: wrap; } .attendance-action-button { max-width: 100%; } }
 .history-section { margin-top: 22px; }
 .history-card-grid, .admin-event-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 #studentFineList { align-items: start; }

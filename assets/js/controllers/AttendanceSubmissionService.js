@@ -4,7 +4,7 @@ export class AttendanceSubmissionService {
   constructor({ read, write, onWaiting = () => {}, waitMs = 12000 }) {
     Object.assign(this, { read, write, onWaiting, waitMs }); this.pending = new Set();
   }
-  async submit({ reference, matches, payload, options }) {
+  async submit({ reference, matches, payload, options, validatePrevious = () => {} }) {
     if (this.pending.has(reference.id)) return { state: 'busy' };
     this.pending.add(reference.id);
     try {
@@ -12,6 +12,7 @@ export class AttendanceSubmissionService {
       try { previous = await this.read(reference); }
       catch (error) { error.attendanceStage = 'preflight'; throw error; }
       if (previous.exists() && matches(previous.data())) return { state: 'existing', snapshot: previous };
+      validatePrevious(previous);
       const timer = setTimeout(() => this.onWaiting(reference), this.waitMs);
       try { await this.write(reference, payload, options); }
       catch (error) {

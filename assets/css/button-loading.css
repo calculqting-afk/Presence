@@ -1,0 +1,35 @@
+/* Shared authentication feedback; attendance retains its existing styles. */
+.attendance-button-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: auth-button-spin .8s linear infinite;
+}
+.attendance-progress-announcer {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.submit-button[aria-busy],
+.logout-button.attendance-button-loading,
+#confirmLogout.attendance-button-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  cursor: wait;
+  opacity: 1;
+}
+.submit-button:disabled { pointer-events: none; }
+#confirmLogout { min-width: 150px; }
+@keyframes auth-button-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .attendance-button-spinner { animation: none; }
+}

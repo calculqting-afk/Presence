@@ -1,12 +1,13 @@
-import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261010-attendance-fix';
+import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261010-auth-progress';
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
-import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261010-attendance-fix';
-import { GeofenceController } from '../controllers/GeofenceController.js?v=20261010-attendance-fix';
+import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261010-auth-progress';
+import { GeofenceController } from '../controllers/GeofenceController.js?v=20261010-auth-progress';
 import { hasPermission } from '../core/permissions.js';
-import { AttendanceCorrectionController } from '../controllers/AttendanceCorrectionController.js?v=20261010-attendance-fix';
+import { AttendanceCorrectionController } from '../controllers/AttendanceCorrectionController.js?v=20261010-auth-progress';
 import { AttendanceSummaryService } from '../controllers/AttendanceSummaryService.js';
-import { AttendanceHistoryController, AttendanceRepository } from '../controllers/AttendanceHistoryController.js?v=20261010-attendance-fix';
+import { AttendanceHistoryController, AttendanceRepository } from '../controllers/AttendanceHistoryController.js?v=20261010-auth-progress';
 import { AttendanceToolbarController } from '../controllers/AttendanceToolbarController.js';
+import { EventSchedulePresenter } from '../controllers/EventSchedulePresenter.js';
 
 export class AdminDashboard {
 initialize() {
@@ -46,6 +47,7 @@ initialize() {
   let presenceByUid = new Map();
   let legacyPresenceByUid = new Map();
   const summaryService = new AttendanceSummaryService({ closeDate: eventCloseDate, checkoutCloseDate: eventCheckoutCloseDate });
+  const schedulePresenter = new EventSchedulePresenter({ formatTime: formatEventTime, escapeHtml, addMinutes: timePlusMinutes });
   const coverageDate = new Date(Date.now() - 30 * 86400000);
   const recentAttendanceFrom = new Date(coverageDate.getTime() - coverageDate.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const attendanceCoverageFrom = '';
@@ -530,9 +532,7 @@ initialize() {
   }
 
   function eventCardMarkup(event, past) {
-    const checkInWindow = `${formatEventTime(event.timeIn)} – ${formatEventTime(event.checkInCutoff || event.timeOut)}`;
-    const checkOutWindow = `${formatEventTime(event.timeOut)} – ${formatEventTime(event.checkOutCutoff || timePlusMinutes(event.timeOut) || event.timeOut)}`;
-    return `<article class="event-card admin-event-card admin-event-card-student-style"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(event.description || event.notes || "No description provided.")}</div><div class="event-meta"><span class="event-check-time"><b>IN</b>${escapeHtml(checkInWindow)}</span><span class="event-check-time"><b>OUT</b>${escapeHtml(checkOutWindow)}</span><span class="event-location">${escapeHtml(event.location)}</span></div><div class="event-card-actions">${eventStatusBadge(getEventStatus(event))}<div class="admin-event-card-actions">${past ? "" : `<button class="outline-button" type="button" data-manage-geofence="${event.id}">Attendance area</button>`}<button class="outline-button" type="button" data-edit-event="${event.id}">Edit event</button><button class="small-button danger modal-danger-button" type="button" data-delete-event="${event.id}" ${can("deleteEvents") ? "" : "hidden"}>Remove</button></div></div></div></article>`;
+    return `<article class="event-card admin-event-card admin-event-card-student-style"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(event.description || event.notes || "No description provided.")}</div>${schedulePresenter.render(event)}<div class="event-card-actions">${eventStatusBadge(getEventStatus(event))}<div class="admin-event-card-actions">${past ? "" : `<button class="outline-button" type="button" data-manage-geofence="${event.id}">Attendance area</button>`}<button class="outline-button" type="button" data-edit-event="${event.id}">Edit event</button><button class="small-button danger modal-danger-button" type="button" data-delete-event="${event.id}" ${can("deleteEvents") ? "" : "hidden"}>Remove</button></div></div></div></article>`;
   }
 
   function renderPastEvents() {

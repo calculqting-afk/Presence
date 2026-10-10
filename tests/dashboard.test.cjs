@@ -6,6 +6,93 @@ const vm = require('node:vm');
 const { pathToFileURL } = require('node:url');
 
 const root = path.resolve(__dirname, '..');
+test('authentication progress blocks duplicates, restores failures and remains locked for redirect', async () => {
+  const { AuthActionController } = await isolatedModule('assets/js/controllers/AuthActionController.js', {}, { document: undefined });
+  const controller = new AuthActionController();
+  const button = { innerHTML: 'Continue', disabled: false };
+  const sidebar = { innerHTML: 'Logout', disabled: false };
+  let resolveAction;
+  let calls = 0;
+  const pending = controller.run({ buttons: [button, sidebar], label: 'Logging out…', successLabel: 'Logged out', action: () => {
+    calls++; return new Promise(resolve => { resolveAction = resolve; });
+  } });
+  assert.match(button.innerHTML, /attendance-button-spinner/);
+  assert.match(sidebar.innerHTML, /Logging out/);
+  assert.equal(button.disabled, true);
+  assert.equal(await controller.run({ buttons: [button], action: () => { calls++; } }), false);
+  assert.equal(calls, 1);
+  resolveAction(false); assert.equal(await pending, false);
+  assert.equal(controller.busy, false); assert.equal(button.innerHTML, 'Continue');
+  assert.equal(sidebar.innerHTML, 'Logout'); assert.equal(sidebar.disabled, false);
+  await assert.rejects(controller.run({ buttons: [button], label: 'Signing in…', action: async () => { throw new Error('offline'); } }), /offline/);
+  assert.equal(button.disabled, false); assert.equal(controller.busy, false);
+  assert.equal(await controller.run({ buttons: [button], label: 'Signing in…', successLabel: 'Signed in', action: async () => {} }), true);
+  assert.match(button.innerHTML, /Signed in/); assert.equal(button.disabled, true);
+  assert.equal(controller.busy, true);
+  controller.dispose(); controller.dispose();
+});
+
+test('login and both dashboard pages load shared authentication progress styles', () => {
+  for (const filename of ['index.html', 'pages/admin-dashboard.html', 'pages/student-dashboard.html']) {
+    assert.match(fs.readFileSync(path.join(root, filename), 'utf8'), /button-loading.css\?v=20261010-auth-progress/);
+  }
+  const css = fs.readFileSync(path.join(root, 'assets/css/button-loading.css'), 'utf8');
+  assert.match(css, /prefers-reduced-motion/);
+  assert.match(fs.readFileSync(path.join(root, 'assets/js/script.js'), 'utf8'), /loginAction.run/);
+  assert.match(fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8'), /logoutAction.run/);
+});
+
+test('button loading state restores labels and accessibility and survives replacement buttons', async () => {
+  const browser = fakeBrowser();
+  const { ButtonLoadingController } = await isolatedModule('assets/js/controllers/ButtonLoadingController.js', {}, browser);
+  const controller = new ButtonLoadingController();
+  const button = browser.document.querySelector('#loadingTest');
+  const attributes = new Map();
+  button.setAttribute = (key, value) => attributes.set(key, value);
+  button.getAttribute = key => attributes.get(key) ?? null;
+  button.removeAttribute = key => attributes.delete(key);
+  button.innerHTML = 'Check in'; button.disabled = false;
+  assert.equal(controller.start('in:event', button, 'Checking in…'), true);
+  assert.equal(controller.start('in:event', button, 'Duplicate'), false);
+  assert.equal(button.disabled, true); assert.equal(attributes.get('aria-busy'), 'true');
+  controller.update('in:event', 'Verifying location…');
+  assert.match(button.innerHTML, /Verifying location/);
+  const replacement = browser.document.querySelector('#replacement'); replacement.innerHTML = 'Check in'; replacement.disabled = false;
+  controller.attach('in:event', replacement); assert.match(replacement.innerHTML, /Verifying location/); assert.equal(replacement.disabled, true);
+  controller.reset('in:event');
+  assert.equal(button.innerHTML, 'Check in'); assert.equal(replacement.innerHTML, 'Check in');
+  assert.equal(button.disabled, false); assert.equal(replacement.disabled, false); assert.equal(attributes.has('aria-busy'), false);
+  controller.start('out:event', button, 'Checking out…'); controller.finish('out:event', 'Checked out'); controller.reset('out:event');
+  assert.match(button.innerHTML, /Checked out/); assert.ok(!button.innerHTML.includes('attendance-button-spinner'));
+  assert.equal(attributes.get('aria-busy'), 'false'); assert.equal(button.disabled, true);
+  controller.dispose(); controller.dispose();
+});
+
+test('check-in displays real pending progress and restores the button after face verification fails', async () => {
+  let rejectRead;
+  const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks({ getDocFromServer: () => new Promise((_, reject) => { rejectRead = reject; }) }), { document: gridDocument });
+  const controller = new StudentAttendanceController({ getState: () => ({ events: [{ id: 'event' }], attendance: [] }), showError() {} });
+  const button = { dataset: { attendEvent: 'event' }, innerHTML: 'Check in', disabled: false };
+  const pending = controller.handleEventClick({ target: { closest: selector => selector === '[data-attend-event]' ? button : null } });
+  assert.equal(button.disabled, true); assert.match(button.innerHTML, /Checking in/);
+  rejectRead(new Error('Offline')); await pending;
+  assert.equal(button.disabled, false); assert.equal(button.innerHTML, 'Check in'); assert.equal(controller.loading.operations.size, 0);
+  controller.dispose();
+});
+test('event schedules label opening, late threshold and checkout close separately', async () => {
+  const { EventSchedulePresenter } = await isolatedModule('assets/js/controllers/EventSchedulePresenter.js');
+  const escapeHtml = value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  const presenter = new EventSchedulePresenter({ formatTime: value => value, escapeHtml, addMinutes: () => '16:30' });
+  const event = { timeIn: '16:00', checkInCutoff: '16:10', timeOut: '16:15', checkOutCutoff: '16:25', location: '<script>' };
+  const html = presenter.render(event);
+  assert.match(html, /Check-in/); assert.match(html, /Check-out/);
+  assert.match(html, /Late after<\/dt><dd>16:10/);
+  assert.match(html, /Closes<\/dt><dd>16:25/);
+  assert.ok(html.includes('&lt;script&gt;')); assert.ok(!html.includes('<script>'));
+  assert.match(presenter.render({ timeIn: '16:00', timeOut: '16:15' }), /Closes<\/dt><dd>16:30/);
+  assert.match(presenter.render({}), /Not set/);
+  for (const role of ['admin', 'student']) assert.match(fs.readFileSync(path.join(root, `assets/js/${role}/${role === 'admin' ? 'Admin' : 'Student'}Dashboard.js`), 'utf8'), /schedulePresenter.render\(event\)/);
+});
 test('event form pairs each attendance opening with its cutoff', () => {
   const html = fs.readFileSync(path.join(root, 'pages/admin-dashboard.html'), 'utf8');
   const form = html.match(/<form id="eventForm">([\s\S]*?)<\/form>/)[1];
@@ -277,11 +364,56 @@ test('checkout rejects a closed window without writing any record', async () => 
 
 test('checkout preserves record identity and verifies the server acknowledgement', async () => {
   const writes = []; const publications = []; const messages = [];
-  const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks({ setDoc: async (...args) => writes.push(args), getDocFromServer: async () => ({ exists: () => writes.length > 0, id: 'student-1_event', data: () => ({ studentUid: 'student-1', eventId: 'event', status: 'completed', checkedOutAt: 'server-time' }) }), showDashboardToast: title => messages.push(title) }), { document: gridDocument });
+  const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks({ setDoc: async (...args) => writes.push(args), getDocFromServer: async () => ({ exists: () => true, id: 'student-1_event', data: () => ({ studentUid: 'student-1', eventId: 'event', checkedInAt: 'original-time', status: writes.length ? 'completed' : 'checked-in', ...(writes.length ? { checkedOutAt: 'server-time' } : {}) }) }), showDashboardToast: title => messages.push(title) }), { document: gridDocument });
   const controller = new StudentAttendanceController({ bridge: { publish: (...args) => publications.push(args) } });
   await controller.checkOutAttendance({ eventId: 'event' }, {}, { disabled: false });
   assert.equal(writes[0][0].id, 'student-1_event'); assert.equal(writes[0][1].status, 'completed'); assert.equal(writes[0][2].merge, true);
   assert.equal(publications.length, 1); assert.equal(messages.at(-1), 'Checkout recorded');
+});
+
+test('checkout refuses missing, foreign or invalid server check-ins without writing', async () => {
+  let saved = null, writes = 0;
+  const messages = [];
+  const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks({
+    getDocFromServer: async () => ({ exists: () => saved !== null, data: () => saved }),
+    setDoc: async () => writes++, showDashboardToast: (_, message) => messages.push(message)
+  }), { document: gridDocument });
+  const controller = new StudentAttendanceController({});
+  const valid = { studentUid: 'student-1', eventId: 'event', status: 'checked-in', checkedInAt: 'original-time' };
+  for (const candidate of [null, { ...valid, studentUid: 'other' }, { ...valid, eventId: 'other' }, { ...valid, status: 'invalid' }, { ...valid, checkedInAt: null }]) {
+    saved = candidate;
+    const button = { disabled: false };
+    await controller.checkOutAttendance({ eventId: 'event' }, {}, button);
+    assert.equal(button.disabled, false);
+    assert.match(messages.at(-1), /saved check-in is required/);
+  }
+  assert.equal(writes, 0); assert.equal(controller.checkoutBusy.size, 0);
+  controller.dispose();
+});
+
+test('already completed checkout retry preserves its timestamp without another write', async () => {
+  let writes = 0, publications = 0;
+  const saved = { studentUid: 'student-1', eventId: 'event', status: 'completed', checkedInAt: 'original-in', checkedOutAt: 'original-out' };
+  const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks({
+    getDocFromServer: async () => ({ exists: () => true, id: 'student-1_event', data: () => saved }), setDoc: async () => writes++
+  }), { document: gridDocument });
+  const controller = new StudentAttendanceController({ bridge: { publish: (_, data) => { publications++; assert.equal(data.checkedOutAt, 'original-out'); } } });
+  await controller.checkOutAttendance({ eventId: 'event' }, {}, { disabled: false });
+  assert.equal(writes, 0); assert.equal(publications, 1);
+  controller.dispose();
+});
+
+test('checkout rule validates only allowed patch fields and preserves original check-in', () => {
+  // Structural regression; run equivalent positive/negative cases in the emulator.
+  const rules = fs.readFileSync(path.join(root, 'firestore.rules'), 'utf8');
+  const checkout = rules.slice(rules.indexOf('function studentCanCheckOut('), rules.indexOf('// A correction and its immutable'));
+  assert.match(checkout, /attendanceId == request.auth.uid \+ "_" \+ previous.eventId/);
+  assert.match(checkout, /previous.checkedInAt is timestamp/);
+  assert.match(checkout, /data.checkedOutAt == request.time/);
+  assert.match(checkout, /request.time >= event.closeAt && request.time <= event.checkOutClosesAt/);
+  assert.match(checkout, /affectedKeys\(\).hasOnly\(\["checkOutLocation", "checkedOutAt", "status"\]\)/);
+  assert.match(checkout, /validLocation\(data.checkOutLocation\)/);
+  assert.match(rules, /\|\| studentCanCheckOut\(attendanceId, request.resource.data, resource.data\)/);
 });
 
 for (const arrivalStatus of ['present', 'late']) {
@@ -385,7 +517,7 @@ for (const role of ['Student', 'Admin']) {
 test('dashboard entry points use the same shared-module version', () => {
   for (const role of ['student', 'admin']) {
     const html = fs.readFileSync(path.join(root, `pages/${role}-dashboard.html`), 'utf8');
-    assert.ok(html.includes('dashboard.js?v=20261010-attendance-fix'));
+    assert.ok(html.includes('dashboard.js?v=20261010-auth-progress'));
   }
 });
 
