@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, '../assets/js/login-theme.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../assets/js/controllers/ThemeController.js'), 'utf8')
+  + '\n' + fs.readFileSync(path.join(__dirname, '../assets/js/theme.js'), 'utf8');
 
 function page(saved, blocked = false) {
   const events = {}, attributes = {}, writes = [], registrations = {};
@@ -22,7 +23,7 @@ function page(saved, blocked = false) {
     window: { addEventListener: addEvent, removeEventListener: removeEvent }
   });
   vm.runInContext(source, context);
-  const controller = vm.runInContext('loginThemeController', context);
+  const controller = vm.runInContext('presenceThemeController', context);
   return { events, attributes, root, label, writes, meta, storage, controller, registrations };
 }
 
@@ -64,4 +65,47 @@ test('ThemeController initialization is idempotent and disposal removes owned li
   state.controller.toggleTheme(); assert.equal(state.writes.length, 0);
   state.controller.initialize(); state.events.DOMContentLoaded(); state.events.click();
   assert.equal(state.root.dataset.theme, 'light'); assert.equal(state.writes.length, 1);
+});
+
+test('login and both dashboards load one shared controller before CSS with one accessible toggle', () => {
+  for (const file of ['index.html', 'pages/admin-dashboard.html', 'pages/student-dashboard.html']) {
+    const filename = path.join(__dirname, '..', file);
+    const html = fs.readFileSync(filename, 'utf8');
+    const scriptPaths = [...html.matchAll(/<script src="([^"]+)"/g)].map(match => match[1]);
+    assert.equal(scriptPaths.length, 2, file);
+    assert.ok(scriptPaths[0].includes('controllers/ThemeController.js?v=20261010-shared-theme'), file);
+    assert.ok(scriptPaths[1].includes('theme.js?v=20261010-shared-theme'), file);
+    assert.ok(html.indexOf('controllers/ThemeController.js') < html.indexOf('rel="stylesheet"'), file);
+    assert.equal([...html.matchAll(/id="themeToggle"/g)].length, 1, file);
+    assert.ok(html.includes('aria-label="Switch to dark mode" aria-pressed="false"'), file);
+    assert.ok(html.includes('theme-toggle.css?v=20261010-shared-theme'), file);
+    if (file.includes('dashboard')) assert.ok(html.includes('dashboard-theme.css?v=20261010-shared-theme'), file);
+    for (const script of scriptPaths) assert.ok(fs.existsSync(path.resolve(path.dirname(filename), script.split('?')[0])), script);
+  }
+});
+
+test('saved theme carries between login and dashboard instances', () => {
+  const login = page(null); login.events.DOMContentLoaded(); login.events.click();
+  const dashboard = page(login.writes.at(-1)[1]); dashboard.events.DOMContentLoaded();
+  assert.equal(dashboard.root.dataset.theme, 'dark'); assert.equal(dashboard.attributes['aria-pressed'], 'true');
+  dashboard.events.click();
+  const returnedLogin = page(dashboard.writes.at(-1)[1]);
+  assert.equal(returnedLogin.root.dataset.theme, 'light');
+});
+
+test('navy dashboard text and status palette maintain readable contrast', () => {
+  const luminance = hex => {
+    const channels = hex.match(/[0-9a-f]{2}/gi).map(value => parseInt(value, 16) / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+    return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
+  };
+  const contrast = (text, background) => {
+    const values = [luminance(text), luminance(background)].sort((a, b) => b - a);
+    return (values[0] + .05) / (values[1] + .05);
+  };
+  for (const text of ['eef4ff', 'b1bfd4', '83b4ff']) {
+    for (const surface of ['0b1426', '15243b', '102039']) assert.ok(contrast(text, surface) >= 4.5, `${text} on ${surface}`);
+  }
+  for (const [text, surface] of [['71d7aa', '163a30'], ['ffc185', '423023'], ['ff9eaa', '422733'], ['ffffff', '1f6feb']]) {
+    assert.ok(contrast(text, surface) >= 4.5, `${text} on ${surface}`);
+  }
 });

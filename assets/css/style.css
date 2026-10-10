@@ -32,19 +32,8 @@
 }
 
 .header-actions { display: flex; align-items: center; gap: 18px; }
-.theme-toggle {
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  min-width: 44px; min-height: 44px; padding: 10px 13px;
-  color: #374763; background: rgba(255, 255, 255, .7);
-  border: 1px solid var(--line); border-radius: 12px;
-  font-size: .75rem; font-weight: 700;
-}
-.theme-toggle:hover { background: #e7f0ff; }
-.theme-toggle:focus-visible, .text-button:focus-visible, .password-toggle:focus-visible,
+.text-button:focus-visible, .password-toggle:focus-visible,
 .submit-button:focus-visible { outline: 3px solid #3b82f6; outline-offset: 4px; }
-.theme-toggle svg { width: 18px; height: 18px; flex-shrink: 0; }
-.theme-sun, :root[data-theme="dark"] .theme-moon { display: none; }
-:root[data-theme="dark"] .theme-sun { display: block; }
 
 :root[data-theme="dark"] .login-card { background: rgba(21, 36, 59, .94); border-color: #334660; }
 :root[data-theme="dark"] .dialog, :root[data-theme="dark"] .toast { background: #15243b; border-color: #334660; }
@@ -68,8 +57,6 @@
 :root[data-theme="dark"] .text-button,
 :root[data-theme="dark"] .feature-icon,
 :root[data-theme="dark"] .dialog-icon { color: #83b4ff; }
-:root[data-theme="dark"] .theme-toggle { background: #15243b; color: #eef4ff; }
-:root[data-theme="dark"] .theme-toggle:hover,
 :root[data-theme="dark"] .password-toggle:hover { background: #243c5c; }
 :root[data-theme="dark"] .input-icon,
 :root[data-theme="dark"] .lock-icon::before,
@@ -472,8 +459,6 @@ footer {
 
 @media (max-width: 560px) {
   .header-actions { gap: 10px; }
-  .theme-toggle { padding: 10px; }
-  .theme-toggle span { display: none; }
   .system-status { font-size: .65rem; letter-spacing: 0; }
   .brand { font-size: 1.1rem; }
   .site-header, .hero, footer { width: min(100% - 32px, 1180px); }

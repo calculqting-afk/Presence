@@ -439,7 +439,7 @@ initialize() {
     document.querySelector("#notCheckedInMeta").textContent = students.length ? "Registered students without a check-in today" : "No students registered";
     document.querySelector("#adminAttendancePercent").textContent = `${rate}%`;
     document.querySelector("#adminAttendanceDetail").textContent = `${present} present`;
-    document.querySelector("#adminAttendanceRing").style.background = `conic-gradient(#1f6feb 0 ${rate}%, #e8eef7 ${rate}% 100%)`;
+    document.querySelector("#adminAttendanceRing").style.background = `conic-gradient(var(--blue) 0 ${rate}%, var(--ring-track, #e8eef7) ${rate}% 100%)`;
   }
 
   function attendanceLineMarkup(records) {

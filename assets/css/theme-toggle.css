@@ -1,0 +1,21 @@
+/* Shared presentation for ThemeController on login and both dashboards. */
+.theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  flex: 0 0 auto; min-width: 44px; min-height: 44px; padding: 10px 13px;
+  color: #374763; background: rgba(255, 255, 255, .7);
+  border: 1px solid #dce4ef; border-radius: 12px;
+  font: inherit; font-size: .75rem; font-weight: 700; cursor: pointer;
+}
+.theme-toggle:hover { background: #e7f0ff; }
+.theme-toggle:focus-visible { outline: 3px solid #3b82f6; outline-offset: 4px; }
+.theme-toggle svg { width: 18px; height: 18px; flex-shrink: 0; }
+.theme-sun, :root[data-theme="dark"] .theme-moon { display: none; }
+:root[data-theme="dark"] .theme-sun { display: block; }
+:root[data-theme="dark"] .theme-toggle { background: #15243b; color: #eef4ff; border-color: #334660; }
+:root[data-theme="dark"] .theme-toggle:hover { background: #243c5c; }
+.topbar .theme-toggle { padding: 10px; }
+.topbar .theme-toggle span { display: none; }
+@media (max-width: 560px) {
+  .theme-toggle { padding: 10px; }
+  .theme-toggle span { display: none; }
+}

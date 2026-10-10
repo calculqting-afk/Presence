@@ -5,6 +5,7 @@ class ThemeController {
     this.document = pageDocument;
     this.window = pageWindow;
     this.getStorage = getStorage;
+    // Retain the original key so existing login preferences carry to dashboards.
     this.storageKey = 'presence.loginTheme';
     this.root = this.document.documentElement;
     this.theme = 'light';
@@ -80,6 +81,3 @@ class ThemeController {
     this.initialized = false;
   }
 }
-
-const loginThemeController = new ThemeController();
-loginThemeController.initialize();

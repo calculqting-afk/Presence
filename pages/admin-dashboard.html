@@ -1,8 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f5f9ff">
+  <script src="../assets/js/controllers/ThemeController.js?v=20261010-shared-theme"></script>
+  <script src="../assets/js/theme.js?v=20261010-shared-theme"></script>
   <meta name="description" content="Presence administrator attendance dashboard.">
   <title>Admin Dashboard — Presence</title>
   <link rel="icon" type="image/png" sizes="any" href="../assets/images/presence-logo.png?v=20260926">
@@ -12,7 +16,9 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261009-performance">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261010-theme">
+  <link rel="stylesheet" href="../assets/css/theme-toggle.css?v=20261010-shared-theme">
+  <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261010-shared-theme">
 </head>
 <body data-dashboard="admin">
   <div class="app-shell">
@@ -39,7 +45,11 @@
     <main class="main-area">
       <header class="topbar">
         <div><h1 id="pageTitle">Dashboard</h1><p id="pageSubtitle">School attendance overview</p></div>
-        <div class="topbar-actions"><span class="date-pill" data-current-date></span><button class="notification-bell" id="notificationBell" type="button" aria-label="Open notifications" aria-expanded="false">🔔<span class="notification-count" id="notificationCount" hidden>0</span></button><button class="topbar-profile" type="button" data-go-view="profile" aria-label="Open administrator profile"><span class="avatar"><img data-admin-photo alt="" hidden><span data-admin-initials>AD</span></span><span class="profile-name" data-admin-name>School Admin</span></button></div>
+        <div class="topbar-actions"><button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch to dark mode" aria-pressed="false" title="Switch to dark mode">
+        <svg class="theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20.6 13.2A8.7 8.7 0 0 1 10.8 3.4 8.7 8.7 0 1 0 20.6 13.2Z"/></svg>
+        <svg class="theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4 19 5"/></svg>
+        <span id="themeToggleLabel">Dark</span>
+      </button><span class="date-pill" data-current-date></span><button class="notification-bell" id="notificationBell" type="button" aria-label="Open notifications" aria-expanded="false">🔔<span class="notification-count" id="notificationCount" hidden>0</span></button><button class="topbar-profile" type="button" data-go-view="profile" aria-label="Open administrator profile"><span class="avatar"><img data-admin-photo alt="" hidden><span data-admin-initials>AD</span></span><span class="profile-name" data-admin-name>School Admin</span></button></div>
       </header>
       <div class="content">
         <section class="view-section" data-section="dashboard">
@@ -52,7 +62,7 @@
           </div>
           <div class="dashboard-grid">
             <article class="panel"><div class="panel-head"><div><h3>Published events</h3><p>Saved event overview</p></div><button class="link-button" type="button" data-go-view="modify-events">Manage events</button></div><div class="timeline" id="adminEventTimeline"><div class="empty-state">No events have been created yet.</div></div></article>
-            <article class="panel"><div class="panel-head"><div><h3>Attendance today</h3><p>Across all grade levels</p></div></div><div class="ring-wrap"><div class="progress-ring" id="adminAttendanceRing" style="background:#e8eef7"></div><div class="progress-value"><strong id="adminAttendancePercent">0%</strong><small id="adminAttendanceDetail">No records</small></div></div><div class="attendance-legend"><span class="legend-item"><i class="legend-dot" style="background:#1f6feb"></i>Present</span><span class="legend-item"><i class="legend-dot" style="background:#e8eef7"></i>Pending</span></div></article>
+            <article class="panel"><div class="panel-head"><div><h3>Attendance today</h3><p>Across all grade levels</p></div></div><div class="ring-wrap"><div class="progress-ring" id="adminAttendanceRing" style="background:var(--ring-track, #e8eef7)"></div><div class="progress-value"><strong id="adminAttendancePercent">0%</strong><small id="adminAttendanceDetail">No records</small></div></div><div class="attendance-legend"><span class="legend-item"><i class="legend-dot" style="background:#1f6feb"></i>Present</span><span class="legend-item"><i class="legend-dot" style="background:var(--ring-track, #e8eef7)"></i>Pending</span></div></article>
           </div>
           <article class="panel live-attendance-panel"><div class="panel-head"><div><h3>Live attendance</h3><p>Students checking in and out right now.</p></div><button class="link-button" type="button" data-go-view="attendance-line">View attendance line</button></div><div class="attendance-line" id="adminDashboardAttendanceLine"><div class="empty-state">No attendance activity yet.</div></div></article>
         </section>

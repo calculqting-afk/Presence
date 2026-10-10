@@ -78,6 +78,19 @@ For boundary testing, create short test windows a few minutes apart. The emulato
 4. Verify listener scope with the automated tests. Firestore uses multiplexed connections, so a persistent Network connection alone does not prove a stopped collection listener is still active. Use emulator Requests/usage observations to investigate data reads.
 5. Cache headers remain one-hour revalidation for stable JS/CSS paths; HTML remains `no-cache`. Filename fingerprinting and server-side directory pagination are future work, not part of this refactor. Some shared collection reads remain; quota savings depend on actual navigation and data updates.
 
+## Shared light/dark navy theme
+
+The login, admin and student pages use the same `ThemeController` and device/origin preference (`presence.loginTheme`). Theme switching does not call Firebase or change permissions. Each browser/profile has its own preference.
+
+1. Choose Dark on login, sign in, and confirm the dashboard remains dark. Choose Light in the dashboard toolbar, reload, then log out and confirm login remains light.
+2. Open two tabs on the same origin/profile. Toggle one and confirm the other follows. Separate Chrome/Edge profiles intentionally do not share this choice.
+3. Check keyboard Tab focus and Enter/Space on the toggle; the accessible action should change to the opposite mode.
+4. Check both modes at 320px and normal desktop widths: toolbar controls must remain usable without horizontal overflow. Review notifications, help/logout/profile dialogs, student directory/filter controls, attendance/fine/event cards and forms.
+5. Verify maps, camera video and uploaded photos are not color-inverted. Status colors and correction badges must still be distinguishable. Retest normal admin/student actions in both modes.
+6. With browser storage disabled, theme switching should still work for the current page. With slow/blocked Firebase requests, the theme toggle should remain independent.
+
+Automated tests cover preference restoration/persistence, shared markup wiring, tab synchronization, lifecycle cleanup, storage failure and navy palette contrast. These checks do not replace real browser/mobile layout testing.
+
 ## Firestore rule testing
 
 For the fixed administrator role policy, publishing steps, manual correction audit checks, and Auth limitations, follow [ROLE-PERMISSIONS.md](ROLE-PERMISSIONS.md).

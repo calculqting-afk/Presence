@@ -12,4 +12,4 @@ The user requires all future feature updates to follow a clear object-oriented s
 - Prefer composition over unnecessary inheritance. Small pure helpers can support classes; HTML, CSS, tests and Firestore rules remain in their native declarative/test formats.
 - Preserve existing behavior during structural refactors and add regression tests. Do not rewrite unrelated legacy code simply to introduce classes.
 
-The login `ThemeController` is loaded as a classic script before CSS to restore the saved theme before first paint. Preserve that behavior and its independence from Firebase initialization.
+The shared `assets/js/controllers/ThemeController.js` and `assets/js/theme.js` bootstrap are loaded as classic scripts before CSS on login and both dashboards to restore the saved theme before first paint. Preserve that behavior and its independence from Firebase initialization. The existing `presence.loginTheme` storage key now serves all three pages to preserve saved choices without migration.

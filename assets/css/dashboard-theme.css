@@ -1,0 +1,114 @@
+/* Dark navy surfaces preserve status semantics and the existing light design. */
+:root { color-scheme: light; --ring-track: #e8eef7; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --sky: #0b1426; --ink: #eef4ff; --muted: #b1bfd4; --line: #334660;
+  --blue: #83b4ff; --blue-soft: #203859;
+  --green: #71d7aa; --green-soft: #163a30;
+  --orange: #ffc185; --orange-soft: #423023;
+  --red: #ff9eaa; --red-soft: #422733;
+  --ring-track: #334660;
+  --surface: #15243b; --surface-soft: #102039;
+  --shadow: 0 16px 45px rgba(0, 6, 20, .28);
+}
+:root[data-theme="dark"] .topbar { background: rgba(15, 28, 48, .94); }
+:root[data-theme="dark"] .sidebar { background: linear-gradient(180deg, #101f3a, #0a1428); }
+:root[data-theme="dark"] :is(.nav-label, .sidebar-user small) { color: #b1bfd4; }
+
+:root[data-theme="dark"] :is(.panel, .stat-card, .event-card, .history-event-card,
+  .admin-event-card, .fine-record-card, .attended-event-box, .dashboard-modal,
+  .notification-panel, .toast, .student-mobile-card) {
+  background: var(--surface); border-color: var(--line); box-shadow: var(--shadow);
+}
+:root[data-theme="dark"] :is(.event-description, .notice, .profile-fact, .profile-photo-control,
+  .student-info-box, .geofence-editor, .fine-record-event, .fine-record-meta > div,
+  .fine-detail-grid > div, .fine-history-list li, .community-service-record,
+  .community-service-empty, .face-guidance-panel, .event-detail-boxes > div,
+  .student-mobile-card-details > div, .attendance-line-item, .attendance-line-times > div, .notification-item,
+  .notification-filter, .fine-student-search-results, .fine-student-search-result) {
+  background: var(--surface-soft); border-color: var(--line);
+}
+:root[data-theme="dark"] :is(.outline-button, .notification-bell, .modal-close) {
+  color: var(--ink); background: var(--surface-soft); border-color: var(--line);
+}
+:root[data-theme="dark"] :is(.notification-item:hover, .notification-item.unread,
+  .fine-student-search-result:hover, .fine-student-search-result:focus,
+  .notification-bell:hover, .topbar-profile:hover, .small-button:hover) {
+  background: #243c5c; border-color: #577394;
+}
+:root[data-theme="dark"] .primary-button { color: white; background: #1f6feb; }
+:root[data-theme="dark"] .primary-button:hover { background: #0d4fbb; }
+:root[data-theme="dark"] .welcome-card .primary-button { color: #0d4fbb; background: white; }
+:root[data-theme="dark"] .welcome-card { background: linear-gradient(110deg, #0d3a87, #1553aa); }
+:root[data-theme="dark"] .welcome-card .eyebrow { color: #dbeaff !important; }
+:root[data-theme="dark"] .toast-mark { color: white; background: #168653; }
+:root[data-theme="dark"] .progress-ring::before { background: var(--surface); }
+
+:root[data-theme="dark"] :is(.field input, .field select, .field textarea,
+  .search-input, .map-search-row input, .student-filter-row select,
+  .fine-filter-row select, .fine-filter-row input, .notification-search,
+  .profile-photo-field input[type="file"], .duration-stepper, [data-role-select]) {
+  color: var(--ink); background: #0e1c31; border-color: #3e526e;
+}
+:root[data-theme="dark"] :is(input, textarea)::placeholder { color: #a5b6ce; }
+:root[data-theme="dark"] :is(.field input:focus, .field select:focus, .field textarea:focus,
+  .search-input:focus, .notification-search:focus, .map-search-row input:focus,
+  .duration-stepper:focus-within) { background: #172b46; border-color: #83b4ff; }
+:root[data-theme="dark"] input:-webkit-autofill {
+  -webkit-text-fill-color: #eef4ff; box-shadow: inset 0 0 0 100px #172b46;
+}
+:root[data-theme="dark"] .duration-stepper-button { background: #203859; border-color: var(--line); }
+:root[data-theme="dark"] .duration-stepper-button:hover { background: #1f6feb; color: white; }
+:root[data-theme="dark"] .duration-stepper-actions { border-color: var(--line); }
+:root[data-theme="dark"] th { color: var(--muted); background: #102039; }
+:root[data-theme="dark"] :is(td, .history-row, .timeline-item, .fine-details,
+  .community-service-section + .community-service-section, .student-profile-header) { border-color: var(--line); }
+
+:root[data-theme="dark"] :is(.profile-fact strong, .student-info-box strong,
+  .student-mobile-card-head h3, .student-mobile-card-details strong,
+  .event-description strong, .fine-record-card h3, .fine-record-event strong,
+  .fine-record-meta strong, .fine-detail-grid strong, .notification-panel-head h2,
+  .notification-copy strong, .community-service-section-heading h3,
+  .community-service-record-top, .logout-modal h2, .geofence-editor legend,
+  .geofence-toggle, .geofence-manager-head strong, .face-guidance-panel strong,
+  .attendance-line-person strong, .attendance-line-event strong, .attendance-line-times strong,
+  .fine-student-search-result, .student-profile-identity span strong) { color: var(--ink); }
+:root[data-theme="dark"] :is(.stat-meta, .timeline-time, .timeline-main small,
+  .event-description, .event-meta, .event-detail-boxes span, .event-detail-boxes strong,
+  .history-event-card > p, .fine-record-card > p, .fine-record-event span,
+  .fine-record-meta span, .fine-detail-grid span, .fine-history-list strong,
+  .fine-history-list span, .fine-history-list small, .fine-details h4,
+  .community-service-record h4, .notice, .face-consent, .field label,
+  .duration-stepper > span, .duration-stepper > b, .date-pill,
+  .notification-filter, .notification-copy small, .notification-copy time,
+  .toast, .toast button, .search-icon, .attendance-line-times span, .field > small) { color: var(--muted); }
+:root[data-theme="dark"] :is(.event-type-badge, .event-check-time b, .notification-copy em) { color: #83b4ff; }
+:root[data-theme="dark"] :is(.badge.blue) { color: #a7caff; }
+:root[data-theme="dark"] :is(.badge.green, .presence-status.is-online, .fine-record-meta .is-completed) { color: #71d7aa; }
+:root[data-theme="dark"] :is(.badge.orange, .event-check-time:nth-child(2) b) { color: #ffc185; }
+:root[data-theme="dark"] :is(.badge.gray, .presence-status.is-logged-out) { color: #b1bfd4; }
+:root[data-theme="dark"] .badge.gray { background: #293b52; }
+:root[data-theme="dark"] .presence-status.is-offline { color: #ff9eaa; }
+:root[data-theme="dark"] .community-service-warning { color: #ffbac4; background: #422733; border-color: #6c4352; }
+:root[data-theme="dark"] :is(.notification-icon.service) { color: #ffc185; }
+:root[data-theme="dark"] :is(.notification-icon.attendance) { color: #ff9eaa; }
+:root[data-theme="dark"] .notification-count { color: white; background: #c43c50; border-color: var(--surface); }
+:root[data-theme="dark"] :is(.event-card-notice, .clear-countdown) {
+  color: #ffc185 !important; background: #423023; border-color: #6b5037;
+}
+:root[data-theme="dark"] :is(.cleanup-counts > div, .cleanup-options label) { background: #422733; border-color: #6c4352; }
+:root[data-theme="dark"] :is(.cleanup-counts strong, .cleanup-options strong) { color: #ffbac4; }
+:root[data-theme="dark"] :is(.cleanup-counts span, .cleanup-options small) { color: #d8b9c4; }
+:root[data-theme="dark"] #studentProfileModal .modal-actions { background: linear-gradient(rgba(21,36,59,.94), #15243b 35%); }
+:root[data-theme="dark"] #faceCameraBox[data-guidance="ready"] + .face-guidance-panel { background: #163a30; border-color: #386452; }
+/* Keep map tiles, camera video and profile photos unfiltered. */
+:root[data-theme="dark"] .geofence-map { background: #102039; border-color: var(--line); }
+.geofence-map { color-scheme: light; }
+:root[data-theme="dark"] :is(button, input, select, textarea, a):focus-visible { outline-color: #83b4ff; }
+
+/* A third toolbar control needs its own space at phone widths. */
+@media (max-width: 580px) {
+  .topbar { flex-wrap: wrap; }
+  .topbar > div:first-child { flex: 1 1 120px; }
+  .topbar-actions { flex-wrap: wrap; }
+}

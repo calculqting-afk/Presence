@@ -242,7 +242,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .panel-head p { margin: 5px 0 0; color: var(--muted); font-size: .72rem; }
 .link-button { color: var(--blue); background: none; border: 0; font-size: .66rem; font-weight: 700; }
 
-.progress-ring { width: 114px; height: 114px; display: grid; place-items: center; margin: 8px auto 22px; border-radius: 50%; background: conic-gradient(var(--blue) 0 91%, #e8eef7 91% 100%); }
+.progress-ring { width: 114px; height: 114px; display: grid; place-items: center; margin: 8px auto 22px; border-radius: 50%; background: conic-gradient(var(--blue) 0 91%, var(--ring-track, #e8eef7) 91% 100%); }
 .progress-ring::before { content: ""; width: 86px; height: 86px; background: white; border-radius: 50%; }
 .progress-value { position: absolute; left: 50%; top: 57px; transform: translate(-50%, -50%); text-align: center; }
 .progress-value strong { display: block; font-size: 1.38rem; }
