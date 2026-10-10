@@ -19,7 +19,7 @@ export class SurveyPolicy {
     return config;
   }
   assertOpen(config) {
-    if (!config.enabled || this.now() < this.time(config.opensAt) || this.now() > this.time(config.closesAt)) throw new Error('This survey is not open. Saved answers remain available; ask an organizer if you need help.');
+    if (config.archived || config.deleting || !config.enabled || this.now() < this.time(config.opensAt) || this.now() > this.time(config.closesAt)) throw new Error('This survey is not open. Saved answers remain available; ask an organizer if you need help.');
   }
   nextQuestion(config, attempt) {
     if (attempt && attempt.surveyRevision !== config.revision) throw new Error('This survey changed. Ask an organizer to review your saved attempt.');

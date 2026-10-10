@@ -1,8 +1,9 @@
 import { SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js?v=20261005-operational-reset";
 import { ROLE_VIEWS } from './core/permissions.js?v=20261010-surveys';
 import { AuthActionController } from './controllers/AuthActionController.js';
-import { SurveyController } from './controllers/SurveyController.js?v=20261010-survey-ui';
-import { SurveyRepository } from './controllers/SurveyRepository.js';
+import { SurveyController } from './controllers/SurveyController.js?v=20261011-survey-archive';
+import { SurveyRepository } from './controllers/SurveyRepository.js?v=20261011-survey-archive';
+import { SurveyDeletionService } from './controllers/SurveyDeletionService.js';
 import { SurveyLocationService } from './controllers/SurveyLocationService.js?v=20261010-location-retry';
 import { hasPermission } from './core/permissions.js?v=20261010-surveys';
 import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
@@ -665,7 +666,7 @@ async function initialize() {
   if (currentUserRole === 'student' || hasPermission(currentUserRole, 'manageSurveys')) {
     const repository = new SurveyRepository({ db, uid: currentUser.uid, profile: () => currentUserProfile });
     const surveys = new SurveyController({ repository, locationService: new SurveyLocationService({ loadBoundary: eventId => repository.boundary(eventId) }),
-      profile: () => ({ ...currentUserProfile, uid: currentUser.uid }), canManage: hasPermission(currentUserRole, 'manageSurveys'), escapeHtml, openView, showToast: showDashboardToast });
+      profile: () => ({ ...currentUserProfile, uid: currentUser.uid }), canManage: hasPermission(currentUserRole, 'manageSurveys'), escapeHtml, openView, showToast: showDashboardToast, deletionService: new SurveyDeletionService({ repository }) });
     surveys.initialize();
     const disposeDashboard = dashboard.dispose.bind(dashboard);
     dashboard.dispose = () => { surveys.dispose(); disposeDashboard(); };

@@ -90,10 +90,11 @@ async function repositoryHarness() {
     collection: (db, ...parts) => ({ path: parts.join('/') }), serverTimestamp: () => timestamp,
     getDocFromServer: async reference => snapshot(reference), getDocsFromServer: async () => ({ docs: [] }),
     query: (...args) => args, where: (...args) => args, limit: n => n, orderBy: (...args) => args, startAfter: cursor => cursor,
+    writeBatch: () => { const pending = []; return { delete: reference => pending.push(reference.path), commit: async () => pending.forEach(key => documents.delete(key)) }; },
     runTransaction: async (db, action) => {
       const pending = [];
-      const result = await action({ get: async reference => snapshot(reference), set: (reference, data) => pending.push([reference.path, data]), update: (reference, data) => pending.push([reference.path, { ...documents.get(reference.path), ...data }]) });
-      pending.forEach(([key, value]) => { documents.set(key, value); writes.push(key); }); return result;
+      const result = await action({ get: async reference => snapshot(reference), delete: reference => pending.push([reference.path, null]), set: (reference, data) => pending.push([reference.path, data]), update: (reference, data) => pending.push([reference.path, { ...documents.get(reference.path), ...data }]) });
+      pending.forEach(([key, value]) => { if (value === null) documents.delete(key); else documents.set(key, value); writes.push(key); }); return result;
     }
   };
   const remote = new vm.SyntheticModule(Object.keys(sdk), function() { Object.entries(sdk).forEach(([key, value]) => this.setExport(key, value)); }, { context });
@@ -235,4 +236,111 @@ test('survey screens keep concise location notice and move guidance into accessi
   assert.match(controller.workspace.innerHTML, /How it works/); assert.match(controller.workspace.innerHTML, /survey-results-heading">Responses/);
   const css = fs.readFileSync(path.join(root, 'assets/css/dashboard.css'), 'utf8');
   assert.match(css, /event-card-actions > \.badge \{ flex-shrink: 0; white-space: nowrap;/);
+});
+
+test('response search and sorting use IDs/names and historical roster sections without mutating rows', async () => {
+  const { SurveyResponseList } = await moduleAt('SurveyResponseList');
+  const list = new SurveyResponseList();
+  const rows = [{ studentUid: 'a', studentName: 'Zoe', studentId: 'ID-10', status: 'completed', updatedAt: new Date(1000) },
+    { studentUid: 'b', studentName: 'Apollo', studentId: 'ID-2', status: 'needs-review', updatedAt: new Date(2000) }];
+  const event = { attendanceRoster: { a: '2B', b: '2A' } };
+  assert.deepEqual(list.apply(rows, event).map(row => row.studentUid), ['b', 'a']);
+  list.filters.sort = 'id'; assert.deepEqual(list.apply(rows, event).map(row => row.studentId), ['ID-2', 'ID-10']);
+  list.filters.search = 'APOL'; assert.equal(list.apply(rows, event)[0].studentUid, 'b');
+  list.filters.search = ''; list.filters.section = '2B'; assert.equal(list.apply(rows, event)[0].studentUid, 'a');
+  list.filters.status = 'needs-review'; assert.equal(list.apply(rows, event).length, 0);
+  assert.deepEqual(rows.map(row => row.studentUid), ['a', 'b']); assert.equal(list.section(rows[0], {}), 'Unknown');
+});
+
+test('survey action loading blocks repeated clicks and restores failures; toggle requires confirmation', async () => {
+  const { SurveyController } = await moduleAt('SurveyController');
+  let writes = 0, release, resets = 0;
+  const controller = new SurveyController({ repository: { setEnabled: async () => writes++ }, locationService: {},
+    profile: () => ({}), canManage: true, escapeHtml: String, openView() {}, showToast() {}, document: {},
+    window: { location: { href: 'https://school.test/' } } });
+  controller.loading = { start() {}, reset() { resets++; } };
+  const action = controller.runAction({}, 'Refreshing…', () => new Promise(resolve => { release = resolve; }));
+  await controller.runAction({}, 'Refreshing…', () => writes++); assert.equal(writes, 0);
+  release(); await action; assert.equal(controller.busy, false);
+  await assert.rejects(controller.runAction({}, 'Saving…', async () => { throw Error('offline'); }), /offline/);
+  assert.equal(controller.busy, false); assert.equal(resets, 2);
+  controller.visible = true; controller.selectedEvent = { id: 'event' }; controller.config = { enabled: true };
+  controller.confirmation = { open: async () => false }; await controller.toggleSurvey({}); assert.equal(writes, 0);
+  controller.confirmation.open = async () => true; controller.renderAdmin = async () => {};
+  await controller.toggleSurvey({}); assert.equal(writes, 1); assert.equal(controller.config.enabled, false);
+  const css = fs.readFileSync(path.join(root, 'assets/css/survey.css'), 'utf8');
+  assert.match(css, /\.sidebar \.nav-list \{ display:flex; flex-direction:row; flex-wrap:nowrap;/);
+});
+
+test('survey confirmation dialog reuses its instance and settles cancel/cleanup safely', async () => {
+  const { SurveyConfirmationController } = await moduleAt('SurveyConfirmationController');
+  let created = 0, opened = 0, removed = 0;
+  const nodes = new Map(); const get = key => { if (!nodes.has(key)) nodes.set(key, { textContent: '', addEventListener() {}, focus() {} }); return nodes.get(key); };
+  const dialog = { setAttribute() {}, querySelector: get, addEventListener() {}, showModal() { opened++; }, close() {}, remove() { removed++; } };
+  const controller = new SurveyConfirmationController({ document: { createElement() { created++; return dialog; }, body: { append() {} } } });
+  const first = controller.open(false); assert.match(get('p').textContent, /saved progress/);
+  assert.equal(await controller.open(true), false); controller.finish(true); assert.equal(await first, true);
+  const second = controller.open(true); assert.match(get('p').textContent, /deadline will not change/);
+  controller.dispose(); assert.equal(await second, false); assert.equal(created, 1); assert.equal(opened, 2); assert.equal(removed, 1);
+});
+
+test('destructive confirmation requires five elapsed seconds, an explicit click, and clears its timer', async () => {
+  const { SurveyConfirmationController } = await moduleAt('SurveyConfirmationController');
+  let now = 1000, tick, cancelled = 0;
+  const nodes = new Map(); const get = key => { if (!nodes.has(key)) nodes.set(key, { textContent: '', disabled: false, addEventListener() {}, focus() {} }); return nodes.get(key); };
+  const dialog = { setAttribute() {}, querySelector: get, addEventListener() {}, showModal() {}, close() {}, remove() {} };
+  const controller = new SurveyConfirmationController({ document: { createElement: () => dialog, body: { append() {} } }, now: () => now, schedule: fn => { tick = fn; return 1; }, cancelTimer: () => cancelled++ });
+  const pending = controller.open(false, { title: 'Delete?', label: 'Delete permanently', countdown: 5 });
+  assert.equal(get('[data-confirm]').disabled, true); assert.equal(get('[data-confirm]').textContent, 'Wait 5s');
+  controller.finish(true); assert.ok(controller.resolve);
+  now = 5999; tick(); assert.equal(get('[data-confirm]').disabled, true);
+  now = 6000; tick(); assert.equal(get('[data-confirm]').disabled, false); assert.ok(controller.resolve);
+  controller.finish(true); assert.equal(await pending, true); assert.equal(cancelled, 1);
+  const next = controller.open(false, { countdown: 5 }); controller.finish(false); assert.equal(await next, false); assert.equal(cancelled, 2);
+});
+
+test('survey deletion removes every review before its response and supports resuming a partial failure', async () => {
+  const { SurveyDeletionService } = await moduleAt('SurveyDeletionService');
+  const responses = [{ id: 'a', kind: 'response' }, { id: 'b', kind: 'response' }];
+  const reviews = { a: [{ id: 'audit', kind: 'review' }], b: [] }; const order = []; let fail = true;
+  const repository = {
+    beginDeletion: async () => order.push('lock'),
+    deletionPage: async (event, uid) => uid ? reviews[uid] : responses.slice(0, 1),
+    deleteDocuments: async docs => { const record = docs[0]; if (record.kind === 'response' && fail) { fail = false; throw Error('offline'); }
+      order.push(record.kind); if (record.kind === 'review') reviews.a = []; else responses.shift(); },
+    finishDeletion: async () => order.push('parent')
+  };
+  const service = new SurveyDeletionService({ repository });
+  await assert.rejects(service.remove('event'), /offline/); assert.deepEqual(order, ['lock', 'review']);
+  await service.remove('event'); assert.deepEqual(order, ['lock', 'review', 'lock', 'response', 'response', 'parent']);
+});
+
+test('archive policy stops answering and rules gate deletion on archived locked surveys', async () => {
+  const { SurveyPolicy } = await moduleAt('SurveyPolicy');
+  const policy = new SurveyPolicy({ now: () => 5000 });
+  assert.throws(() => policy.assertOpen({ ...config(), archived: true }), /not open/);
+  assert.throws(() => policy.assertOpen({ ...config(), deleting: true }), /not open/);
+  const rules = fs.readFileSync(path.join(root, 'firestore.rules'), 'utf8');
+  assert.match(rules, /allow delete: if canManageSurveys\(\) && surveyIsDeleting\(eventId\)/);
+  assert.match(rules, /return surveyAcceptsWrites\(eventId\) && config.enabled/);
+});
+
+test('archive/restore retains answers and deletion locks reopening before removing only survey metadata', async () => {
+  const { repository, documents } = await repositoryHarness();
+  documents.set('events/event', { name: 'Meeting', hasSurvey: true });
+  documents.set('eventSurveys/event', config());
+  documents.set('eventSurveys/event/responses/student', { answers: { q0: { value: 'Yes' } } });
+  documents.set('attendance/student_event', { present: true });
+  await assert.rejects(repository.beginDeletion('event'), /Only archived/);
+  await repository.setArchived('event', true);
+  assert.equal(documents.get('events/event').surveyArchived, true);
+  await assert.rejects(repository.setEnabled('event', true), /Restore/);
+  assert.ok(documents.get('eventSurveys/event/responses/student').answers.q0);
+  await repository.setArchived('event', false); assert.equal(documents.get('eventSurveys/event').enabled, false);
+  await repository.setArchived('event', true); await repository.beginDeletion('event');
+  await assert.rejects(repository.setArchived('event', false), /deletion already started/);
+  await repository.deleteDocuments([{ ref: { path: 'eventSurveys/event/responses/student' } }]);
+  await repository.finishDeletion('event');
+  assert.equal(documents.has('eventSurveys/event'), false); assert.equal(documents.get('events/event').hasSurvey, false);
+  assert.equal(documents.get('attendance/student_event').present, true);
 });

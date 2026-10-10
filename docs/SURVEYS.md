@@ -29,6 +29,7 @@
 - Location evidence stores method/result, boundary type, accuracy and check time—not raw GPS coordinates. No background location tracking is performed.
 - Attendance and fines are never written by survey classes. No Cloud Functions, Firebase Storage or Blaze upgrade is used.
 - Event listing is bounded to 100 recent events; a direct QR can load an older eligible event. Response browsing loads 25 records per page. Survey screens use explicit refresh instead of permanent Firestore subscriptions.
+- Response management supports name/Student ID search, section/status filters, and latest/name/ID/section sorting of loaded pages. Load more to include older responses. Sections use the event roster; legacy events without a captured section show Unknown. Pause/reopen requires modal confirmation, retains progress and uses a loading state; it does not extend the original window.
 
 ## Security limitations and deployment
 
@@ -43,6 +44,18 @@ Real-phone GPS requires the published HTTPS website. A QR containing `localhost`
 Automated Node tests use mocked Firebase transactions, not a live database. Firestore emulator authorization and real-phone visual/location testing remain required before production release; Java was unavailable in this workspace during implementation.
 
 ## Manual test checklist
+
+## Archive and permanent deletion
+
+Authorized survey managers can archive a survey with confirmation. It disappears from student navigation and stops answer/review-request submissions while preserving responses. The Archive panel supports Restore (paused, original deadline unchanged) or permanent deletion, whether responses exist or not.
+
+Delete permanently requires a five-second countdown followed by an explicit confirmation click. It erases survey questions, responses, progress and review history; the event, attendance and fines remain. Cancellation/Escape stops the confirmation timer. The countdown is a UI safeguard, not a trusted server authorization mechanism. Firestore rules restrict deletion to survey managers and a survey locked in archived/deleting state.
+
+Deletion reads at most 100 child records per page and removes nested review records before responses and the survey parent. A network failure can leave partially deleted data: the durable deleting flag prevents reopening or new submissions; refresh the Archive panel and choose Resume deletion. Once begun, deletion cannot be restored. Keep the page open until completion. No automatic recovery of permanently erased responses is provided.
+
+Publish the updated Firestore rules before using these controls. Test with disposable surveys both with and without responses: cancel before/after the countdown, archive visibility on the student account, restore-paused behavior, complete deletion, and interrupted deletion/resume. No live survey data was deleted during development. Emulator authorization testing remains pending because Java is unavailable.
+
+## General survey tests
 
 1. Publish a two-question start-only survey as each allowed admin role; Student Manager must not see survey management.
 2. Scan QR signed out, sign in, and confirm the correct event opens. Repeat while already signed in. Test on GitHub Pages paths and a Hostinger-style root domain.

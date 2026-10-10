@@ -1,4 +1,4 @@
-import { collection, doc, getDocFromServer, getDocsFromServer, query, where, limit, orderBy, startAfter, runTransaction, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
+import { collection, doc, getDocFromServer, getDocsFromServer, query, where, limit, orderBy, startAfter, runTransaction, serverTimestamp, writeBatch } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { SurveyPolicy } from './SurveyPolicy.js';
 
 export class SurveyRepository {
@@ -11,6 +11,10 @@ export class SurveyRepository {
   }
   async events() {
     const snapshot = await getDocsFromServer(query(collection(this.db, 'events'), orderBy('openAt', 'desc'), limit(100)));
+    return snapshot.docs.map(item => ({ id: item.id, ...item.data() }));
+  }
+  async archivedEvents() {
+    const snapshot = await getDocsFromServer(query(collection(this.db, 'events'), where('surveyArchived', '==', true), limit(100)));
     return snapshot.docs.map(item => ({ id: item.id, ...item.data() }));
   }
   async boundary(eventId) { const snapshot = await getDocFromServer(doc(this.db, 'eventGeofences', eventId)); return snapshot.data(); }
@@ -29,6 +33,7 @@ export class SurveyRepository {
     return runTransaction(this.db, async transaction => {
       const ref = this.configRef(eventId), snapshot = await transaction.get(ref);
       if (!snapshot.exists()) throw new Error('Survey not found.');
+      if (snapshot.data().archived || snapshot.data().deleting) throw new Error('Restore this survey before reopening it.');
       transaction.update(ref, { enabled, updatedAt: serverTimestamp() });
     });
   }
@@ -63,7 +68,7 @@ export class SurveyRepository {
       const configSnapshot = await transaction.get(this.configRef(eventId));
       const ref = this.attemptRef(eventId), snapshot = await transaction.get(ref);
       const config = configSnapshot.data(), previous = snapshot.data();
-      if (!config || previous?.status === 'completed') throw new Error('Review is unavailable for this attempt.');
+      if (!config || config.archived || config.deleting || previous?.status === 'completed') throw new Error('Review is unavailable for this attempt.');
       const stage = this.policy.locationStage(config, previous);
       transaction.set(ref, { ...(previous || { studentUid: this.uid, studentId: this.profile().accountId || '', studentName: [this.profile().firstName, this.profile().lastName].filter(Boolean).join(' '), eventId, surveyRevision: config.revision, answers: {}, answerCount: 0, startedAt: serverTimestamp() }),
         status: 'needs-review', reviewReason: reason.trim(), reviewIssue: issue || 'unavailable', reviewStage: stage || 'other', reviewRequestedAt: serverTimestamp(), updatedAt: serverTimestamp() });
@@ -78,10 +83,46 @@ export class SurveyRepository {
     if (!['approved', 'declined'].includes(decision) || !note?.trim() || note.length > 1000) throw new Error('Choose a decision and provide a reason (1–1000 characters).');
     const auditRef = doc(collection(this.db, 'eventSurveys', eventId, 'responses', uid, 'reviews'));
     return runTransaction(this.db, async transaction => {
+      const config = await transaction.get(this.configRef(eventId));
+      if (config.data()?.deleting) throw new Error('This survey is being deleted.');
       const ref = this.attemptRef(eventId, uid), snapshot = await transaction.get(ref);
       if (snapshot.data()?.status !== 'needs-review') throw new Error('This review request is no longer pending.');
       transaction.update(ref, { reviewDecision: decision, reviewNote: note.trim(), reviewedBy: this.uid, reviewAuditId: auditRef.id, reviewedAt: serverTimestamp(), updatedAt: serverTimestamp(), status: 'in-progress' });
       transaction.set(auditRef, { actorUid: this.uid, decision, note: note.trim(), stage: snapshot.data().reviewStage, requestedAt: snapshot.data().reviewRequestedAt, reviewedAt: serverTimestamp() });
+    });
+  }
+  async setArchived(eventId, archived) {
+    return runTransaction(this.db, async transaction => {
+      const ref = this.configRef(eventId), snapshot = await transaction.get(ref);
+      if (!snapshot.exists() || snapshot.data().deleting) throw new Error('Survey unavailable or deletion already started.');
+      transaction.update(ref, { archived, enabled: false, updatedAt: serverTimestamp() });
+      transaction.update(doc(this.db, 'events', eventId), { surveyArchived: archived, updatedAt: serverTimestamp() });
+    });
+  }
+  async beginDeletion(eventId) {
+    return runTransaction(this.db, async transaction => {
+      const ref = this.configRef(eventId), snapshot = await transaction.get(ref);
+      if (!snapshot.exists() || !snapshot.data().archived) throw new Error('Only archived surveys can be permanently deleted.');
+      transaction.update(ref, { deleting: true, enabled: false, updatedAt: serverTimestamp() });
+    });
+  }
+  async deletionPage(eventId, uid) {
+    const parts = ['eventSurveys', eventId, 'responses', ...(uid ? [uid, 'reviews'] : [])];
+    const snapshot = await getDocsFromServer(query(collection(this.db, ...parts), limit(100)));
+    return snapshot.docs;
+  }
+  async deleteDocuments(documents) {
+    if (!documents.length) return;
+    const batch = writeBatch(this.db);
+    documents.forEach(snapshot => batch.delete(snapshot.ref));
+    await batch.commit();
+  }
+  async finishDeletion(eventId) {
+    return runTransaction(this.db, async transaction => {
+      const ref = this.configRef(eventId), snapshot = await transaction.get(ref);
+      if (!snapshot.data()?.deleting) throw new Error('Survey deletion has not started.');
+      transaction.delete(ref);
+      transaction.update(doc(this.db, 'events', eventId), { hasSurvey: false, surveyArchived: false, updatedAt: serverTimestamp() });
     });
   }
 }

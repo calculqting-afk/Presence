@@ -116,7 +116,7 @@ service cloud.firestore {
       return data.keys().hasOnly([
           "name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff",
           "audience", "description", "notes", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt",
-          "checkOutClosesAt", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt", "hasSurvey"
+          "checkOutClosesAt", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt", "hasSurvey", "surveyArchived"
         ])
         && data.keys().hasAll(["name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "audience", "description", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt"])
         && shortText(data.name, 160) && shortText(data.type, 60) && shortText(data.date, 10)
@@ -126,6 +126,7 @@ service cloud.firestore {
         && shortText(data.description, 4000) && optionalShortText(data, "notes", 4000)
         && data.requiresGeofence is bool
         && (!("hasSurvey" in data) || data.hasSurvey is bool)
+        && (!("surveyArchived" in data) || data.surveyArchived is bool)
         && (("attendanceRoster" in data) == ("rosterCapturedAt" in data))
         && (!("attendanceRoster" in data) || (data.attendanceRoster is map
           && data.attendanceRoster.keys().size() <= 5000 && data.rosterCapturedAt is timestamp))
@@ -459,9 +460,13 @@ service cloud.firestore {
         && (questions.size() <= 19 || validSurveyQuestion(questions[19], 19));
     }
     function validSurveyConfig(data, eventId) {
-      return data.keys().hasOnly(["eventId", "enabled", "revision", "locationMode", "questions", "opensAt", "closesAt", "createdAt", "createdBy", "updatedAt"])
+      return data.keys().hasOnly(["eventId", "enabled", "revision", "locationMode", "questions", "opensAt", "closesAt", "createdAt", "createdBy", "updatedAt", "archived", "deleting"])
         && data.keys().hasAll(["eventId", "enabled", "revision", "locationMode", "questions", "opensAt", "closesAt", "createdAt", "createdBy", "updatedAt"])
         && data.eventId == eventId && data.enabled is bool && data.revision == 1
+        && (!("archived" in data) || data.archived is bool)
+        && (!("deleting" in data) || data.deleting is bool)
+        && (!("archived" in data) || !data.archived || !data.enabled)
+        && (!("deleting" in data) || !data.deleting || (data.archived == true && !data.enabled))
         && data.locationMode in ["start-only", "start-finish"]
         && data.opensAt is timestamp && data.closesAt is timestamp && data.opensAt < data.closesAt
         && data.createdAt is timestamp && data.createdBy is string && data.updatedAt == request.time
@@ -506,7 +511,7 @@ service cloud.firestore {
       let question = config.questions[index];
       let answer = data.answers[question.id];
       let finalAnswer = data.answerCount == config.questions.size();
-      return config.enabled == true && request.time >= config.opensAt && request.time <= config.closesAt
+      return surveyAcceptsWrites(eventId) && config.enabled == true && request.time >= config.opensAt && request.time <= config.closesAt
         && (previous == null || previous.status != "needs-review")
         && data.answerCount == index + 1
         && data.status == (finalAnswer ? "completed" : "in-progress")
@@ -530,7 +535,7 @@ service cloud.firestore {
       let config = get(/databases/$(database)/documents/eventSurveys/$(eventId)).data;
       let count = previous == null ? 0 : previous.answerCount;
       let stage = count == 0 ? "start" : (config.locationMode == "start-finish" && count == config.questions.size() - 1 ? "finish" : "other");
-      return count < config.questions.size() && data.answerCount == count && data.status == "needs-review"
+      return surveyAcceptsWrites(eventId) && count < config.questions.size() && data.answerCount == count && data.status == "needs-review"
         && data.keys().hasAll(["reviewReason", "reviewIssue", "reviewStage", "reviewRequestedAt"])
         && shortText(data.reviewReason, 1000) && data.reviewReason.size() > 0
         && data.reviewIssue in ["outside", "unavailable"] && data.reviewStage == stage && data.reviewRequestedAt == request.time
@@ -540,6 +545,14 @@ service cloud.firestore {
           : data.diff(previous).affectedKeys().hasOnly(["status", "reviewReason", "reviewIssue", "reviewStage", "reviewRequestedAt", "updatedAt"]));
     }
 
+    function surveyAcceptsWrites(eventId) {
+      let config = get(/databases/$(database)/documents/eventSurveys/$(eventId)).data;
+      return (!("archived" in config) || !config.archived) && (!("deleting" in config) || !config.deleting);
+    }
+    function surveyIsDeleting(eventId) {
+      let config = get(/databases/$(database)/documents/eventSurveys/$(eventId)).data;
+      return config.keys().hasAll(["archived", "deleting"]) && config.archived == true && config.deleting == true && config.enabled == false;
+    }
     match /eventSurveys/{eventId} {
       allow get: if canReadSurvey(eventId);
       allow list: if canManageSurveys();
@@ -550,8 +563,9 @@ service cloud.firestore {
         && validSurveyConfig(request.resource.data, eventId)
         && request.resource.data.createdAt == request.time && request.resource.data.createdBy == request.auth.uid;
       allow update: if canManageSurveys() && validSurveyConfig(request.resource.data, eventId)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["enabled", "updatedAt"]);
-      allow delete: if false;
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["enabled", "updatedAt", "archived", "deleting"])
+        && (!("deleting" in resource.data) || !resource.data.deleting || request.resource.data.deleting == true);
+      allow delete: if canManageSurveys() && surveyIsDeleting(eventId);
 
       match /responses/{uid} {
         allow get: if canManageSurveys() || (canReadSurvey(eventId) && request.auth.uid == uid);
@@ -565,7 +579,7 @@ service cloud.firestore {
             && resource.data.status != "completed"
             && validSurveyResponse(request.resource.data, eventId, uid)
             && (validSurveyReviewRequest(eventId, request.resource.data, resource.data) || validSurveyAnswer(eventId, request.resource.data, resource.data)))
-          || (canManageSurveys() && resource.data.status == "needs-review"
+          || (canManageSurveys() && !surveyIsDeleting(eventId) && resource.data.status == "needs-review"
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["reviewDecision", "reviewNote", "reviewedBy", "reviewedAt", "reviewAuditId", "updatedAt", "status"])
             && request.resource.data.reviewDecision in ["approved", "declined"]
             && shortText(request.resource.data.reviewNote, 1000) && request.resource.data.reviewNote.size() > 0
@@ -574,10 +588,10 @@ service cloud.firestore {
             && shortText(request.resource.data.reviewAuditId, 128) && request.resource.data.reviewAuditId.size() > 0
             && getAfter(/databases/$(database)/documents/eventSurveys/$(eventId)/responses/$(uid)/reviews/$(request.resource.data.reviewAuditId)).data.actorUid == request.auth.uid
             && getAfter(/databases/$(database)/documents/eventSurveys/$(eventId)/responses/$(uid)/reviews/$(request.resource.data.reviewAuditId)).data.reviewedAt == request.time);
-        allow delete: if false;
+        allow delete: if canManageSurveys() && surveyIsDeleting(eventId);
         match /reviews/{reviewId} {
           allow read: if canManageSurveys();
-          allow create: if canManageSurveys()
+          allow create: if canManageSurveys() && !surveyIsDeleting(eventId)
             && request.resource.data.keys().hasOnly(["actorUid", "decision", "note", "stage", "requestedAt", "reviewedAt"])
             && request.resource.data.actorUid == request.auth.uid
             && request.resource.data.reviewedAt == request.time
@@ -591,7 +605,8 @@ service cloud.firestore {
             && getAfter(/databases/$(database)/documents/eventSurveys/$(eventId)/responses/$(uid)).data.reviewNote == request.resource.data.note
             && getAfter(/databases/$(database)/documents/eventSurveys/$(eventId)/responses/$(uid)).data.reviewStage == request.resource.data.stage
             && getAfter(/databases/$(database)/documents/eventSurveys/$(eventId)/responses/$(uid)).data.reviewRequestedAt == request.resource.data.requestedAt;
-          allow update, delete: if false;
+          allow update: if false;
+          allow delete: if canManageSurveys() && surveyIsDeleting(eventId);
         }
       }
     }
