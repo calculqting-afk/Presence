@@ -345,6 +345,9 @@ function renderView(viewName) {
   document.querySelectorAll("[data-section]").forEach((section) => { section.hidden = section.dataset.section !== viewName; });
   const copy = pageCopy[dashboardRole][viewName];
   if (copy) [document.querySelector("#pageTitle").textContent, document.querySelector("#pageSubtitle").textContent] = copy;
+  if (viewName === 'modify-students' && currentUserRole === 'student_manager') {
+    document.querySelector('#pageSubtitle').textContent = 'Manage student details and face registration';
+  }
   window.dispatchEvent(new CustomEvent("presence:viewchange", { detail: { viewName } }));
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -647,8 +650,8 @@ async function initialize() {
     : "Student";
   updateDashboardGreeting(displayName);
   const module = dashboardRole === "student"
-    ? await import("./student/StudentDashboard.js?v=20261010-auth-progress")
-    : await import("./admin/AdminDashboard.js?v=20261010-auth-progress");
+    ? await import("./student/StudentDashboard.js?v=20261010-role-actions")
+    : await import("./admin/AdminDashboard.js?v=20261010-role-actions");
   const Dashboard = dashboardRole === "student" ? module.StudentDashboard : module.AdminDashboard;
   const dashboard = new Dashboard();
   sessionState.dashboard = dashboard;

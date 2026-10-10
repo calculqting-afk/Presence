@@ -6,6 +6,26 @@ const vm = require('node:vm');
 const { pathToFileURL } = require('node:url');
 
 const root = path.resolve(__dirname, '..');
+test('student action presentation omits forbidden controls for every role and profile layout', async () => {
+  const { StudentActionsPresenter } = await isolatedModule('assets/js/controllers/StudentActionsPresenter.js');
+  const { hasPermission } = await isolatedModule('assets/js/core/permissions.js');
+  for (const role of ['super_admin', 'head_admin', 'attendance_admin', 'student_manager', 'unknown']) {
+    const presenter = new StudentActionsPresenter({ can: action => hasPermission(role, action), escapeHtml: value => String(value).replaceAll('"', '&quot;') });
+    for (const profile of [false, true]) {
+      const html = presenter.render({ uid: 'student"1', hasFaceRegistration: true, profile });
+      assert.equal(html.includes('data-password-student'), hasPermission(role, 'changePasswords'), role);
+      assert.equal(html.includes('data-delete-student'), hasPermission(role, 'deleteStudents'), role);
+      assert.equal(html.includes('data-reset-face'), hasPermission(role, 'resetFace'), role);
+      assert.equal(html.includes(profile ? 'data-edit-student' : 'data-view-student'), hasPermission(role, profile ? 'editStudents' : 'viewStudents'), role);
+      if (html) assert.ok(html.includes('student&quot;1'));
+      assert.ok(!presenter.render({ uid: 'student', hasFaceRegistration: false, profile }).includes('data-reset-face'));
+    }
+  }
+  const admin = fs.readFileSync(path.join(root, 'assets/js/admin/AdminDashboard.js'), 'utf8');
+  assert.equal((admin.match(/studentActions.render\(/g) || []).length, 2);
+  assert.match(fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8'), /Manage student details and face registration/);
+});
+
 test('authentication progress blocks duplicates, restores failures and remains locked for redirect', async () => {
   const { AuthActionController } = await isolatedModule('assets/js/controllers/AuthActionController.js', {}, { document: undefined });
   const controller = new AuthActionController();
@@ -517,7 +537,7 @@ for (const role of ['Student', 'Admin']) {
 test('dashboard entry points use the same shared-module version', () => {
   for (const role of ['student', 'admin']) {
     const html = fs.readFileSync(path.join(root, `pages/${role}-dashboard.html`), 'utf8');
-    assert.ok(html.includes('dashboard.js?v=20261010-auth-progress'));
+    assert.ok(html.includes('dashboard.js?v=20261010-role-actions'));
   }
 });
 
