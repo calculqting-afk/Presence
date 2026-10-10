@@ -1,6 +1,10 @@
 import { SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js?v=20261005-operational-reset";
-import { ROLE_VIEWS } from './core/permissions.js';
+import { ROLE_VIEWS } from './core/permissions.js?v=20261010-surveys';
 import { AuthActionController } from './controllers/AuthActionController.js';
+import { SurveyController } from './controllers/SurveyController.js?v=20261010-survey-ui';
+import { SurveyRepository } from './controllers/SurveyRepository.js';
+import { SurveyLocationService } from './controllers/SurveyLocationService.js?v=20261010-location-retry';
+import { hasPermission } from './core/permissions.js?v=20261010-surveys';
 import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
   Timestamp,
@@ -30,6 +34,7 @@ const pageCopy = {
     events: ["Announcements & Events", "Clear descriptions and attendance schedules"],
     attendances: ["My Attendances", "Your check-in and check-out records"],
     history: ["Event History", "Completed events and attendance records"],
+    surveys: ["My Surveys", "Answer and resume your event surveys"],
     fines: ["Fines", "Your assigned community-service requirements"],
     face: ["Face Registration", "Set up secure attendance check-ins"],
     profile: ["Profile", "Review and update your information"]
@@ -45,6 +50,7 @@ const pageCopy = {
     "assign-fine": ["Assign Fine", "Create or update community-service requirements"],
     "assigned-fines": ["Assigned Fines", "Search and manage student fine records"],
     geofence: ["Geofence Locations", "Set attendance areas for each event"],
+    surveys: ["Event Surveys", "Configure questions, share QR links and review responses"],
     profile: ["Profile", "Update your administrator information"]
   }
 };
@@ -650,12 +656,26 @@ async function initialize() {
     : "Student";
   updateDashboardGreeting(displayName);
   const module = dashboardRole === "student"
-    ? await import("./student/StudentDashboard.js?v=20261010-role-actions")
-    : await import("./admin/AdminDashboard.js?v=20261010-role-actions");
+    ? await import("./student/StudentDashboard.js?v=20261010-surveys")
+    : await import("./admin/AdminDashboard.js?v=20261010-surveys");
   const Dashboard = dashboardRole === "student" ? module.StudentDashboard : module.AdminDashboard;
   const dashboard = new Dashboard();
   sessionState.dashboard = dashboard;
   dashboard.initialize();
+  if (currentUserRole === 'student' || hasPermission(currentUserRole, 'manageSurveys')) {
+    const repository = new SurveyRepository({ db, uid: currentUser.uid, profile: () => currentUserProfile });
+    const surveys = new SurveyController({ repository, locationService: new SurveyLocationService({ loadBoundary: eventId => repository.boundary(eventId) }),
+      profile: () => ({ ...currentUserProfile, uid: currentUser.uid }), canManage: hasPermission(currentUserRole, 'manageSurveys'), escapeHtml, openView, showToast: showDashboardToast });
+    surveys.initialize();
+    const disposeDashboard = dashboard.dispose.bind(dashboard);
+    dashboard.dispose = () => { surveys.dispose(); disposeDashboard(); };
+    if (surveys.pendingEventId) {
+      initializeDashboardHistory();
+      openView('surveys');
+      window.addEventListener('beforeunload', () => dashboard.dispose(), { once: true });
+      return;
+    }
+  }
   window.addEventListener('beforeunload', () => dashboard.dispose(), { once: true });
   initializeDashboardHistory();
 }

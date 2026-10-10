@@ -4,7 +4,7 @@ const { spawnSync } = require('node:child_process');
 function files(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]);
 }
-const scripts = [...files('assets/js'), ...files('config'), 'functions/index.js', 'functions/recover-student-password.cjs'];
+const scripts = [...files('assets/js'), ...files('assets/vendor'), ...files('config'), 'functions/index.js', 'functions/recover-student-password.cjs'];
 let failed = false;
 for (const file of scripts.filter(file => /\.(?:js|cjs)$/.test(file))) {
   const result = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });

@@ -3,11 +3,14 @@ import {
   browserLocalPersistence,
   browserSessionPersistence,
   setPersistence,
+  onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 import { AuthActionController } from './controllers/AuthActionController.js';
+import { SurveyLinkService } from './controllers/SurveyLinkService.js';
+import { SurveyEntryController } from './controllers/SurveyEntryController.js';
 
 const form = document.querySelector("#loginForm");
 const accountInput = document.querySelector("#accountId");
@@ -23,6 +26,16 @@ const helpDialog = document.querySelector("#helpDialog");
 let toastTimer;
 const loginAction = new AuthActionController();
 window.addEventListener('pagehide', () => loginAction.dispose(), { once: true });
+const surveyEntry = new SurveyEntryController({ auth, subscribe: onAuthStateChanged, isLoginBusy: () => loginAction.busy,
+  resolveRole: async user => {
+    if (user.email?.toLowerCase() === SUPER_ADMIN_EMAIL) return 'admin';
+    const snapshot = await getDoc(doc(db, 'students', user.uid));
+    const profile = snapshot.data();
+    if (!snapshot.exists() || profile.active !== true) return null;
+    return ['head_admin', 'attendance_admin', 'student_manager'].includes(profile.role) ? 'admin' : 'student';
+  } });
+surveyEntry.initialize();
+window.addEventListener('pagehide', () => surveyEntry.dispose(), { once: true });
 
 function setFieldError(input, errorElement, message = "") {
   input.closest(".input-wrap").classList.toggle("invalid", Boolean(message));
@@ -91,7 +104,9 @@ form.addEventListener("submit", async (event) => {
         }));
         showToast(role === "admin" ? "Admin access verified" : "Welcome to Presence", "Your account was verified successfully.");
         window.setTimeout(() => {
-          window.location.href = role === "admin" ? "pages/admin-dashboard.html" : "pages/student-dashboard.html";
+          const surveyId = new SurveyLinkService({ href: window.location.href }).eventId();
+          const destination = role === "admin" ? "pages/admin-dashboard.html" : "pages/student-dashboard.html";
+          window.location.href = destination + (surveyId ? `?survey=${encodeURIComponent(surveyId)}` : '');
         }, 450);
       } catch (error) {
         const permissionDenied = error.code === "permission-denied"

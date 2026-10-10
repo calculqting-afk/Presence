@@ -116,7 +116,7 @@ service cloud.firestore {
       return data.keys().hasOnly([
           "name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff",
           "audience", "description", "notes", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt",
-          "checkOutClosesAt", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt"
+          "checkOutClosesAt", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt", "hasSurvey"
         ])
         && data.keys().hasAll(["name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "audience", "description", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt"])
         && shortText(data.name, 160) && shortText(data.type, 60) && shortText(data.date, 10)
@@ -125,6 +125,7 @@ service cloud.firestore {
         && data.audience in ["All students", "Section 1A", "Section 1B", "Section 2A", "Section 2B", "Section 3A", "Section 3B", "Section 4A", "Section 4B"]
         && shortText(data.description, 4000) && optionalShortText(data, "notes", 4000)
         && data.requiresGeofence is bool
+        && (!("hasSurvey" in data) || data.hasSurvey is bool)
         && (("attendanceRoster" in data) == ("rosterCapturedAt" in data))
         && (!("attendanceRoster" in data) || (data.attendanceRoster is map
           && data.attendanceRoster.keys().size() <= 5000 && data.rosterCapturedAt is timestamp))
@@ -407,6 +408,192 @@ service cloud.firestore {
       // Deletion is deliberately stricter than event editing. This protects
       // the operational-data reset from being triggered by other admin roles.
       allow delete: if isSuperAdmin();
+    }
+
+
+    // Surveys never write attendance/fines. Browser GPS evidence is not trusted GPS.
+    function canManageSurveys() {
+      return isSuperAdmin() || isHeadAdmin() || isAttendanceAdmin();
+    }
+    function canReadSurvey(eventId) {
+      return canManageSurveys() || (isSurveyStudent() && studentCanReadEventGeofence(eventId));
+    }
+    function isSurveyStudent() {
+      let profile = get(/databases/$(database)/documents/students/$(request.auth.uid)).data;
+      return isStudent() && (!("role" in profile) || profile.role in ["student", "viewer"]);
+    }
+    function validSurveyChoices(choices) {
+      // Authorized editors validate every choice in SurveyPolicy. Keep config
+      // checks bounded for 20 agendas; submitted values must be strings in choices.
+      return choices is list && choices.size() <= 8 && choices.toSet().size() == choices.size();
+    }
+    function validSurveyQuestion(question, index) {
+      return question is map
+        && question.id == "q" + string(index)
+        && shortText(question.text, 500) && question.text.size() > 0
+        && question.type in ["choice", "text"]
+        && validSurveyChoices(question.choices)
+        && (question.type == "text" ? question.choices.size() == 0 : question.choices.size() >= 2);
+    }
+    function validSurveyQuestions(questions) {
+      return questions is list && questions.size() >= 1 && questions.size() <= 20
+        && (questions.size() <= 0 || validSurveyQuestion(questions[0], 0))
+        && (questions.size() <= 1 || validSurveyQuestion(questions[1], 1))
+        && (questions.size() <= 2 || validSurveyQuestion(questions[2], 2))
+        && (questions.size() <= 3 || validSurveyQuestion(questions[3], 3))
+        && (questions.size() <= 4 || validSurveyQuestion(questions[4], 4))
+        && (questions.size() <= 5 || validSurveyQuestion(questions[5], 5))
+        && (questions.size() <= 6 || validSurveyQuestion(questions[6], 6))
+        && (questions.size() <= 7 || validSurveyQuestion(questions[7], 7))
+        && (questions.size() <= 8 || validSurveyQuestion(questions[8], 8))
+        && (questions.size() <= 9 || validSurveyQuestion(questions[9], 9))
+        && (questions.size() <= 10 || validSurveyQuestion(questions[10], 10))
+        && (questions.size() <= 11 || validSurveyQuestion(questions[11], 11))
+        && (questions.size() <= 12 || validSurveyQuestion(questions[12], 12))
+        && (questions.size() <= 13 || validSurveyQuestion(questions[13], 13))
+        && (questions.size() <= 14 || validSurveyQuestion(questions[14], 14))
+        && (questions.size() <= 15 || validSurveyQuestion(questions[15], 15))
+        && (questions.size() <= 16 || validSurveyQuestion(questions[16], 16))
+        && (questions.size() <= 17 || validSurveyQuestion(questions[17], 17))
+        && (questions.size() <= 18 || validSurveyQuestion(questions[18], 18))
+        && (questions.size() <= 19 || validSurveyQuestion(questions[19], 19));
+    }
+    function validSurveyConfig(data, eventId) {
+      return data.keys().hasOnly(["eventId", "enabled", "revision", "locationMode", "questions", "opensAt", "closesAt", "createdAt", "createdBy", "updatedAt"])
+        && data.keys().hasAll(["eventId", "enabled", "revision", "locationMode", "questions", "opensAt", "closesAt", "createdAt", "createdBy", "updatedAt"])
+        && data.eventId == eventId && data.enabled is bool && data.revision == 1
+        && data.locationMode in ["start-only", "start-finish"]
+        && data.opensAt is timestamp && data.closesAt is timestamp && data.opensAt < data.closesAt
+        && data.createdAt is timestamp && data.createdBy is string && data.updatedAt == request.time
+        && validSurveyQuestions(data.questions);
+    }
+    function validSurveyResponse(data, eventId, uid) {
+      return data.keys().hasOnly(["studentUid", "studentId", "studentName", "eventId", "surveyRevision", "answers", "answerCount", "status", "startedAt", "updatedAt",
+          "startEvidence", "finishEvidence", "reviewReason", "reviewIssue", "reviewStage", "reviewRequestedAt",
+          "reviewDecision", "reviewNote", "reviewedBy", "reviewedAt", "reviewAuditId"])
+        && data.keys().hasAll(["studentUid", "studentId", "studentName", "eventId", "surveyRevision", "answers", "answerCount", "status", "startedAt", "updatedAt"])
+        && shortText(data.studentId, 64)
+        && shortText(data.studentName, 200)
+        && data.studentUid == uid && data.eventId == eventId
+        && data.surveyRevision == get(/databases/$(database)/documents/eventSurveys/$(eventId)).data.revision
+        && data.answers is map && data.answerCount is int && data.answerCount >= 0 && data.answerCount <= 20
+        && data.answers.size() == data.answerCount
+        && data.status in ["in-progress", "completed", "needs-review"]
+        && data.startedAt is timestamp && data.updatedAt == request.time;
+    }
+    function validSurveyEvidence(evidence) {
+      return evidence is map && evidence.keys().hasOnly(["result", "method", "accuracy", "boundaryType", "checkedAt"])
+        && evidence.keys().hasAll(["result", "method", "accuracy", "boundaryType", "checkedAt"])
+        && evidence.result in ["inside", "reviewed"] && evidence.method == "browser"
+        && evidence.boundaryType in ["circle", "polygon", "review"]
+        && evidence.accuracy is number && evidence.accuracy >= 0 && evidence.accuracy <= 50
+        && evidence.checkedAt == request.time;
+    }
+    function approvedSurveyReview(previous, stage) {
+      return previous != null && previous.keys().hasAll(["reviewDecision", "reviewStage", "reviewedAt", "reviewRequestedAt"])
+        && previous.reviewDecision == "approved" && previous.reviewStage == stage
+        && previous.reviewedAt >= previous.reviewRequestedAt;
+    }
+    function validSurveyStage(evidence, previous, stage) {
+      return validSurveyEvidence(evidence)
+        && (evidence.result == "inside"
+          ? evidence.boundaryType in ["circle", "polygon"]
+          : (evidence.boundaryType == "review" && approvedSurveyReview(previous, stage)));
+    }
+    function validSurveyAnswer(eventId, data, previous) {
+      let config = get(/databases/$(database)/documents/eventSurveys/$(eventId)).data;
+      let index = previous == null ? 0 : previous.answerCount;
+      let question = config.questions[index];
+      let answer = data.answers[question.id];
+      let finalAnswer = data.answerCount == config.questions.size();
+      return config.enabled == true && request.time >= config.opensAt && request.time <= config.closesAt
+        && (previous == null || previous.status != "needs-review")
+        && data.answerCount == index + 1
+        && data.status == (finalAnswer ? "completed" : "in-progress")
+        && answer is map && answer.keys().hasOnly(["value", "answeredAt"]) && answer.keys().hasAll(["value", "answeredAt"])
+        && shortText(answer.value, 1000) && answer.value.size() > 0 && answer.answeredAt == request.time
+        && (question.type == "text" || answer.value in question.choices)
+        && (previous == null
+          ? (data.startedAt == request.time && data.answers.keys().hasOnly([question.id])
+            && data.keys().hasOnly(["studentUid", "studentId", "studentName", "eventId", "surveyRevision", "answers", "answerCount", "status", "startedAt", "updatedAt", "startEvidence", "finishEvidence"]))
+          : (data.diff(previous).affectedKeys().hasOnly(["answers", "answerCount", "status", "updatedAt", "startEvidence", "finishEvidence"])
+            && data.answers.diff(previous.answers).affectedKeys().hasOnly([question.id])))
+        && (index == 0
+          ? (data.keys().hasAll(["startEvidence"]) && validSurveyStage(data.startEvidence, previous, "start"))
+          : data.startEvidence == previous.startEvidence)
+        && (finalAnswer && config.locationMode == "start-finish"
+          ? (data.keys().hasAll(["finishEvidence"])
+            && (index == 0 ? data.finishEvidence == data.startEvidence : validSurveyStage(data.finishEvidence, previous, "finish")))
+          : !("finishEvidence" in data));
+    }
+    function validSurveyReviewRequest(eventId, data, previous) {
+      let config = get(/databases/$(database)/documents/eventSurveys/$(eventId)).data;
+      let count = previous == null ? 0 : previous.answerCount;
+      let stage = count == 0 ? "start" : (config.locationMode == "start-finish" && count == config.questions.size() - 1 ? "finish" : "other");
+      return count < config.questions.size() && data.answerCount == count && data.status == "needs-review"
+        && data.keys().hasAll(["reviewReason", "reviewIssue", "reviewStage", "reviewRequestedAt"])
+        && shortText(data.reviewReason, 1000) && data.reviewReason.size() > 0
+        && data.reviewIssue in ["outside", "unavailable"] && data.reviewStage == stage && data.reviewRequestedAt == request.time
+        && (previous == null
+          ? (data.startedAt == request.time && data.answers.size() == 0
+            && data.keys().hasOnly(["studentUid", "studentId", "studentName", "eventId", "surveyRevision", "answers", "answerCount", "status", "startedAt", "updatedAt", "reviewReason", "reviewIssue", "reviewStage", "reviewRequestedAt"]))
+          : data.diff(previous).affectedKeys().hasOnly(["status", "reviewReason", "reviewIssue", "reviewStage", "reviewRequestedAt", "updatedAt"]));
+    }
+
+    match /eventSurveys/{eventId} {
+      allow get: if canReadSurvey(eventId);
+      allow list: if canManageSurveys();
+      allow create: if canManageSurveys()
+        && exists(/databases/$(database)/documents/events/$(eventId))
+        && exists(/databases/$(database)/documents/eventGeofences/$(eventId))
+        && get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.enabled == true
+        && validSurveyConfig(request.resource.data, eventId)
+        && request.resource.data.createdAt == request.time && request.resource.data.createdBy == request.auth.uid;
+      allow update: if canManageSurveys() && validSurveyConfig(request.resource.data, eventId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["enabled", "updatedAt"]);
+      allow delete: if false;
+
+      match /responses/{uid} {
+        allow get: if canManageSurveys() || (canReadSurvey(eventId) && request.auth.uid == uid);
+        allow list: if canManageSurveys();
+        allow create: if signedIn() && isSurveyStudent() && request.auth.uid == uid && studentCanReadEventGeofence(eventId)
+          && request.resource.data.studentId == get(/databases/$(database)/documents/students/$(uid)).data.accountId
+          && validSurveyResponse(request.resource.data, eventId, uid)
+          && (validSurveyReviewRequest(eventId, request.resource.data, null) || validSurveyAnswer(eventId, request.resource.data, null));
+        allow update: if
+          (signedIn() && isSurveyStudent() && request.auth.uid == uid && studentCanReadEventGeofence(eventId)
+            && resource.data.status != "completed"
+            && validSurveyResponse(request.resource.data, eventId, uid)
+            && (validSurveyReviewRequest(eventId, request.resource.data, resource.data) || validSurveyAnswer(eventId, request.resource.data, resource.data)))
+          || (canManageSurveys() && resource.data.status == "needs-review"
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["reviewDecision", "reviewNote", "reviewedBy", "reviewedAt", "reviewAuditId", "updatedAt", "status"])
+            && request.resource.data.reviewDecision in ["approved", "declined"]
+            && shortText(request.resource.data.reviewNote, 1000) && request.resource.data.reviewNote.size() > 0
+            && request.resource.data.reviewedBy == request.auth.uid && request.resource.data.reviewedAt == request.time
+            && request.resource.data.updatedAt == request.time && request.resource.data.status == "in-progress"
+            && shortText(request.resource.data.reviewAuditId, 128) && request.resource.data.reviewAuditId.size() > 0
+            && getAfter(/databases/$(database)/documents/eventSurveys/$(eventId)/responses/$(uid)/reviews/$(request.resource.data.reviewAuditId)).data.actorUid == request.auth.uid
+            && getAfter(/databases/$(database)/documents/eventSurveys/$(eventId)/responses/$(uid)/reviews/$(request.resource.data.reviewAuditId)).data.reviewedAt == request.time);
+        allow delete: if false;
+        match /reviews/{reviewId} {
+          allow read: if canManageSurveys();
+          allow create: if canManageSurveys()
+            && request.resource.data.keys().hasOnly(["actorUid", "decision", "note", "stage", "requestedAt", "reviewedAt"])
+            && request.resource.data.actorUid == request.auth.uid
+            && request.resource.data.reviewedAt == request.time
+            && request.resource.data.decision in ["approved", "declined"]
+            && shortText(request.resource.data.note, 1000) && request.resource.data.note.size() > 0
+            && request.resource.data.stage in ["start", "finish", "other"]
+            && request.resource.data.requestedAt is timestamp
+            && getAfter(/databases/$(database)/documents/eventSurveys/$(eventId)/responses/$(uid)).data.reviewedBy == request.auth.uid
+            && getAfter(/databases/$(database)/documents/eventSurveys/$(eventId)/responses/$(uid)).data.reviewedAt == request.time
+            && getAfter(/databases/$(database)/documents/eventSurveys/$(eventId)/responses/$(uid)).data.reviewDecision == request.resource.data.decision
+            && getAfter(/databases/$(database)/documents/eventSurveys/$(eventId)/responses/$(uid)).data.reviewNote == request.resource.data.note
+            && getAfter(/databases/$(database)/documents/eventSurveys/$(eventId)/responses/$(uid)).data.reviewStage == request.resource.data.stage
+            && getAfter(/databases/$(database)/documents/eventSurveys/$(eventId)/responses/$(uid)).data.reviewRequestedAt == request.resource.data.requestedAt;
+          allow update, delete: if false;
+        }
+      }
     }
 
     match /attendance/{attendanceId} {

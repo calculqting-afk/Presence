@@ -16,14 +16,15 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261010-auth-progress">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261010-survey-ui">
   <link rel="stylesheet" href="../assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/button-loading.css?v=20261010-auth-progress">
+  <link rel="stylesheet" href="../assets/css/survey.css?v=20261010-survey-ui">
 </head>
 <body data-dashboard="student">
   <div class="app-shell">
-    <aside class="sidebar" style="--nav-count: 8">
+    <aside class="sidebar" style="--nav-count: 9">
       <a class="brand" href="../index.html" data-dashboard-home><span class="brand-mark"><span></span></span><span>Presence</span></a>
       <p class="nav-label">Student space</p>
       <nav class="nav-list" aria-label="Student navigation">
@@ -34,6 +35,7 @@
         <button class="nav-button" data-view="fines" type="button"><span class="nav-icon">!</span><span>Fines</span><span class="fine-warning-indicator" id="studentFineWarning" role="status" aria-label="Pending community service" hidden>!!</span></button>
         <button class="nav-button" data-view="face" type="button"><span class="nav-icon">◎</span><span>Face Registration</span></button>
         <button class="nav-button" data-view="profile" type="button"><span class="nav-icon">○</span><span>Profile</span></button>
+        <button class="nav-button" data-view="surveys" type="button"><span class="nav-icon">▤</span><span>Surveys</span></button>
         <button class="nav-button logout-button" data-logout type="button"><span class="nav-icon">↙</span><span>Logout</span></button>
       </nav>
       <div class="sidebar-spacer"></div>
@@ -175,6 +177,6 @@
     </section>
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
-  <script type="module" src="../assets/js/dashboard.js?v=20261010-role-actions"></script>
+  <script type="module" src="../assets/js/dashboard.js?v=20261010-surveys"></script>
 </body>
 </html>

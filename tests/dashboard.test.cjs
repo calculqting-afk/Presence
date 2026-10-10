@@ -537,7 +537,7 @@ for (const role of ['Student', 'Admin']) {
 test('dashboard entry points use the same shared-module version', () => {
   for (const role of ['student', 'admin']) {
     const html = fs.readFileSync(path.join(root, `pages/${role}-dashboard.html`), 'utf8');
-    assert.ok(html.includes('dashboard.js?v=20261010-role-actions'));
+    assert.ok(html.includes('dashboard.js?v=20261010-surveys'));
   }
 });
 
