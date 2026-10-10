@@ -18,6 +18,8 @@ export class AttendanceCorrectionController {
   }
 
   initialize() {
+    if (this.initialized) return;
+    this.initialized = true;
     this.modal = document.querySelector('#attendanceCorrectionModal');
     this.form = document.querySelector('#attendanceCorrectionForm');
     this.button = document.querySelector('#addAttendanceCorrection');
@@ -58,7 +60,9 @@ export class AttendanceCorrectionController {
     const student = this.getStudents().find(item => item.uid === studentUid);
     const event = this.getEvents().find(item => item.id === eventId);
     if (!student || !event || student.active === false) throw new Error('Select an active student and an existing event.');
-    if (event.audience !== 'All students' && event.audience !== `Section ${student.section}`) throw new Error('This event is not assigned to that student.');
+    const eligible = event.attendanceRoster ? Object.hasOwn(event.attendanceRoster, studentUid)
+      : event.audience === 'All students' || event.audience === `Section ${student.section}`;
+    if (!eligible) throw new Error('This event is not assigned to that student in its participant roster.');
     const reference = doc(this.db, 'attendance', `${studentUid}_${eventId}`);
     const audit = doc(collection(reference, 'corrections'));
     await this.transaction(this.db, async transaction => {
@@ -95,9 +99,11 @@ export class AttendanceCorrectionController {
   }
 
   dispose() {
+    if (!this.initialized) return;
     this.button.removeEventListener('click', this.onOpen);
     this.form.removeEventListener('submit', this.onSubmit);
     this.modal.removeEventListener('click', this.onClose);
     document.removeEventListener('keydown', this.onEscape);
+    this.initialized = false;
   }
 }

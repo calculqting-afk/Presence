@@ -23,6 +23,8 @@ These tests do **not** prove that deployed Firestore rules permit/deny requests 
 
 ## Browser checks
 
+For the October attendance update, follow [ATTENDANCE-UPDATE.md](ATTENDANCE-UPDATE.md) for roster deployment, accurate summaries, retry/reconciliation, paginated filters and missed-checkout review. CSV export is not part of this update.
+
 Start the local preview:
 
 ```powershell

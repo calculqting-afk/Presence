@@ -1,6 +1,6 @@
 import { collection, onSnapshot, getDocsFromServer } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { db } from '../../../config/firebase-config.js?v=20261005-operational-reset';
-import { currentUser, currentUserRole, formatEventTime } from '../dashboard.js?v=20261009-oop';
+import { currentUser, currentUserRole, formatEventTime } from '../dashboard.js?v=20261010-attendance-ui';
 
 export class AttendancePolicy {
   constructor(windows) { this.windows = windows; }
@@ -59,32 +59,36 @@ export class AttendanceCheckInController {
 }
 
 export class AttendanceSyncService {
-  constructor({ onRecords, onStatus }) {
+  constructor({ onRecords, onStatus, reference = collection(db, "attendance") }) {
     this.onRecords = onRecords;
     this.onStatus = onStatus;
+    this.reference = reference;
     this.unsubscribe = null;
     this.generation = 0;
   }
 
-  start() {
+  start(reference = this.reference) {
     this.stop();
+    this.reference = reference;
     const generation = ++this.generation;
     this.onStatus({ state: "connecting" });
-    this.unsubscribe = onSnapshot(collection(db, "attendance"), (snapshot) => {
+    this.unsubscribe = onSnapshot(this.reference, { includeMetadataChanges: true }, (snapshot) => {
       if (generation !== this.generation) return;
       this.onRecords(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
-      this.onStatus({ state: snapshot.metadata.fromCache ? "offline" : "live", syncedAt: new Date() });
+      this.onStatus({ state: snapshot.metadata.fromCache ? "cached" : "live", syncedAt: new Date() });
     }, (error) => { if (generation === this.generation) this.onStatus({ state: "error", error }); });
   }
 
   async syncNow() {
+    const generation = this.generation;
     this.onStatus({ state: "syncing" });
     let tokenResult;
     try {
       // Force a fresh ID token so recent sign-in or account changes are reflected
       // when Firestore evaluates the Super Admin / Head Admin Rules.
       tokenResult = await currentUser?.getIdTokenResult(true);
-      const snapshot = await getDocsFromServer(collection(db, "attendance"));
+      const snapshot = await getDocsFromServer(this.reference);
+      if (generation !== this.generation) return;
       this.onRecords(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
       this.onStatus({ state: "live", syncedAt: new Date() });
     } catch (error) {
@@ -97,7 +101,7 @@ export class AttendanceSyncService {
         role: currentUserRole,
         projectId: "presence-a873f"
       });
-      this.onStatus({ state: "error", error });
+      if (generation === this.generation) this.onStatus({ state: "error", error });
       throw error;
     }
   }

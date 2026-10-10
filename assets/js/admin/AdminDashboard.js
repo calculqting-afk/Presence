@@ -1,9 +1,12 @@
-import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261009-oop';
+import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261010-attendance-ui';
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
-import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js';
+import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261010-attendance-ui';
 import { GeofenceController } from '../controllers/GeofenceController.js';
 import { hasPermission } from '../core/permissions.js';
-import { AttendanceCorrectionController } from '../controllers/AttendanceCorrectionController.js';
+import { AttendanceCorrectionController } from '../controllers/AttendanceCorrectionController.js?v=20261010-attendance-ui';
+import { AttendanceSummaryService } from '../controllers/AttendanceSummaryService.js';
+import { AttendanceHistoryController, AttendanceRepository } from '../controllers/AttendanceHistoryController.js?v=20261010-attendance-ui';
+import { AttendanceToolbarController } from '../controllers/AttendanceToolbarController.js';
 
 export class AdminDashboard {
 initialize() {
@@ -30,6 +33,8 @@ initialize() {
   let events = [];
   let geofencesByEventId = new Map();
   let students = [];
+  let studentsLoaded = false;
+  let attendanceConfirmed = false;
   let attendance = [];
   let attendanceSyncService;
   let fines = [];
@@ -37,6 +42,22 @@ initialize() {
   let faceRegistrationsByUid = new Map();
   let presenceByUid = new Map();
   let legacyPresenceByUid = new Map();
+  const summaryService = new AttendanceSummaryService({ closeDate: eventCloseDate, checkoutCloseDate: eventCheckoutCloseDate });
+  const coverageDate = new Date(Date.now() - 30 * 86400000);
+  const recentAttendanceFrom = new Date(coverageDate.getTime() - coverageDate.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const attendanceCoverageFrom = '';
+  const historyController = new AttendanceHistoryController({ repository: new AttendanceRepository(db),
+    getStudents: () => students, getEvents: () => events, summary: summaryService, notify: showDashboardToast, onStatus: updateAttendanceSyncStatus,
+    render: (records, state) => { document.querySelector('#adminAttendanceLine').innerHTML = records.length ? attendanceLineMarkup(records) : AttendanceToolbarController.emptyState(state); } });
+  historyController.initialize();
+  document.querySelector('#attendanceFromDate').value = recentAttendanceFrom;
+  const onHistoryView = event => {
+    if (event.detail.viewName === 'attendance-line') void historyController.reload();
+    else historyController.suspend();
+  };
+  window.addEventListener('presence:viewchange', onHistoryView);
+  const disposeHistory = this.dispose;
+  this.dispose = () => { historyController.dispose(); window.removeEventListener('presence:viewchange', onHistoryView); disposeHistory(); };
   const correctionController = new AttendanceCorrectionController({ db, user: currentUser, role: currentUserRole,
     getStudents: () => students, getEvents: () => events, escapeHtml, notify: showDashboardToast });
   correctionController.initialize();
@@ -44,7 +65,8 @@ initialize() {
   this.dispose = () => { correctionController.dispose(); disposeSubscriptions(); };
   const handleCorrection = event => {
     const button = event.target.closest('[data-correct-attendance]');
-    if (button) correctionController.open(attendance.find(item => item.id === button.dataset.correctAttendance));
+    if (button) correctionController.open(historyController.records.find(item => item.id === button.dataset.correctAttendance)
+      || attendance.find(item => item.id === button.dataset.correctAttendance));
   };
   document.querySelector('#adminAttendanceLine').addEventListener('click', handleCorrection);
   document.querySelector('#adminDashboardAttendanceLine').addEventListener('click', handleCorrection);
@@ -76,11 +98,14 @@ initialize() {
   attendanceSyncStatus.hidden = !canManuallySyncAttendance;
   syncAttendanceNow.hidden = !canManuallySyncAttendance;
   function updateAttendanceSyncStatus({ state, syncedAt, error }) {
+    attendanceConfirmed = state === 'live';
+    scheduleStudentsRender();
     const labels = {
       connecting: ["Connecting…", "gray"],
       syncing: ["Syncing…", "blue"],
       live: [syncedAt ? `Live · synced ${syncedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Live", "green"],
       offline: ["Offline · showing saved data", "orange"],
+      cached: ["Cached data · connecting to server", "orange"],
       error: ["Sync unavailable · Retry", "orange"]
     };
     const [label, color] = labels[state] || labels.connecting;
@@ -207,12 +232,14 @@ initialize() {
     adminEventStatusTimer = window.setTimeout(() => {
       if (["dashboard", "modify-events"].includes(activeView)) renderAdminEvents();
       if (activeView === "past-events") renderPastEvents();
+      if (['dashboard', 'attendance-line'].includes(activeView)) renderAttendanceLine();
+      scheduleStudentsRender();
       scheduleAdminEventStatusRefresh();
     }, Math.max(0, nextStatusChange - now) + 50);
   }
 
   const eventSyncNotice = document.querySelector(".notice");
-  if (eventSyncNotice) eventSyncNotice.textContent = "Events are saved online and sync automatically to student dashboards, including after refresh.";
+  if (eventSyncNotice) eventSyncNotice.textContent = "Events sync online. Publishing saves the active participant roster. Re-save upcoming events after adding students or changing sections; the roster is locked once attendance opens. Older events without a roster have unverified absence eligibility.";
   studentTableBody.closest("table").querySelectorAll("th")[1].textContent = "Course / Section";
   studentTableBody.closest("table").querySelectorAll("th")[2].textContent = "Face / live status";
   document.querySelector('label[for="eventNotes"]').textContent = "Description";
@@ -428,15 +455,15 @@ initialize() {
   function renderAdminAttendance() {
     const now = new Date();
     const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-    const presentIds = new Set(attendance.filter((record) => record.eventDate === localDate).map((record) => record.studentUid));
-    const present = presentIds.size;
-    const pending = Math.max(students.length - present, 0);
-    const rate = students.length ? Math.round((present / students.length) * 100) : 0;
+    const totals = summaryService.today(students, events, attendance, localDate);
+    const { present, expected, unverified } = totals;
+    const pending = attendanceConfirmed ? totals.pending : 0, rate = attendanceConfirmed ? totals.rate : 0;
     document.querySelector("#registeredCount").textContent = students.length;
     document.querySelector("#presentTodayCount").textContent = present;
-    document.querySelector("#presentTodayMeta").textContent = students.length ? `${rate}% of registered students` : "No attendance records yet";
+    document.querySelector("#presentTodayMeta").textContent = expected ? `${rate}% of ${expected} scheduled participants` : 'No verified participant roster for today';
     document.querySelector("#notCheckedInCount").textContent = pending;
-    document.querySelector("#notCheckedInMeta").textContent = students.length ? "Registered students without a check-in today" : "No students registered";
+    document.querySelector("#notCheckedInMeta").textContent = attendanceConfirmed
+      ? `${expected ? 'Scheduled participants without a check-in' : 'No verified attendance requirement today'}${unverified ? ` · ${unverified} legacy eligibility unverified` : ''}` : 'Waiting for server attendance verification';
     document.querySelector("#adminAttendancePercent").textContent = `${rate}%`;
     document.querySelector("#adminAttendanceDetail").textContent = `${present} present`;
     document.querySelector("#adminAttendanceRing").style.background = `conic-gradient(var(--blue) 0 ${rate}%, var(--ring-track, #e8eef7) ${rate}% 100%)`;
@@ -450,7 +477,7 @@ initialize() {
       const avatar = student?.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student?.firstName || studentName, student?.lastName || ""));
       const checkedInAt = record.checkedInAt || record.attendedAt;
       const completed = Boolean(record.checkedOutAt);
-      return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || record.studentId || "Student ID unavailable")}${student?.section ? ` · ${escapeHtml(student.section)}` : ""}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><small>${escapeHtml(record.eventDate || "Date unavailable")}</small></div><div class="attendance-line-times"><div><span>IN</span><strong>${escapeHtml(formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>OUT</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Duration</span><strong>${escapeHtml(attendanceDuration(checkedInAt, record.checkedOutAt))}</strong></div></div>${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}${can("correctAttendance") ? `<button class="small-button" type="button" data-correct-attendance="${escapeHtml(record.id)}">Correct</button>` : ""}${arrivalStatusBadge(record.arrivalStatus)}<span class="badge ${completed ? "green" : "blue"}">${completed ? "Completed" : "Checked in"}</span></article>`;
+      return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || record.studentId || "Student ID unavailable")}${student?.section ? ` · ${escapeHtml(student.section)}` : ""}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><small>${escapeHtml(record.eventDate || "Date unavailable")}</small></div><div class="attendance-line-times"><div><span>IN</span><strong>${escapeHtml(formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>OUT</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Duration</span><strong>${escapeHtml(attendanceDuration(checkedInAt, record.checkedOutAt))}</strong></div></div><div class="attendance-line-status">${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}${can("correctAttendance") ? `<button class="small-button" type="button" data-correct-attendance="${escapeHtml(record.id)}">Correct</button>` : ""}${arrivalStatusBadge(record.arrivalStatus)}<span class="badge ${completed ? "green" : summaryService.needsReview(record, events.find(event => event.id === record.eventId)) ? "orange" : "blue"}">${completed ? "Completed" : summaryService.needsReview(record, events.find(event => event.id === record.eventId)) ? "Needs review — missed checkout" : "Checked in"}</span></div></article>`;
     }).join("");
   }
 
@@ -463,17 +490,17 @@ initialize() {
     const records = attendance
       .filter((record) => filter.value === "all" || record.eventId === filter.value)
       .sort((first, second) => (second.checkedInAt?.seconds || second.attendedAt?.seconds || 0) - (first.checkedInAt?.seconds || first.attendedAt?.seconds || 0));
-    document.querySelector("#adminAttendanceLine").innerHTML = attendanceLineMarkup(records);
+    if (activeView === 'attendance-line') historyController.draw();
     document.querySelector("#adminDashboardAttendanceLine").innerHTML = attendanceLineMarkup(records.slice(0, 5));
   }
 
-  document.querySelector("#adminAttendanceEventFilter").addEventListener("change", renderAttendanceLine);
   syncAttendanceNow.addEventListener("click", async () => {
     if (!canManuallySyncAttendance) return;
     if (!attendanceSyncService) return;
     syncAttendanceNow.disabled = true;
     try {
-      await attendanceSyncService.syncNow();
+      if (activeView === 'attendance-line') await historyController.reload();
+      else await attendanceSyncService.syncNow();
       showDashboardToast("Attendance synced", "The Attendance Line was refreshed from Firestore.");
     } catch (error) {
       const message = firebaseErrorCode(error) === "permission-denied"
@@ -909,21 +936,23 @@ initialize() {
   }
 
   function getStudentAbsences(student) {
-    const attendedEventIds = new Set(attendance.filter((record) => record.studentUid === student.uid).map((record) => record.eventId));
-    const studentAudience = `Section ${student.section || ""}`;
-    return events
-      .filter((event) => isEventFinished(event) && (event.audience === "All students" || !event.audience || event.audience === studentAudience) && !attendedEventIds.has(event.id))
+    return summaryService.summarize(student, events, attendance, { coverageFrom: attendanceCoverageFrom, coverageConfirmed: attendanceConfirmed }).absences
       .sort((first, second) => eventCloseDate(second).getTime() - eventCloseDate(first).getTime());
   }
 
-  function openAdminAbsenceModal(student, trigger) {
+  async function openAdminAbsenceModal(student, trigger) {
     if (!can('viewAbsences') || !student) return;
     const studentName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ") || "Student";
-    const absences = getStudentAbsences(student);
+    let result;
+    try {
+      const snapshot = await getDocsFromServer(query(collection(db, 'attendance'), where('studentUid', '==', student.uid)));
+      result = summaryService.summarize(student, events, snapshot.docs.map(item => item.data()));
+    } catch { showDashboardToast('Absence verification unavailable', 'No absence decision was made. Check your connection and retry.'); return; }
+    const absences = result.absences;
     const records = absences.length
       ? absences.map((event) => `<article class="community-service-record"><div class="community-service-record-top"><strong>${escapeHtml(event.name || "Attendance event")}</strong><span class="badge orange">Absent</span></div><div class="fine-detail-grid"><div><span>Date</span><strong>${escapeHtml(formatEventDate(event.date))}</strong></div><div><span>Time</span><strong>${escapeHtml(formatTimeWindow(event))}</strong></div><div><span>Location</span><strong>${escapeHtml(event.location || "Not specified")}</strong></div><div><span>Audience</span><strong>${escapeHtml(event.audience || "All students")}</strong></div></div></article>`).join("")
       : '<div class="community-service-empty">No recorded absences for this student.</div>';
-    adminAbsenceModalController.open({ title: `${studentName}'s absences`, description: `${absences.length} completed event${absences.length === 1 ? "" : "s"} without an attendance record.`, markup: `<section class="community-service-section"><div class="community-service-section-heading"><h3>Missed events</h3><p>Only completed events assigned to this student's section are included.</p></div>${records}</section>`, trigger });
+    adminAbsenceModalController.open({ title: `${studentName}'s absences`, description: `${absences.length} confirmed absences · ${result.unverified.length} historical events unverified.`, markup: `<section class="community-service-section"><div class="community-service-section-heading"><h3>Missed events</h3><p>Confirmed roster participants only. Historical events without eligibility records are unverified. Missed checkout needs review, not an automatic absence.</p></div>${records}</section>`, trigger });
   }
 
   function fineRecordModalMarkup(fine) {
@@ -1081,6 +1110,7 @@ initialize() {
   eventForm.addEventListener("submit", async (submitEvent) => {
     if (!can('manageEvents')) { submitEvent.preventDefault(); return; }
     submitEvent.preventDefault();
+    if (!studentsLoaded) return showDashboardToast('Participant roster not ready', 'Wait for the student directory to load before publishing an event.');
     const timeIn = document.querySelector("#eventTimeIn").value;
     const timeOut = document.querySelector("#eventTimeOut").value;
     const checkInCutoff = document.querySelector("#eventCheckInCutoff").value;
@@ -1095,6 +1125,12 @@ initialize() {
     const geofence = requestedGeofence.enabled ? requestedGeofence : { enabled: false };
     const record = { name: document.querySelector("#eventName").value.trim(), type: document.querySelector("#eventType").value, date, location: document.querySelector("#eventLocation").value.trim(), timeIn, checkInCutoff, timeOut, checkOutCutoff, audience: document.querySelector("#eventAudience").value, description: document.querySelector("#eventNotes").value.trim(), requiresGeofence: geofence.enabled, openAt: Timestamp.fromDate(new Date(`${date}T${timeIn}`)), checkInClosesAt: Timestamp.fromDate(new Date(`${date}T${checkInCutoff}`)), closeAt: Timestamp.fromDate(new Date(`${date}T${timeOut}`)), checkOutClosesAt: Timestamp.fromDate(new Date(`${date}T${checkOutCutoff}`)), updatedAt: serverTimestamp() };
     const duplicate = events.find((event) => event.id !== id && duplicateEventSignature(event) === duplicateEventSignature(record));
+    const previousEvent = events.find(event => event.id === id);
+    if (!previousEvent || new Date() < eventOpenDate(previousEvent)) {
+      record.attendanceRoster = summaryService.captureRoster(students, record);
+      if (Object.keys(record.attendanceRoster).length > 5000) return showDashboardToast('Participant roster too large', 'This event supports up to 5,000 participants. Select a smaller audience.');
+      record.rosterCapturedAt = serverTimestamp();
+    }
     if (duplicate) {
       return showDashboardToast("Duplicate event", `An event named ${record.name} already uses this date, location, audience, and attendance schedule. Change one of those details before saving.`);
     }
@@ -1701,6 +1737,7 @@ initialize() {
     scheduleAdminEventStatusRefresh();
   });
   listen('students', ["*"], collection(db, "students"), (snapshot) => {
+    studentsLoaded = !snapshot.metadata?.fromCache;
     students = snapshot.docs.map((item) => ({ uid: item.id, ...item.data() }));
     scheduleStudentsRender();
     if (activeView === "assign-fine") renderFineOptions();
@@ -1719,9 +1756,13 @@ initialize() {
       }
       if (activeView === "attendance-line") renderAttendanceLine();
     },
+    reference: collection(db, 'attendance'),
     onStatus: updateAttendanceSyncStatus
   });
-  subscriptions.register('attendance', ['dashboard', 'attendance-line', 'modify-students', 'modify-events', 'past-events', 'profile'], () => { attendanceSyncService.start(); return () => attendanceSyncService.stop(); });
+  subscriptions.register('attendance', ['dashboard', 'modify-students', 'modify-events', 'past-events', 'profile'], () => {
+    attendanceSyncService.start();
+    return () => attendanceSyncService.stop();
+  });
   const disposeListeners = this.dispose;
   this.dispose = () => { disposeListeners(); attendanceRealtimeBridge.close(); window.clearTimeout(adminEventStatusTimer); window.cancelAnimationFrame(studentRenderFrame); };
   if (can('viewFines')) listen('fines', ["assign-fine","assigned-fines","modify-students","profile"], collection(db, "fines"), (snapshot) => {

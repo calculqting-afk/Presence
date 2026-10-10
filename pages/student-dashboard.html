@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261010-theme">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261010-attendance-ui">
   <link rel="stylesheet" href="../assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261010-shared-theme">
 </head>
@@ -74,8 +74,20 @@
         </section>
 
         <section class="view-section" data-section="attendances" hidden>
-          <div class="section-head"><div><p class="eyebrow">Personal attendance</p><h2>My Attendances</h2><p>Track your exact check-in and check-out records.</p></div></div>
-          <div class="history-card-grid history-section" id="studentAttendanceList"><div class="empty-state panel">No attendance records yet.</div></div>
+          <div class="section-head attendance-section-head"><h2>Your attendance</h2><details class="attendance-help" id="studentAttendanceHelp"><summary aria-label="Attendance help"><span aria-hidden="true">i</span></summary><div class="attendance-help-content"><strong>About your attendance</strong><p>Use the filters to find your saved check-ins and checkouts.</p><p>A missed checkout needs administrative review. It does not automatically create an absence or fine.</p></div></details></div>
+          <article class="panel attendance-workspace attendance-workspace--student">
+          <form class="attendance-filters" id="studentAttendanceFilters">
+            <label class="attendance-search-field">Event<input type="search" id="studentAttendanceSearch" placeholder="Search event name"></label>
+            <button class="outline-button attendance-filter-toggle" id="studentAttendanceToggleFilters" type="button" aria-expanded="false" aria-controls="studentAttendanceAdvancedFilters">Filters</button>
+            <div class="attendance-filter-options" id="studentAttendanceAdvancedFilters">
+            <label>From<input type="date" id="studentAttendanceFrom"></label><label>To<input type="date" id="studentAttendanceTo"></label>
+            <label>Status<select id="studentAttendanceStatus"><option value="">All statuses</option><option value="checked-in">Checked in</option><option value="completed">Completed</option><option value="review">Needs review — missed checkout</option></select></label>
+            </div>
+            <div class="attendance-filter-actions"><button class="link-button" id="studentAttendanceClearFilters" type="button">Clear</button><button class="primary-button" type="submit">Apply</button></div>
+          </form>
+          <div class="history-card-grid attendance-results" id="studentAttendanceList"><div class="attendance-empty"><h3>No attendance records yet.</h3></div></div>
+          <div class="attendance-pagination" id="studentAttendancePagination" hidden><span id="studentAttendancePageInfo" role="status" aria-live="polite"></span><div class="attendance-page-actions" id="studentAttendancePaginationControls"><button class="outline-button" type="button" id="studentAttendancePrevious">Previous</button><span class="attendance-page-number" id="studentAttendanceCurrentPage" aria-label="Current page">1</span><button class="outline-button" type="button" id="studentAttendanceNext">Next</button></div></div>
+          </article>
         </section>
 
         <section class="view-section" data-section="history" hidden>
@@ -162,6 +174,6 @@
     </section>
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
-  <script type="module" src="../assets/js/dashboard.js?v=20261009-oop"></script>
+  <script type="module" src="../assets/js/dashboard.js?v=20261010-attendance-ui"></script>
 </body>
 </html>

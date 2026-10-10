@@ -1,21 +1,28 @@
-import { StudentAttendanceController } from '../controllers/StudentAttendanceController.js';
-import { currentUser, currentUserProfile, escapeHtml, formatBirthday, FineModalController, showDashboardToast, createNotification, uploadFacePhotoToDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineTimestamp, getFineHistory, updateDashboardGreeting, createDeviceSessionToken, auth, db, signOut, updatePassword, Timestamp, collection, deleteField, doc, getDoc, getDocFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch, sessionState } from '../dashboard.js?v=20261009-oop';
+import { StudentAttendanceController } from '../controllers/StudentAttendanceController.js?v=20261010-attendance-ui';
+import { currentUser, currentUserProfile, escapeHtml, formatBirthday, FineModalController, showDashboardToast, createNotification, uploadFacePhotoToDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineTimestamp, getFineHistory, updateDashboardGreeting, createDeviceSessionToken, auth, db, signOut, updatePassword, Timestamp, collection, deleteField, doc, getDoc, getDocFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch, sessionState } from '../dashboard.js?v=20261010-attendance-ui';
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
-import { AttendancePolicy, LateCheckInModal, AttendanceCheckInController, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js';
+import { AttendancePolicy, LateCheckInModal, AttendanceCheckInController, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261010-attendance-ui';
+import { AttendanceSummaryService } from '../controllers/AttendanceSummaryService.js';
+import { StudentAttendanceListController } from '../controllers/StudentAttendanceListController.js?v=20261010-attendance-ui';
+import { AttendanceToolbarController } from '../controllers/AttendanceToolbarController.js';
 
 export class StudentDashboard {
 initialize() {
   const subscriptions = new ScopedSubscriptions({ onError: (error, key) => { console.error(key, error); showDashboardToast('Data sync unavailable', 'Check your connection and reload to retry.'); } });
-  const listen = (key, views, reference, callback) => subscriptions.register(key, views, (guard, onError) => onSnapshot(reference, guard(callback), onError));
+  const listen = (key, views, reference, callback) => subscriptions.register(key, views, (guard, onError) => onSnapshot(reference, { includeMetadataChanges: true }, guard(callback), onError));
   const changeSubscriptions = event => subscriptions.setView(event.detail.viewName);
   window.addEventListener('presence:viewchange', changeSubscriptions);
   this.dispose = () => { subscriptions.stop(); window.removeEventListener('presence:viewchange', changeSubscriptions); };
 
   let events = [];
   let attendance = [];
+  let attendanceConfirmed = false;
   let fines = [];
   let dismissedIds = new Set();
   let studentProfile;
+  const summaryService = new AttendanceSummaryService({ closeDate: eventCloseDate, checkoutCloseDate: eventCheckoutCloseDate });
+  const attendanceList = new StudentAttendanceListController({ summary: summaryService, getEvents: () => events, render: renderMyAttendances, notify: showDashboardToast });
+  attendanceList.initialize();
   let pendingProfilePhoto = "";
   let presenceWriteErrorShown = false;
   let eventRenderFrame;
@@ -131,7 +138,8 @@ initialize() {
 
   function renderEvents() {
     const attendanceByEventId = new Map(attendance.map((record) => [record.eventId, record]));
-    const activeEvents = events.filter((event) => !isEventFinished(event));
+    const activeEvents = events.filter(event => !isEventFinished(event) && (attendanceByEventId.has(event.id)
+      || summaryService.eligibility({ ...studentProfile, uid: currentUser.uid }, event) !== 'excluded'));
     const eventGrid = document.querySelector("#studentEventGrid");
     const timeline = document.querySelector("#studentEventTimeline");
     if (!activeEvents.length) {
@@ -191,18 +199,20 @@ initialize() {
   }
 
   function renderAttendanceSummary() {
-    const attendedIds = new Set(attendance.map((record) => record.eventId));
-    const closedEvents = events.filter((event) => isEventFinished(event));
-    const absences = closedEvents.filter((event) => !attendedIds.has(event.id));
-    const presentDays = new Set(attendance.map((record) => record.eventDate)).size;
+    const result = summaryService.summarize({ ...studentProfile, uid: currentUser.uid }, events, attendance, { coverageConfirmed: attendanceConfirmed });
+    const { attendedIds, absences, presentDays } = result;
+    const closedEvents = events.filter(event => isEventFinished(event)
+      && (attendedIds.has(event.id) || summaryService.eligibility({ ...studentProfile, uid: currentUser.uid }, event) !== 'excluded'));
     document.querySelector("#eventsAttendedCount").textContent = attendance.length;
     document.querySelector("#absenceCount").textContent = absences.length;
     document.querySelector("#daysPresentCount").textContent = presentDays;
     document.querySelector("#eventsAttendedMeta").textContent = attendance.length ? `${attendance.length} attendance record${attendance.length === 1 ? "" : "s"}` : "No attendance recorded yet";
-    document.querySelector("#absenceMeta").textContent = absences.length ? `${absences.length} closed event${absences.length === 1 ? "" : "s"} missed` : "No missed events";
+    document.querySelector("#absenceMeta").textContent = `${absences.length} confirmed absences · ${result.unverified.length} historical events unverified · ${result.review.length} checkouts need review`;
     document.querySelector("#absenceSummaryCard").setAttribute("aria-label", absences.length ? `View details for ${absences.length} absence${absences.length === 1 ? "" : "s"}` : "View absence details");
     document.querySelector("#daysPresentMeta").textContent = presentDays ? `${presentDays} unique event day${presentDays === 1 ? "" : "s"}` : "Based on attended events";
-    const records = closedEvents.filter((event) => !dismissedIds.has(event.id)).map((event) => ({ event, status: attendedIds.has(event.id) ? "Attended" : "Absent" }));
+    const records = closedEvents.filter((event) => !dismissedIds.has(event.id)).map((event) => ({ event,
+      status: attendedIds.has(event.id) ? result.review.some(record => record.eventId === event.id) ? 'Needs review' : 'Attended'
+        : absences.some(item => item.id === event.id) ? 'Absent' : 'Eligibility unverified' }));
     const history = document.querySelector("#studentEventHistory");
     if (!records.length) {
       history.innerHTML = '<div class="empty-state">No finished event history yet.</div>';
@@ -216,13 +226,13 @@ initialize() {
 
   function renderMyAttendances() {
     const container = document.querySelector("#studentAttendanceList");
-    const records = attendance.slice().sort((first, second) => {
+    const records = attendanceList.select(attendance.slice().sort((first, second) => {
       const firstTime = first.checkedInAt?.seconds || first.attendedAt?.seconds || 0;
       const secondTime = second.checkedInAt?.seconds || second.attendedAt?.seconds || 0;
       return secondTime - firstTime;
-    });
+    }));
     if (!records.length) {
-      container.innerHTML = '<div class="empty-state panel">No attendance records yet.</div>';
+      container.innerHTML = AttendanceToolbarController.emptyState({ filtered: attendance.length > 0 });
       return;
     }
     container.innerHTML = records.map((record) => {
@@ -231,8 +241,8 @@ initialize() {
       const completed = Boolean(record.checkedOutAt);
       const readyToCheckOut = !completed && record.status === "checked-in" && isCheckoutAvailable(event);
       const hasVerifiedCheckIn = Boolean(checkedInAt);
-      const status = completed ? "Completed" : !hasVerifiedCheckIn ? "Check-in incomplete" : readyToCheckOut ? "Ready to check out" : new Date() < eventCloseDate(event) ? "Checked in" : "Checkout window closed";
-      const color = completed ? "green" : readyToCheckOut ? "orange" : status === "Checked in" ? "blue" : "gray";
+      const status = completed ? "Completed" : !hasVerifiedCheckIn ? "Check-in incomplete" : summaryService.needsReview(record, event) ? 'Needs review — missed checkout' : readyToCheckOut ? "Ready to check out" : "Checked in";
+      const color = completed ? "green" : readyToCheckOut || status.startsWith('Needs review') ? "orange" : status === "Checked in" ? "blue" : "gray";
       const checkInWindow = event.timeIn ? `${formatEventTime(event.timeIn)} – ${formatEventTime(event.checkInCutoff || event.timeOut)}` : "Not recorded";
       const checkOutWindow = event.timeOut ? `${formatEventTime(event.timeOut)} – ${formatEventTime(event.checkOutCutoff || timePlusMinutes(event.timeOut))}` : "Not recorded";
       return `<article class="history-event-card attendance-record-card"><div class="history-card-top"><span class="event-type-badge">${escapeHtml(record.eventType || "School Event")}</span><div class="attendance-record-badges"><span class="badge ${color}">${escapeHtml(status)}</span>${arrivalStatusBadge(record.arrivalStatus)}${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}</div></div><h3>${escapeHtml(record.eventName || "Attendance event")}</h3><p>${escapeHtml(record.location || "Location not recorded")}</p><div class="event-detail-boxes"><div><span>Checked in</span><strong>${escapeHtml(formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>Checked out</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Arrival</span><strong>${escapeHtml(record.arrivalStatus === "late" ? "Late" : "Present")}</strong></div><div><span>Check-in window</span><strong>${escapeHtml(checkInWindow)}</strong></div><div><span>Checkout window</span><strong>${escapeHtml(checkOutWindow)}</strong></div><div><span>Duration</span><strong>${escapeHtml(attendanceDuration(checkedInAt, record.checkedOutAt))}</strong></div></div>${readyToCheckOut ? `<div class="history-card-actions"><button class="primary-button" type="button" data-check-out-attendance="${escapeHtml(record.id)}">Check out</button></div>` : ""}</article>`;
@@ -494,7 +504,7 @@ initialize() {
     showError: showGeofenceError, bridge: attendanceRealtimeBridge, checkIn: attendanceCheckInController
   });
   const disposeDashboard = this.dispose;
-  this.dispose = () => { attendanceController.dispose(); disposeDashboard(); };
+  this.dispose = () => { attendanceList.dispose(); attendanceController.dispose(); disposeDashboard(); };
 
   document.querySelector("#studentEventHistory").addEventListener("click", async (clickEvent) => {
     const button = clickEvent.target.closest("[data-dismiss-history]");
@@ -696,12 +706,13 @@ initialize() {
       return;
     }
     studentProfile = snapshot.data();
+    scheduleEventRender();
     renderProfile();
     if (studentProfile.mustChangePassword === true) openRequiredPasswordChangeModal();
     else closeRequiredPasswordChangeModal();
   });
   listen('events', ["*"], query(collection(db, "events"), orderBy("openAt", "asc")), (snapshot) => { events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); scheduleEventRender(); renderMyAttendances(); scheduleEventStatusRefresh(); });
-  listen('attendance', ["*"], query(collection(db, "attendance"), where("studentUid", "==", currentUser.uid)), (snapshot) => { attendance = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); scheduleEventRender(); renderMyAttendances(); });
+  listen('attendance', ["*"], query(collection(db, "attendance"), where("studentUid", "==", currentUser.uid)), (snapshot) => { attendanceConfirmed = !snapshot.metadata?.fromCache; attendance = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); scheduleEventRender(); renderMyAttendances(); });
   listen('dismissed-history', ["history"], query(collection(db, "dismissedHistory"), where("studentUid", "==", currentUser.uid)), (snapshot) => { dismissedIds = new Set(snapshot.docs.map((item) => item.data().eventId)); scheduleEventRender(); });
   listen('fines', ["*"], query(collection(db, "fines"), where("studentUid", "==", currentUser.uid)), (snapshot) => { fines = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); renderFines(); renderProfile(); });
   listen('face', ["face","profile","events"], doc(db, "faceRegistrations", currentUser.uid), (snapshot) => {

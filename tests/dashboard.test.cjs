@@ -24,6 +24,7 @@ async function isolatedModule(relative, shared = {}, globals = {}) {
     if (specifier.startsWith('https:')) return mock('sdk', {
       collection: (...args) => ({ path: args.join('/') }), doc: (...args) => ({ path: args.join('/'), id: args.length === 1 ? 'audit-1' : args.at(-1) }),
       Timestamp: { fromDate: date => date }, serverTimestamp: () => 'server-time', runTransaction: async () => {},
+      query: (...args) => args, where: (...args) => args, orderBy: (...args) => args, limit: size => ({ limit: size }), startAfter: cursor => ({ cursor }),
       onSnapshot: () => () => {}, getDocsFromServer: async () => ({ docs: [] })
     });
     return load(path.resolve(path.dirname(referencing.identifier), specifier.split('?')[0]));
@@ -143,24 +144,24 @@ test('checkout rejects a closed window without writing any record', async () => 
 
 test('checkout preserves record identity and verifies the server acknowledgement', async () => {
   const writes = []; const publications = []; const messages = [];
-  const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks({ setDoc: async (...args) => writes.push(args), getDocFromServer: async () => ({ exists: () => true, id: 'student-1_event', data: () => ({ status: 'completed', checkedOutAt: 'server-time' }) }), showDashboardToast: title => messages.push(title) }), { document: gridDocument });
+  const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks({ setDoc: async (...args) => writes.push(args), getDocFromServer: async () => ({ exists: () => writes.length > 0, id: 'student-1_event', data: () => ({ studentUid: 'student-1', eventId: 'event', status: 'completed', checkedOutAt: 'server-time' }) }), showDashboardToast: title => messages.push(title) }), { document: gridDocument });
   const controller = new StudentAttendanceController({ bridge: { publish: (...args) => publications.push(args) } });
   await controller.checkOutAttendance({ eventId: 'event' }, {}, { disabled: false });
   assert.equal(writes[0][0].id, 'student-1_event'); assert.equal(writes[0][1].status, 'completed'); assert.equal(writes[0][2].merge, true);
-  assert.equal(publications.length, 2); assert.equal(messages.at(-1), 'Checkout recorded');
+  assert.equal(publications.length, 1); assert.equal(messages.at(-1), 'Checkout recorded');
 });
 
 for (const arrivalStatus of ['present', 'late']) {
   test(`check-in saves ${arrivalStatus} with server timestamps and verifies its acknowledgement`, async () => {
     const writes = []; const publications = []; const messages = [];
     const record = { studentUid: 'student-1', eventId: 'event', status: 'checked-in', arrivalStatus, checkedInAt: 'server-time' };
-    const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks({ setDoc: async (...args) => writes.push(args), getDocFromServer: async reference => ({ id: reference.id, exists: () => true, data: () => reference.collection === 'faceRegistrations' ? { registered: true } : record }), showDashboardToast: title => messages.push(title) }), { document: gridDocument });
+    const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks({ setDoc: async (...args) => writes.push(args), getDocFromServer: async reference => ({ id: reference.id, exists: () => reference.collection === 'faceRegistrations' || writes.length > 0, data: () => reference.collection === 'faceRegistrations' ? { registered: true } : record }), showDashboardToast: title => messages.push(title) }), { document: gridDocument });
     const controller = new StudentAttendanceController({ getState: () => ({ events: [{ id: 'event' }], attendance: [] }), setFaceRegistration() {}, checkIn: { begin: async () => ({ available: true, arrivalStatus }) }, bridge: { publish: (...args) => publications.push(args) } });
     const button = { dataset: { attendEvent: 'event' }, disabled: false };
     await controller.handleEventClick({ target: { closest: selector => selector === '[data-attend-event]' ? button : null } });
     assert.equal(writes.length, 1); assert.equal(writes[0][0].id, 'student-1_event');
     assert.equal(writes[0][1].arrivalStatus, arrivalStatus); assert.equal(writes[0][1].checkedInAt, 'server-time');
-    assert.equal(publications.length, 2);
+    assert.equal(publications.length, 1);
     assert.equal(messages.at(-1), arrivalStatus === 'late' ? 'Late attendance recorded' : 'Attendance recorded');
   });
 }
@@ -251,7 +252,7 @@ for (const role of ['Student', 'Admin']) {
 test('dashboard entry points use the same shared-module version', () => {
   for (const role of ['student', 'admin']) {
     const html = fs.readFileSync(path.join(root, `pages/${role}-dashboard.html`), 'utf8');
-    assert.ok(html.includes('dashboard.js?v=20261009-oop'));
+    assert.ok(html.includes('dashboard.js?v=20261010-attendance-ui'));
   }
 });
 
@@ -316,4 +317,248 @@ test('attendance corrections atomically preserve the previous record and identif
   assert.equal(writes.length, 2);
   controller.role = 'attendance_admin'; controller.getEvents = () => [{ id: 'event-1', audience: 'Section 1A' }];
   await assert.rejects(controller.save(input), /not assigned/); assert.equal(writes.length, 2);
+});
+
+test('shared summaries preserve roster eligibility after a section change and exclude nonparticipants', async () => {
+  const { AttendanceSummaryService } = await isolatedModule('assets/js/controllers/AttendanceSummaryService.js');
+  const summary = new AttendanceSummaryService({ closeDate: event => new Date(event.close), checkoutCloseDate: event => new Date(event.end), now: () => new Date(10000) });
+  const student = { uid: 'a', section: '2B' };
+  const events = [
+    { id: 'rostered', date: '2026-10-01', close: 1000, end: 2000, audience: 'Section 2A', attendanceRoster: { a: '2A' } },
+    { id: 'other', close: 1000, end: 2000, attendanceRoster: { b: '2B' } },
+    { id: 'legacy', close: 1000, end: 2000, audience: 'All students' },
+    { id: 'before-enrollment', close: 1000, end: 2000, audience: 'All students' }
+  ];
+  let result = summary.summarize(student, events, []);
+  assert.equal(result.absences.length, 1); assert.equal(result.absences[0].id, 'rostered');
+  assert.equal(result.unverified.length, 2);
+  result = summary.summarize({ ...student, createdAt: { toDate: () => new Date(5000) } }, events, []);
+  assert.equal(result.unverified.length, 0); assert.equal(result.absences.length, 1);
+  result = summary.summarize(student, events, [], { coverageConfirmed: false });
+  assert.equal(result.absences.length, 0);
+  result = summary.summarize(student, events, [], { coverageFrom: '2026-10-02' });
+  assert.equal(result.absences.length, 0);
+});
+
+test('missed checkout is review, not absence, and completed records leave review', async () => {
+  const { AttendanceSummaryService } = await isolatedModule('assets/js/controllers/AttendanceSummaryService.js');
+  let now = 1000;
+  const summary = new AttendanceSummaryService({ closeDate: () => new Date(500), checkoutCloseDate: () => new Date(2000), now: () => new Date(now) });
+  const event = { id: 'event', attendanceRoster: { a: '2A' }, checkOutClosesAt: true };
+  const record = { studentUid: 'a', eventId: 'event', checkedInAt: true, eventDate: '2026-10-01' };
+  assert.equal(summary.needsReview(record, event), false);
+  now = 3000;
+  const result = summary.summarize({ uid: 'a' }, [event], [record]);
+  assert.equal(result.review.length, 1); assert.equal(result.absences.length, 0); assert.equal(result.attendedCount, 1);
+  assert.equal(summary.needsReview({ ...record, checkedOutAt: true }, event), false);
+});
+
+test('today totals include scheduled active participants only and no event means zero pending', async () => {
+  const { AttendanceSummaryService } = await isolatedModule('assets/js/controllers/AttendanceSummaryService.js');
+  const summary = new AttendanceSummaryService({});
+  const students = [{ uid: 'a' }, { uid: 'b' }, { uid: 'c', active: false }, { uid: 'd' }];
+  const event = { date: '2026-10-01', attendanceRoster: { a: '2A', b: '2A', c: '2A' } };
+  const records = [{ studentUid: 'a', eventDate: event.date, checkedInAt: true }];
+  const totals = summary.today(students, [event], records, event.date);
+  assert.equal(totals.pending, 1); assert.equal(totals.expected, 2); assert.equal(totals.rate, 50);
+  assert.equal(summary.today(students, [], [], event.date).pending, 0);
+  assert.equal(Object.keys(summary.captureRoster([{ uid: 'a', section: '2A' }, { uid: 'b', section: '2B' }, { uid: 'c', section: '2A', active: false }], { audience: 'Section 2A' })).join(','), 'a');
+});
+
+test('submission retries preserve existing attendance and reconcile a competing tab', async () => {
+  const { AttendanceSubmissionService } = await isolatedModule('assets/js/controllers/AttendanceSubmissionService.js');
+  let writes = 0, reads = 0;
+  const snapshot = exists => ({ exists: () => exists, data: () => ({ checkedInAt: true }) });
+  const service = new AttendanceSubmissionService({ read: async () => snapshot(true), write: async () => writes++ });
+  const request = { reference: { id: 'a_event' }, matches: record => Boolean(record.checkedInAt), payload: {} };
+  assert.equal((await service.submit(request)).state, 'existing'); assert.equal(writes, 0);
+  service.read = async () => snapshot(++reads > 1);
+  service.write = async () => { writes++; throw Object.assign(new Error('Duplicate rejected'), { code: 'permission-denied' }); };
+  assert.equal((await service.submit(request)).state, 'existing'); assert.equal(writes, 1);
+});
+
+test('acknowledged save with failed confirmation is not reported as a failed save', async () => {
+  const { AttendanceSubmissionService } = await isolatedModule('assets/js/controllers/AttendanceSubmissionService.js');
+  let reads = 0;
+  const service = new AttendanceSubmissionService({ read: async () => { if (++reads === 1) return { exists: () => false }; throw new Error('Offline'); }, write: async () => {} });
+  const request = { reference: { id: 'a_event' }, matches: () => true, payload: {} };
+  assert.equal((await service.submit(request)).state, 'confirmation-pending'); assert.equal(service.pending.size, 0);
+  service.read = async () => ({ exists: () => false });
+  service.write = async () => { throw new Error('Write rejected'); };
+  await assert.rejects(service.submit(request), /Write rejected/);
+});
+
+test('concurrent submission is blocked while the first operation is pending', async () => {
+  const { AttendanceSubmissionService } = await isolatedModule('assets/js/controllers/AttendanceSubmissionService.js');
+  let finish;
+  const service = new AttendanceSubmissionService({ read: async () => ({ exists: () => false }), write: () => new Promise(resolve => { finish = resolve; }) });
+  const request = { reference: { id: 'a_event' }, matches: () => true, payload: {} };
+  const first = service.submit(request); await Promise.resolve();
+  assert.equal((await service.submit(request)).state, 'busy'); finish();
+  assert.equal((await first).state, 'confirmation-pending'); assert.equal(service.pending.size, 0);
+});
+
+for (const outcome of ['late', 'closed', 'cancelled']) {
+  test(`GPS crossing a cutoff handles ${outcome} before writing`, async () => {
+    const writes = [], publications = [];
+    const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks({
+      setDoc: async (...args) => writes.push(args),
+      getDocFromServer: async reference => ({ id: reference.id, exists: () => reference.collection === 'faceRegistrations' || writes.length > 0,
+        data: () => reference.collection === 'faceRegistrations' ? { registered: true } : { studentUid: 'student-1', eventId: 'event', checkedInAt: true, arrivalStatus: 'late' } })
+    }), { document: gridDocument });
+    let begins = 0;
+    const checkIn = { begin: async () => ++begins === 1 ? { available: true, arrivalStatus: 'present' }
+      : outcome === 'cancelled' ? { available: false, cancelled: true } : { available: true, arrivalStatus: 'late' },
+      policy: { evaluateCheckIn: () => outcome === 'closed' ? { available: false } : { available: true, arrivalStatus: 'late' } } };
+    const controller = new StudentAttendanceController({ getState: () => ({ events: [{ id: 'event', requiresGeofence: true }], attendance: [] }), setFaceRegistration() {}, checkIn, bridge: { publish: (...args) => publications.push(args) } });
+    controller.verifiedGeofenceLocation = async () => ({ latitude: 14, longitude: 121 });
+    const button = { dataset: { attendEvent: 'event' } };
+    await controller.handleEventClick({ target: { closest: selector => selector === '[data-attend-event]' ? button : null } });
+    assert.equal(writes.length, outcome === 'late' ? 1 : 0);
+    if (writes.length) assert.equal(writes[0][1].arrivalStatus, 'late');
+    else assert.equal(button.disabled, false);
+  });
+}
+
+test('history reads are bounded, date-filtered, and use server document cursors', async () => {
+  const { AttendanceRepository } = await isolatedModule('assets/js/controllers/AttendanceHistoryController.js');
+  const requests = [], docs = [{ id: 'one', data: () => ({ eventDate: '2026-10-01' }) }];
+  const repository = new AttendanceRepository({}, async reference => { requests.push(reference); return { docs }; });
+  const result = await repository.page({ from: '2026-10-01', to: '2026-10-02', size: 1 });
+  assert.equal(result.more, true); assert.equal(result.cursor, docs[0]);
+  assert.match(JSON.stringify(requests[0]), /eventDate.*desc/); assert.match(JSON.stringify(requests[0]), /2026-10-01/); assert.match(JSON.stringify(requests[0]), /limit/);
+  await repository.page({ cursor: result.cursor });
+  assert.equal(requests[1].some(item => item?.cursor === result.cursor), true);
+});
+
+test('history filters use historical sections and pagination discards stale responses', async () => {
+  const browser = fakeBrowser();
+  const { AttendanceHistoryController } = await isolatedModule('assets/js/controllers/AttendanceHistoryController.js', {}, browser);
+  let finish, calls = 0; const rows = [], errors = [];
+  const repository = { page: () => ++calls === 1 ? new Promise(resolve => { finish = resolve; })
+    : Promise.resolve({ records: [{ id: 'new', studentUid: 'a', eventId: 'event', eventDate: '2026-10-01' }], more: false }) };
+  const controller = new AttendanceHistoryController({ repository, getStudents: () => [{ uid: 'a', section: '2B', firstName: 'Apollo' }],
+    getEvents: () => [{ id: 'event', attendanceRoster: { a: '2A' } }], summary: { needsReview: () => true }, render: records => rows.push(records), notify: (...args) => errors.push(args) });
+  controller.initialize(); controller.initialize();
+  browser.document.querySelector('#attendanceSection').value = '2A';
+  browser.document.querySelector('#attendanceStatus').value = 'review';
+  browser.document.querySelector('#attendanceStudentSearch').value = 'apollo';
+  const old = controller.reload(); const recent = controller.reload(); await recent;
+  finish({ records: [{ id: 'stale' }], more: true }); await old;
+  assert.equal(controller.records.length, 1); assert.equal(controller.filtered()[0].id, 'new');
+  browser.document.querySelector('#attendanceFromDate').value = '2026-10-02'; browser.document.querySelector('#attendanceToDate').value = '2026-10-01';
+  await controller.reload(); assert.equal(errors.at(-1)[0], 'Invalid date range'); assert.equal(calls, 2);
+  controller.dispose();
+});
+
+test('student attendance pages retain filters and clamp after records change', async () => {
+  const browser = fakeBrowser();
+  const { StudentAttendanceListController } = await isolatedModule('assets/js/controllers/StudentAttendanceListController.js', {}, browser);
+  const controller = new StudentAttendanceListController({ summary: { needsReview: record => record.review }, getEvents: () => [], render() {}, pageSize: 1 });
+  controller.initialize();
+  browser.document.querySelector('#studentAttendanceStatus').value = 'review';
+  const records = [{ id: '1', review: true }, { id: '2', review: false }, { id: '3', review: true }];
+  assert.equal(controller.select(records)[0].id, '1'); controller.page++;
+  assert.equal(controller.select(records)[0].id, '3');
+  assert.equal(controller.select([records[0]])[0].id, '1'); assert.equal(controller.page, 0);
+  controller.dispose(); controller.dispose();
+});
+
+test('unknown network outcomes do not falsely claim a save was accepted', async () => {
+  const { AttendanceSubmissionService } = await isolatedModule('assets/js/controllers/AttendanceSubmissionService.js');
+  let reads = 0;
+  const service = new AttendanceSubmissionService({ read: async () => { if (++reads === 1) return { exists: () => false }; throw new Error('Offline'); },
+    write: async () => { throw Object.assign(new Error('Connection lost'), { code: 'unavailable' }); } });
+  assert.equal((await service.submit({ reference: { id: 'a_event' }, matches: () => true, payload: {} })).state, 'unknown');
+});
+
+test('loading sparse matches fills the current page before advancing and live watch is disposed', async () => {
+  const browser = fakeBrowser();
+  const { AttendanceHistoryController } = await isolatedModule('assets/js/controllers/AttendanceHistoryController.js', {}, browser);
+  let calls = 0, stops = 0, receive;
+  const repository = { page: async () => ({ records: ++calls === 1 ? [{ id: '1' }] : [{ id: '2' }, { id: '3' }], more: true }),
+    watch: (_, callback) => { receive = callback; return () => stops++; } };
+  const controller = new AttendanceHistoryController({ repository, getStudents: () => [], getEvents: () => [], summary: { needsReview: () => false }, render() {}, notify() {}, pageSize: 2 });
+  controller.initialize(); await controller.reload();
+  await controller.onNext(); assert.equal(controller.page, 0); assert.equal(controller.records.length, 3);
+  await controller.onNext(); assert.equal(controller.page, 1);
+  controller.suspend(); assert.equal(stops, 1);
+  receive([{ id: 'stale' }]); assert.equal(controller.records.length, 3);
+  controller.dispose();
+});
+
+test('new attendance controllers reference controls that exist in their dashboard HTML', () => {
+  const cases = [['AttendanceHistoryController.js', 'admin'], ['StudentAttendanceListController.js', 'student']];
+  for (const [filename, role] of cases) {
+    const source = fs.readFileSync(path.join(root, 'assets/js/controllers', filename), 'utf8');
+    const html = fs.readFileSync(path.join(root, `pages/${role}-dashboard.html`), 'utf8');
+    for (const match of source.matchAll(/(?:querySelector|value)\('(#\w+)'\)/g)) assert.ok(html.includes(`id="${match[1].slice(1)}"`), match[1]);
+  }
+});
+
+test('shared attendance toolbar resets filters, expands accessibly, and cleans up once', async () => {
+  const browser = fakeBrowser();
+  const { AttendanceToolbarController } = await isolatedModule('assets/js/controllers/AttendanceToolbarController.js', {}, browser);
+  const form = browser.document.querySelector('#attendanceFilters');
+  let added = 0, removed = 0, resets = 0, clears = 0, focused = 0, expanded;
+  form.reset = () => resets++;
+  form.classList.toggle = (_, value) => { expanded = value; };
+  for (const target of [browser.document, browser.document.querySelector('#attendanceClearFilters'), browser.document.querySelector('#attendanceToggleFilters')]) {
+    target.addEventListener = () => added++;
+    target.removeEventListener = () => removed++;
+  }
+  const toolbar = new AttendanceToolbarController({ form, prefix: 'attendance', onClear: () => clears++ });
+  toolbar.initialize(); toolbar.initialize();
+  assert.equal(added, 3); assert.equal(expanded, false);
+  let aria;
+  toolbar.toggle.setAttribute = (name, value) => { if (name === 'aria-expanded') aria = value; };
+  toolbar.onToggle(); assert.equal(expanded, true); assert.equal(aria, 'true');
+  toolbar.onReset(); assert.equal(resets, 1); assert.equal(clears, 1);
+  toolbar.help.open = true;
+  toolbar.help.querySelector('summary').focus = () => focused++;
+  toolbar.onEscape({ key: 'Escape' });
+  assert.equal(toolbar.help.open, false); assert.equal(focused, 1);
+  toolbar.dispose(); toolbar.dispose(); assert.equal(removed, 3);
+});
+
+test('admin empty results keep Load more available when server records remain', async () => {
+  const browser = fakeBrowser();
+  const { AttendanceHistoryController } = await isolatedModule('assets/js/controllers/AttendanceHistoryController.js', {}, browser);
+  let state;
+  const controller = new AttendanceHistoryController({ repository: {}, getStudents: () => [], getEvents: () => [], summary: { needsReview: () => false }, render: (_, next) => { state = next; }, notify() {} });
+  controller.initialize(); controller.records = []; controller.more = false; controller.draw();
+  assert.equal(browser.document.querySelector('#attendancePagination').hidden, true);
+  controller.more = true; controller.draw();
+  assert.equal(browser.document.querySelector('#attendancePagination').hidden, false);
+  assert.equal(controller.next.disabled, false); assert.equal(controller.next.textContent, 'Load more');
+  assert.equal(state.partial, true);
+  controller.dispose();
+});
+
+test('student pagination hides unnecessary controls and shows accurate ranges', async () => {
+  const browser = fakeBrowser();
+  const { StudentAttendanceListController } = await isolatedModule('assets/js/controllers/StudentAttendanceListController.js', {}, browser);
+  const controller = new StudentAttendanceListController({ summary: { needsReview: () => false }, getEvents: () => [], render() {}, pageSize: 2 });
+  controller.initialize(); controller.select([]);
+  assert.equal(browser.document.querySelector('#studentAttendancePagination').hidden, true);
+  const records = [{ id: '1' }, { id: '2' }, { id: '3' }];
+  controller.select(records.slice(0, 2));
+  assert.equal(browser.document.querySelector('#studentAttendancePaginationControls').hidden, true);
+  controller.select(records); controller.page = 1; controller.select(records);
+  assert.equal(browser.document.querySelector('#studentAttendancePaginationControls').hidden, false);
+  assert.equal(browser.document.querySelector('#studentAttendancePageInfo').textContent, '3–3 of 3 records');
+  controller.toolbar.onReset(); assert.equal(controller.page, 0);
+  controller.dispose();
+});
+
+test('attendance toolbars have matching HTML controls and honest partial empty states', async () => {
+  for (const [role, prefix] of [['admin', 'attendance'], ['student', 'studentAttendance']]) {
+    const html = fs.readFileSync(path.join(root, `pages/${role}-dashboard.html`), 'utf8');
+    for (const suffix of ['ClearFilters', 'ToggleFilters', 'Help', 'CurrentPage', 'Pagination', 'PaginationControls']) assert.ok(html.includes(`id="${prefix}${suffix}"`));
+    assert.ok(html.includes('aria-expanded="false"'));
+  }
+  const { AttendanceToolbarController } = await isolatedModule('assets/js/controllers/AttendanceToolbarController.js');
+  assert.match(AttendanceToolbarController.emptyState({ partial: true }), /Load more to continue searching/);
+  assert.match(AttendanceToolbarController.emptyState({ filtered: true }), /Try clearing your filters/);
+  assert.match(AttendanceToolbarController.emptyState({ busy: true }), /Loading attendance/);
 });

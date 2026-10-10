@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261010-theme">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261010-attendance-ui">
   <link rel="stylesheet" href="../assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261010-shared-theme">
 </head>
@@ -68,8 +68,27 @@
         </section>
 
         <section class="view-section" data-section="attendance-line" hidden>
-          <div class="section-head"><div><p class="eyebrow">Real-time attendance</p><h2>Attendance Line</h2><p>See student check-ins and check-outs as they are recorded.</p></div><div class="button-row"><span class="badge gray" id="attendanceSyncStatus" role="status" aria-live="polite">Connecting…</span><button class="outline-button" id="syncAttendanceNow" type="button">↻ Sync now</button><select id="adminAttendanceEventFilter" aria-label="Filter attendance by event"><option value="all">All events</option></select></div></div>
-          <article class="panel"><button class="outline-button" type="button" id="addAttendanceCorrection">Set attendance / manual correction</button><div class="attendance-line" id="adminAttendanceLine"><div class="empty-state">No attendance records yet.</div></div></article>
+          <div class="section-head attendance-section-head"><h2>Attendance records</h2><div class="button-row attendance-header-actions">
+            <span class="badge gray" id="attendanceSyncStatus" role="status" aria-live="polite">Connecting…</span>
+            <button class="outline-button" id="syncAttendanceNow" type="button"><span aria-hidden="true">↻</span> Refresh</button>
+            <button class="primary-button" type="button" id="addAttendanceCorrection"><span aria-hidden="true">＋</span> Set attendance</button>
+            <details class="attendance-help" id="attendanceHelp"><summary aria-label="Attendance help"><span aria-hidden="true">i</span></summary><div class="attendance-help-content"><strong>About these records</strong><p>Dates filter server records. Other filters search loaded records; use Load more to continue.</p><p>Section uses the event roster when available, otherwise the current profile.</p><p>Missed checkout needs review, not an automatic absence or fine.</p></div></details>
+          </div></div>
+          <article class="panel attendance-workspace">
+            <form id="attendanceFilters" class="attendance-filters">
+              <label class="attendance-search-field">Student<input type="search" id="attendanceStudentSearch" placeholder="Search name, ID or email"></label>
+              <button class="outline-button attendance-filter-toggle" id="attendanceToggleFilters" type="button" aria-expanded="false" aria-controls="attendanceAdvancedFilters">Filters</button>
+              <div class="attendance-filter-options" id="attendanceAdvancedFilters">
+              <label>From<input type="date" id="attendanceFromDate"></label><label>To<input type="date" id="attendanceToDate"></label>
+              <label>Section<select id="attendanceSection"><option value="">All sections</option><option>1A</option><option>1B</option><option>2A</option><option>2B</option><option>3A</option><option>3B</option><option>4A</option><option>4B</option></select></label>
+              <label>Event<select id="adminAttendanceEventFilter"><option value="all">All events</option></select></label>
+              <label>Status<select id="attendanceStatus"><option value="">All statuses</option><option value="checked-in">Checked in</option><option value="completed">Completed</option><option value="review">Needs review — missed checkout</option></select></label>
+              </div>
+              <div class="attendance-filter-actions"><button class="link-button" id="attendanceClearFilters" type="button">Clear</button><button class="primary-button" type="submit">Apply</button></div>
+            </form>
+            <div class="attendance-line attendance-results" id="adminAttendanceLine"><div class="attendance-empty"><h3>No attendance records yet.</h3></div></div>
+            <div class="attendance-pagination" id="attendancePagination" hidden><span id="attendancePageInfo" role="status" aria-live="polite"></span><div class="attendance-page-actions" id="attendancePaginationControls"><button class="outline-button" id="previousAttendancePage" type="button">Previous</button><span class="attendance-page-number" id="attendanceCurrentPage" aria-label="Current page">1</span><button class="outline-button" id="nextAttendancePage" type="button">Load more</button></div></div>
+          </article>
         </section>
 
         <section class="view-section" data-section="create" hidden>
@@ -279,7 +298,7 @@
     </section>
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
-  <script type="module" src="../assets/js/dashboard.js?v=20261009-oop"></script>
+  <script type="module" src="../assets/js/dashboard.js?v=20261010-attendance-ui"></script>
 <div class="dashboard-modal-backdrop" id="attendanceCorrectionModal" hidden>
     <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="correctionTitle">
       <button class="modal-close" type="button" data-close-correction aria-label="Close">×</button>

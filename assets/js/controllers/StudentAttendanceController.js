@@ -1,9 +1,13 @@
-import { currentUser, currentUserProfile, showDashboardToast, openView, isCheckoutAvailable, db, Timestamp, doc, getDocFromServer, serverTimestamp, setDoc } from '../dashboard.js?v=20261009-oop';
+import { currentUser, currentUserProfile, showDashboardToast, openView, isCheckoutAvailable, db, Timestamp, doc, getDocFromServer, serverTimestamp, setDoc } from '../dashboard.js?v=20261010-attendance-ui';
 const GEOFENCE_GPS_ALLOWANCE_CAP_METERS = 20;
+import { AttendanceSubmissionService } from './AttendanceSubmissionService.js';
 
 export class StudentAttendanceController {
   constructor({ getState, setFaceRegistration, showError, bridge, checkIn }) {
     Object.assign(this, { getState, setFaceRegistration, showError, bridge, checkIn });
+    this.submission = new AttendanceSubmissionService({ read: getDocFromServer, write: setDoc,
+      onWaiting: () => showDashboardToast('Waiting for the server', 'Attendance is still awaiting a server response. Keep this page open and do not submit again.') });
+    this.checkoutBusy = new Set();
     this.grid = document.querySelector('#studentEventGrid');
     this.listener = event => {
       if (this.busy) return;
@@ -91,32 +95,35 @@ export class StudentAttendanceController {
   }
 
   async checkOutAttendance(record, event, button) {
+    if (this.checkoutBusy.has(record?.eventId)) return;
     if (!record || !event || !isCheckoutAvailable(event)) {
       showDashboardToast("Checkout unavailable", "Checkout is available from Time Out until the event's checkout cutoff.");
       return;
     }
     button.disabled = true;
+    this.checkoutBusy.add(record.eventId);
     try {
       let checkOutLocation;
       if (event.requiresGeofence) {
         checkOutLocation = await this.verifiedGeofenceLocation(event);
       }
+      if (!isCheckoutAvailable(event)) throw new Error('The checkout window closed while checking your location. Ask an Attendance Manager to review your record.');
       const attendanceReference = doc(db, "attendance", `${currentUser.uid}_${record.eventId}`);
-      await setDoc(attendanceReference, {
+      const result = await this.submission.submit({ reference: attendanceReference,
+        matches: data => data.studentUid === currentUser.uid && data.eventId === record.eventId && Boolean(data.checkedOutAt),
+        payload: {
         ...(checkOutLocation ? { checkOutLocation } : {}),
         checkedOutAt: serverTimestamp(),
         status: "completed"
-      }, { merge: true });
-      this.bridge.publish(attendanceReference.id, {
-        ...record,
-        ...(checkOutLocation ? { checkOutLocation } : {}),
-        checkedOutAt: Timestamp.now(),
-        status: "completed"
-      });
-      const savedRecord = await getDocFromServer(attendanceReference);
-      if (!savedRecord.exists() || savedRecord.data().status !== "completed" || !savedRecord.data().checkedOutAt) {
-        throw new Error("Checkout is still waiting to sync. Please try again in a moment.");
+      }, options: { merge: true } });
+      if (result.state === 'busy') { button.disabled = false; return; }
+      if (result.state === 'unknown') {
+        showDashboardToast('Checkout status unknown', 'The connection failed before checkout could be confirmed. Refresh to check the saved record before retrying.'); button.disabled = false; return;
       }
+      if (result.state === 'confirmation-pending') {
+        showDashboardToast('Checkout saved — confirmation pending', 'The server accepted your checkout. Do not submit again; refresh when your connection recovers.'); return;
+      }
+      const savedRecord = result.snapshot;
       this.bridge.publish(savedRecord.id, savedRecord.data());
       showDashboardToast("Checkout recorded", "Your attendance record now includes your checkout time.");
     } catch (error) {
@@ -130,6 +137,8 @@ export class StudentAttendanceController {
         showDashboardToast("Unable to check out", error.message || "Try again while you are in the attendance area.");
       }
       button.disabled = false;
+    } finally {
+      this.checkoutBusy.delete(record.eventId);
     }
   }
   async handleEventClick(clickEvent) {
@@ -158,7 +167,7 @@ export class StudentAttendanceController {
       openView("face");
       return;
     }
-    const checkInResult = await this.checkIn.begin(selectedEvent, button);
+    let checkInResult = await this.checkIn.begin(selectedEvent, button);
     if (!checkInResult.available) {
       if (!checkInResult.cancelled) showDashboardToast("Attendance unavailable", "Attendance is allowed from Time In until Time Out. Check-ins after the cutoff are marked Late.");
       return;
@@ -169,6 +178,18 @@ export class StudentAttendanceController {
       if (selectedEvent.requiresGeofence) {
         showDashboardToast("Checking your location", "Allow location access to confirm you are in the attendance area.");
         checkInLocation = await this.verifiedGeofenceLocation(selectedEvent);
+      }
+      // GPS can take 15 seconds. Re-evaluate and request late consent if the
+      // cutoff was crossed; never silently submit the original Present label.
+      if (this.checkIn.policy) {
+        const latest = this.checkIn.policy.evaluateCheckIn(selectedEvent);
+        if (latest.arrivalStatus !== checkInResult.arrivalStatus && latest.available) checkInResult = await this.checkIn.begin(selectedEvent, button);
+        else checkInResult = latest;
+        if (!checkInResult.available) {
+          button.disabled = false;
+          if (!checkInResult.cancelled) showDashboardToast('Attendance window closed', 'The window closed while verifying your location. Ask an Attendance Manager to review your attendance.');
+          return;
+        }
       }
       const attendanceReference = doc(db, "attendance", `${currentUser.uid}_${selectedEvent.id}`);
       const attendancePayload = {
@@ -189,24 +210,19 @@ export class StudentAttendanceController {
         status: "checked-in",
         arrivalStatus: checkInResult.arrivalStatus
       };
-      await setDoc(attendanceReference, attendancePayload);
-      const checkedInAt = Timestamp.now();
-      this.bridge.publish(attendanceReference.id, {
-        ...attendancePayload,
-        attendedAt: checkedInAt,
-        checkedInAt
-      });
-      const savedRecord = await getDocFromServer(attendanceReference);
-      if (!savedRecord.exists()
-        || savedRecord.data().studentUid !== currentUser.uid
-        || savedRecord.data().eventId !== selectedEvent.id
-        || savedRecord.data().status !== "checked-in"
-        || savedRecord.data().arrivalStatus !== checkInResult.arrivalStatus
-        || !savedRecord.data().checkedInAt) {
-        throw new Error("Attendance is still waiting to sync. Please try again in a moment.");
+      const result = await this.submission.submit({ reference: attendanceReference, payload: attendancePayload,
+        matches: data => data.studentUid === currentUser.uid && data.eventId === selectedEvent.id && Boolean(data.checkedInAt) });
+      if (result.state === 'busy') { button.disabled = false; return; }
+      if (result.state === 'unknown') {
+        showDashboardToast('Attendance status unknown', 'The connection failed before attendance could be confirmed. Refresh to check the saved record before retrying.'); button.disabled = false; return;
       }
+      if (result.state === 'confirmation-pending') {
+        showDashboardToast('Attendance saved — confirmation pending', 'The server accepted your attendance. Do not submit again; refresh when your connection recovers.'); return;
+      }
+      const savedRecord = result.snapshot;
       this.bridge.publish(savedRecord.id, savedRecord.data());
-      showDashboardToast(checkInResult.arrivalStatus === "late" ? "Late attendance recorded" : "Attendance recorded", checkInResult.arrivalStatus === "late" ? "Your attendance was saved as Late." : "Your attendance was saved successfully.");
+      if (result.state === 'existing') showDashboardToast('Attendance already recorded', 'Your existing check-in was preserved; no duplicate was created.');
+      else showDashboardToast(savedRecord.data().arrivalStatus === "late" ? "Late attendance recorded" : "Attendance recorded", savedRecord.data().arrivalStatus === "late" ? "Your attendance was saved as Late." : "Your attendance was saved successfully.");
     } catch (error) {
       if (error.geofenceIssue === "location") {
         this.showError("Allow location for Presence", "Your device location may be on, but this browser has not allowed this site to use it. Click the site controls icon to the left of the address bar, set Location to Allow, then reload this page and try again.");

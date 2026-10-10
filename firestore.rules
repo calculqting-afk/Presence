@@ -92,7 +92,7 @@ service cloud.firestore {
       return data.keys().hasOnly([
           "name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff",
           "audience", "description", "notes", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt",
-          "checkOutClosesAt", "createdAt", "createdBy", "updatedAt"
+          "checkOutClosesAt", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt"
         ])
         && data.keys().hasAll(["name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "audience", "description", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt"])
         && shortText(data.name, 160) && shortText(data.type, 60) && shortText(data.date, 10)
@@ -101,6 +101,9 @@ service cloud.firestore {
         && data.audience in ["All students", "Section 1A", "Section 1B", "Section 2A", "Section 2B", "Section 3A", "Section 3B", "Section 4A", "Section 4B"]
         && shortText(data.description, 4000) && optionalShortText(data, "notes", 4000)
         && data.requiresGeofence is bool
+        && (("attendanceRoster" in data) == ("rosterCapturedAt" in data))
+        && (!("attendanceRoster" in data) || (data.attendanceRoster is map
+          && data.attendanceRoster.keys().size() <= 5000 && data.rosterCapturedAt is timestamp))
         && data.openAt is timestamp && data.checkInClosesAt is timestamp && data.closeAt is timestamp && data.checkOutClosesAt is timestamp
         && (!('createdAt' in data) || data.createdAt is timestamp)
         && optionalShortText(data, "createdBy", 128)
@@ -229,8 +232,13 @@ service cloud.firestore {
     function studentCanReadEventGeofence(eventId) {
       return isStudent()
         && exists(/databases/$(database)/documents/events/$(eventId))
-        && (get(/databases/$(database)/documents/events/$(eventId)).data.audience == "All students"
-          || get(/databases/$(database)/documents/events/$(eventId)).data.audience == "Section " + get(/databases/$(database)/documents/students/$(request.auth.uid)).data.section);
+        && eligibleForAttendance(get(/databases/$(database)/documents/events/$(eventId)).data,
+          get(/databases/$(database)/documents/students/$(request.auth.uid)).data, request.auth.uid);
+    }
+
+    function eligibleForAttendance(event, student, uid) {
+      return ("attendanceRoster" in event) ? uid in event.attendanceRoster
+        : (event.audience == "All students" || event.audience == "Section " + student.section);
     }
 
     function studentCanCheckIn(attendanceId, data) {
@@ -244,7 +252,7 @@ service cloud.firestore {
         && data.studentUid == request.auth.uid
         && data.studentId == student.accountId
         && attendanceMatchesEvent(data, event)
-        && (event.audience == "All students" || event.audience == "Section " + student.section)
+        && eligibleForAttendance(event, student, request.auth.uid)
         && request.time >= event.openAt && request.time < event.closeAt
         && data.attendedAt == request.time && data.checkedInAt == request.time
         && data.keys().hasAll(["arrivalStatus"])
@@ -277,7 +285,7 @@ service cloud.firestore {
       return canManageAttendance() && validAttendance(data)
         && attendanceId == data.studentUid + "_" + data.eventId
         && student.active == true && data.studentId == student.accountId
-        && (event.audience == "All students" || event.audience == "Section " + student.section)
+        && eligibleForAttendance(event, student, data.studentUid)
         && attendanceMatchesEvent(data, event)
         && data.recordSource == "admin-corrected" && data.correctedBy == request.auth.uid
         && shortText(data.correctionId, 128) && data.correctionId.matches('^[A-Za-z0-9_-]+$')
@@ -359,7 +367,14 @@ service cloud.firestore {
         && request.resource.data.checkOutClosesAt is timestamp
         && request.resource.data.openAt < request.resource.data.checkInClosesAt
         && request.resource.data.checkInClosesAt <= request.resource.data.closeAt
-        && request.resource.data.closeAt < request.resource.data.checkOutClosesAt;
+        && request.resource.data.closeAt < request.resource.data.checkOutClosesAt
+        && (!exists(/databases/$(database)/documents/events/$(eventId))
+          ? (request.resource.data.keys().hasAll(["attendanceRoster", "rosterCapturedAt"])
+            && request.resource.data.rosterCapturedAt == request.time)
+          : (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["attendanceRoster", "rosterCapturedAt"])
+            || (resource.data.openAt > request.time
+              && request.resource.data.keys().hasAll(["attendanceRoster", "rosterCapturedAt"])
+              && request.resource.data.rosterCapturedAt == request.time)));
       // Deletion is deliberately stricter than event editing. This protects
       // the operational-data reset from being triggered by other admin roles.
       allow delete: if isSuperAdmin();

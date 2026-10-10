@@ -639,8 +639,8 @@ async function initialize() {
     : "Student";
   updateDashboardGreeting(displayName);
   const module = dashboardRole === "student"
-    ? await import("./student/StudentDashboard.js")
-    : await import("./admin/AdminDashboard.js");
+    ? await import("./student/StudentDashboard.js?v=20261010-attendance-ui")
+    : await import("./admin/AdminDashboard.js?v=20261010-attendance-ui");
   const Dashboard = dashboardRole === "student" ? module.StudentDashboard : module.AdminDashboard;
   const dashboard = new Dashboard();
   sessionState.dashboard = dashboard;
