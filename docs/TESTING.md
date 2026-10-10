@@ -113,6 +113,33 @@ Use the emulator Requests tab and rule-coverage report to inspect failures. For 
 
 Current limitation to verify: the existing attendance rules require valid location fields and an enabled geofence, while the radius-distance calculation is performed in the browser. A successful browser outside-area test does not prove that a direct SDK request with forged coordinates is blocked. Include that direct-request case in security testing; this refactor did not add server-side distance enforcement.
 
+## Circle and polygon boundary checks
+
+### First check-in and rejection regression
+
+After publishing the current `firestore.rules`, use a new event with no attendance document for the test student. Verify its initial document GET succeeds with `exists() == false`, then check-in creates exactly one record. Reload/retry and verify the original timestamp is preserved; complete checkout and verify only checkout fields change.
+
+Rules-emulator/Playground cases: active student can GET their own missing `<uid>_<eventId>` document; another student's missing/existing document is denied; logged-out/inactive accounts are denied; owner-constrained attendance queries work, and unfiltered student queries remain denied. Existing records with another owner must stay denied even if their ID begins with the current student's UID. Check-in write restrictions for roster, face registration, server window, identity, timestamps and duplicate overwrites are unchanged.
+
+The missing-document exception accepts the application's alphanumeric/hyphen/underscore UID and event-ID format. It does not permit collection listing or reveal existing foreign records. Automated rules checks here are structural only, not an emulator authorization test.
+
+Also test browser GPS failure/timeout and invalid coordinates, malformed event dates, and permission failures during preflight versus save. Error messages should identify the failing stage without asking a GPS-timeout user to change an already-granted permission.
+
+Publish the updated `firestore.rules` before saving polygon areas. Existing documents without `type` are circles; no data migration is needed.
+
+- As Super Admin, Head Admin, and Attendance Admin, open Create Events and Geofence Locations. Select Circle or Polygon and confirm the relevant controls appear.
+- Circle: set a center/radius, save and reload. Confirm the legacy circle still works.
+- Polygon: place 3–10 points in boundary order, Close boundary, save, then reopen. Confirm its shape is restored. Undo should reopen it; Clear boundary should remove all vertices.
+- Reject fewer than three points, crossed/duplicate/collinear edges, a boundary spanning over 10 km from its first point, and saving an unclosed shape.
+- Switching types must show only the selected overlay and save only that type's coordinates. Search in polygon mode should navigate the map without adding a vertex.
+- Check student check-in AND checkout inside/outside each boundary. Test polygon edge/vertex, a concave notch, and GPS accuracy over 20 m: the allowance remains capped at 20 m.
+- Student Manager and student must not manage geofences, including direct unauthorized Firestore writes. Test these denials in the emulator.
+- Verify light/navy and mobile placement; inspect the browser console for map/load errors.
+
+Geometry and shape validation run in the browser. Firestore rules validate vertex count, coordinate types/ranges, and authorized writers, but do not enforce polygon topology or prove physical presence. Direct forged GPS submissions remain a known limitation. Automated Node tests are mocked; they do not replace live-device GPS tests or emulator rule tests. The Firestore emulator was not run here because Java is unavailable on PATH.
+
+Implementation uses the existing [Leaflet polygon API](https://leafletjs.com/reference-1.9.4.html#polygon), without an additional drawing plugin.
+
 ## Official testing references
 
 - [Firebase: test Cloud Firestore Security Rules](https://firebase.google.com/docs/firestore/security/test-rules-emulator)

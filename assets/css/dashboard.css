@@ -818,6 +818,10 @@ body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
 /* Shared attendance workspace: scoped styles avoid browser-default controls. */
+.geofence-boundary-tools { margin: 16px 0; display: grid; gap: 12px; }
+.geofence-boundary-tools > .field { max-width: 320px; }
+.geofence-boundary-tools .form-actions { margin: 0 0 10px; flex-wrap: wrap; }
+.geofence-fields .field[hidden], .geofence-boundary-tools [hidden] { display: none !important; }
 .attendance-section-head { align-items: center; gap: 20px; }
 .attendance-section-head h2 { margin: 0; font-size: 1.3rem; }
 .attendance-header-actions { flex-wrap: wrap; justify-content: flex-end; }

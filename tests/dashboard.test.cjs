@@ -126,6 +126,132 @@ function attendanceMocks(overrides = {}) {
 }
 const gridDocument = { querySelector: () => ({ addEventListener() {}, removeEventListener() {} }) };
 
+test('submission preflight failure never writes and identifies the failing stage', async () => {
+  const { AttendanceSubmissionService } = await isolatedModule('assets/js/controllers/AttendanceSubmissionService.js');
+  let writes = 0;
+  const service = new AttendanceSubmissionService({ read: async () => { throw Object.assign(new Error('Denied'), { code: 'permission-denied' }); }, write: async () => writes++ });
+  await assert.rejects(service.submit({ reference: { id: 'student_event' }, matches: () => false, payload: {} }), error => error.attendanceStage === 'preflight');
+  assert.equal(writes, 0); assert.equal(service.pending.size, 0);
+  service.read = async () => ({ exists: () => false });
+  service.write = async () => { throw Object.assign(new Error('Denied'), { code: 'permission-denied' }); };
+  await assert.rejects(service.submit({ reference: { id: 'student_event' }, matches: () => false, payload: {} }), error => error.attendanceStage === 'write');
+  assert.equal(service.pending.size, 0);
+});
+
+test('attendance policy rejects malformed, reversed and nonfinite window dates', async () => {
+  const { AttendancePolicy } = await isolatedModule('assets/js/controllers/AttendanceController.js', { currentUser: {}, currentUserRole: 'student', formatEventTime: value => value });
+  const policy = new AttendancePolicy({ eventOpenDate: event => event.open, eventCloseDate: event => event.close, eventCheckInCloseDate: event => event.cutoff });
+  for (const event of [
+    { open: new Date(NaN), close: new Date(3000), cutoff: new Date(2000) },
+    { open: new Date(3000), close: new Date(1000), cutoff: new Date(2000) },
+    { open: new Date(1000), close: new Date(3000), cutoff: new Date(4000) },
+    { open: new Date(1000), close: new Date(3000), cutoff: new Date(500) }
+  ]) assert.equal(policy.evaluateCheckIn(event, new Date(2000)).reason, 'invalid-window');
+});
+
+test('invalid GPS cannot pass either geometry check and errors distinguish preflight from save', async () => {
+  const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks(), { document: gridDocument });
+  const messages = [];
+  const controller = new StudentAttendanceController({ showError: (...args) => messages.push(args) });
+  for (const coords of [{ latitude: NaN, longitude: 121 }, { latitude: 14, longitude: 181 }, { latitude: 91, longitude: 121 }, { latitude: '14', longitude: 121 }]) {
+    controller.getCurrentCheckInLocation = async () => ({ coords });
+    await assert.rejects(controller.verifiedGeofenceLocation({ id: 'event' }), error => error.geofenceIssue === 'location');
+  }
+  assert.match(controller.submissionErrorMessage({ code: 'permission-denied', attendanceStage: 'preflight' }), /before saving/);
+  assert.match(controller.submissionErrorMessage({ code: 'permission-denied', attendanceStage: 'write' }), /save/);
+  controller.showLocationError({ locationErrorCode: 3, message: 'GPS timed out' });
+  assert.equal(messages.at(-1)[1], 'GPS timed out');
+  controller.dispose();
+});
+
+test('attendance rules separate missing-document preflight from owner-scoped queries', () => {
+  // Structural regression only; actual authorization must also be tested in the emulator.
+  const rules = fs.readFileSync(path.join(root, 'firestore.rules'), 'utf8');
+  const attendance = rules.slice(rules.indexOf('match /attendance/{attendanceId}'), rules.indexOf('match /corrections/{correctionId}'));
+  assert.match(attendance, /allow get:/);
+  assert.match(attendance, /exists\(\/databases\/\$\(database\)\/documents\/attendance\/\$\(attendanceId\)\)/);
+  assert.match(attendance, /request.auth.uid.matches/);
+  assert.match(attendance, /attendanceId.matches/);
+  assert.match(attendance, /allow list: if canViewAttendanceReports\(\)\s*\|\| \(isStudent\(\) && resource.data.studentUid == request.auth.uid\)/);
+});
+
+const polygonArea = { enabled: true, type: 'polygon', vertices: [
+  { latitude: 14, longitude: 121 }, { latitude: 14, longitude: 121.001 },
+  { latitude: 14.001, longitude: 121.001 }, { latitude: 14.001, longitude: 121 }
+] };
+
+test('circle legacy data and polygon boundaries share inside/outside checks', async () => {
+  const { GeofenceBoundary } = await isolatedModule('assets/js/controllers/GeofenceBoundary.js');
+  const circle = GeofenceBoundary.create({ latitude: 14, longitude: 121, radiusMeters: 100 });
+  assert.equal(circle.evaluate({ latitude: 14, longitude: 121 }).inside, true);
+  assert.equal(circle.evaluate({ latitude: 14.01, longitude: 121 }).inside, false);
+  const polygon = GeofenceBoundary.create(polygonArea);
+  assert.equal(polygon.evaluate({ latitude: 14.0005, longitude: 121.0005 }).inside, true);
+  assert.equal(polygon.evaluate({ latitude: 14, longitude: 121 }).inside, true);
+  assert.equal(polygon.evaluate({ latitude: 14.0005, longitude: 121.0011 }).inside, false);
+  assert.equal(polygon.evaluate({ latitude: 14.0005, longitude: 121.0011 }, 20).inside, true);
+  assert.equal(polygon.evaluate({ latitude: 14.0005, longitude: 121.002 }, 20).inside, false);
+  assert.equal(GeofenceBoundary.create({ ...polygonArea, vertices: [...polygonArea.vertices].reverse() }).evaluate({ latitude: 14.0005, longitude: 121.0005 }).inside, true);
+});
+
+test('polygon rejects incomplete, duplicate, crossed, collinear and oversized boundaries', async () => {
+  const { GeofenceBoundary } = await isolatedModule('assets/js/controllers/GeofenceBoundary.js');
+  const v = polygonArea.vertices;
+  for (const vertices of [v.slice(0, 2), [v[0], v[1], v[1], v[3]], [v[0], v[2], v[1], v[3]],
+    [v[0], v[1], { latitude: 14, longitude: 121.002 }], Array(11).fill(v[0]),
+    [v[0], v[1], { latitude: 15, longitude: 122 }], [v[0], v[1], { latitude: NaN, longitude: 121 }]]) {
+    assert.throws(() => GeofenceBoundary.create({ type: 'polygon', vertices }));
+  }
+  assert.throws(() => GeofenceBoundary.create({ type: 'unknown' }));
+});
+
+test('concave polygon excludes a point in its bounding box but outside its shape', async () => {
+  const { GeofenceBoundary } = await isolatedModule('assets/js/controllers/GeofenceBoundary.js');
+  const boundary = GeofenceBoundary.create({ type: 'polygon', vertices: [
+    { latitude: 14, longitude: 121 }, { latitude: 14, longitude: 121.002 },
+    { latitude: 14.001, longitude: 121.001 }, { latitude: 14.002, longitude: 121.002 },
+    { latitude: 14.002, longitude: 121 }
+  ] });
+  assert.equal(boundary.evaluate({ latitude: 14.001, longitude: 121.0018 }).inside, false);
+  assert.equal(boundary.evaluate({ latitude: 14.001, longitude: 121.0005 }).inside, true);
+});
+
+test('student polygon verification uses capped accuracy and checks malformed boundaries before GPS', async () => {
+  let area = polygonArea;
+  const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks({ getDocFromServer: async () => ({ exists: () => true, data: () => area }) }), { document: gridDocument });
+  const controller = new StudentAttendanceController({});
+  let gps = 0, longitude = 121.0005;
+  controller.getCurrentCheckInLocation = async () => { gps++; return { coords: { latitude: 14.0005, longitude, accuracy: 500 } }; };
+  assert.equal((await controller.verifiedGeofenceLocation({ id: 'event' })).distanceMeters, 0);
+  longitude = 121.002;
+  await assert.rejects(controller.verifiedGeofenceLocation({ id: 'event' }), error => error.geofenceIssue === 'outside' && error.boundaryType === 'polygon');
+  area = { ...polygonArea, vertices: polygonArea.vertices.slice(0, 2) };
+  await assert.rejects(controller.verifiedGeofenceLocation({ id: 'event' }), error => error.geofenceIssue === 'configuration');
+  assert.equal(gps, 2);
+  controller.dispose();
+});
+
+test('polygon editor requires closing, supports undo/clear, and round-trips saved shapes', async () => {
+  const browser = fakeBrowser();
+  const { GeofenceController } = await isolatedModule('assets/js/controllers/GeofenceController.js', {}, browser);
+  const controller = new GeofenceController('event', { showToast() {} });
+  controller.ensureMap = async () => ({ fitBounds() {} });
+  controller.enabled.checked = true; controller.type.value = 'polygon';
+  polygonArea.vertices.forEach(point => controller.addVertex(point.latitude, point.longitude));
+  assert.throws(() => controller.validate(), /Close/);
+  controller.closePolygon();
+  assert.equal(controller.validate().vertices.length, 4);
+  controller.set(polygonArea);
+  assert.equal(controller.type.value, 'polygon'); assert.equal(controller.closed, true);
+  assert.equal(controller.validate().vertices.length, 4);
+  controller.undoLastPoint(); assert.equal(controller.closed, false); assert.equal(controller.vertices.length, 3);
+  assert.throws(() => controller.validate(), /Close/);
+  controller.clearPolygon(); assert.equal(controller.vertices.length, 0);
+  assert.equal(controller.closeBoundary.disabled, true);
+  controller.clear(); assert.equal(controller.type.value, 'circle'); assert.equal(controller.vertices.length, 0);
+  controller.dispose(); controller.dispose();
+});
+
 test('student geofence rejects missing configuration before requesting GPS', async () => {
   const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks({ getDocFromServer: async () => ({ exists: () => false, data: () => undefined }) }), { document: gridDocument });
   const controller = new StudentAttendanceController({});
@@ -184,7 +310,7 @@ test('unregistered face blocks check-in without writing attendance', async () =>
 
 test('geofence editor rejects blank coordinates instead of silently saving 0,0', async () => {
   const elements = new Map();
-  const document = { querySelector: selector => { if (!elements.has(selector)) elements.set(selector, { value: '', checked: false, addEventListener() {} }); return elements.get(selector); } };
+  const document = { querySelector: selector => { if (!elements.has(selector)) elements.set(selector, { value: '', checked: false, addEventListener() {}, closest() { return this; }, insertAdjacentHTML() {} }); return elements.get(selector); } };
   const { GeofenceController } = await isolatedModule('assets/js/controllers/GeofenceController.js', {}, { document });
   const controller = new GeofenceController('event', { showToast() {} });
   controller.enabled.checked = true;
@@ -207,7 +333,7 @@ test('concurrent map requests initialize one map per editor', async () => {
   let mapCount = 0; const assets = []; const nodes = new Map();
   const map = { setView() { return this; }, on() {} };
   const window = { L: { map: () => { mapCount++; return map; }, tileLayer: () => ({ addTo() {} }) } };
-  const document = { querySelector: selector => { if (!nodes.has(selector)) nodes.set(selector, { addEventListener() {} }); return nodes.get(selector); }, createElement: () => ({}), head: { append: element => assets.push(element) } };
+  const document = { querySelector: selector => { if (!nodes.has(selector)) nodes.set(selector, { addEventListener() {}, closest() { return this; }, insertAdjacentHTML() {} }); return nodes.get(selector); }, createElement: () => ({}), head: { append: element => assets.push(element) } };
   const { GeofenceController } = await isolatedModule('assets/js/controllers/GeofenceController.js', {}, { document, window });
   const controller = new GeofenceController('event', { showToast() {} });
   const first = controller.ensureMap(); const second = controller.ensureMap();
@@ -235,7 +361,7 @@ for (const role of ['Student', 'Admin']) {
     const names = sharedSource.match(/export \{ ([^}]+) \}/)[1].split(', ');
     const shared = Object.fromEntries(names.map(name => [name, () => '']));
     const active = new Map(); const started = [];
-    Object.assign(shared, { currentUser: { uid: 'student-1', email: 'test@example.com' }, currentUserProfile: {}, currentUserRole: role === 'Student' ? 'student' : 'super_admin', activeView: 'dashboard', ASSIGNABLE_ROLE_LABELS: {}, sessionState: {}, db: {}, collection: (_, name) => name, doc: (_, name, id) => `${name}/${id}`, query: value => value, onSnapshot: (reference, callback) => { started.push(reference); active.set(reference, callback); return () => active.delete(reference); }, setDoc: async () => {}, createDeviceSessionToken: () => 'test-session', FineModalController: class {}, Timestamp: { now: () => new Date(), fromMillis: value => new Date(value) } });
+    Object.assign(shared, { currentUser: { uid: 'student-1', email: 'test@example.com' }, currentUserProfile: {}, currentUserRole: role === 'Student' ? 'student' : 'super_admin', activeView: 'dashboard', ASSIGNABLE_ROLE_LABELS: {}, sessionState: {}, db: {}, collection: (_, name) => name, doc: (_, name, id) => `${name}/${id}`, query: value => value, onSnapshot: (reference, optionsOrCallback, next) => { const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : next; started.push(reference); active.set(reference, callback); return () => active.delete(reference); }, setDoc: async () => {}, createDeviceSessionToken: () => 'test-session', FineModalController: class {}, Timestamp: { now: () => new Date(), fromMillis: value => new Date(value) } });
     const browser = fakeBrowser();
     const module = await isolatedModule(`assets/js/${role.toLowerCase()}/${role}Dashboard.js`, shared, browser);
     const dashboard = new module[`${role}Dashboard`]();
@@ -259,8 +385,37 @@ for (const role of ['Student', 'Admin']) {
 test('dashboard entry points use the same shared-module version', () => {
   for (const role of ['student', 'admin']) {
     const html = fs.readFileSync(path.join(root, `pages/${role}-dashboard.html`), 'utf8');
-    assert.ok(html.includes('dashboard.js?v=20261010-attendance-ui'));
+    assert.ok(html.includes('dashboard.js?v=20261010-attendance-fix'));
   }
+});
+
+test('roster readiness follows cache-to-server metadata even when documents do not change', async () => {
+  const source = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8');
+  const names = source.match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared = Object.fromEntries(names.map(name => [name, () => '']));
+  const callbacks = new Map(), options = new Map(), messages = [];
+  Object.assign(shared, { currentUser: { uid: 'admin', email: 'test@example.com' }, currentUserProfile: {}, currentUserRole: 'super_admin', activeView: 'create', ASSIGNABLE_ROLE_LABELS: {}, db: {},
+    collection: (_, name) => name, doc: (_, name, id) => `${name}/${id}`, query: value => value,
+    onSnapshot: (reference, optionsOrCallback, next) => {
+      callbacks.set(reference, typeof optionsOrCallback === 'function' ? optionsOrCallback : next);
+      if (typeof optionsOrCallback !== 'function') options.set(reference, optionsOrCallback);
+      return () => callbacks.delete(reference);
+    }, showDashboardToast: title => messages.push(title), FineModalController: class {}, Timestamp: { fromMillis: value => new Date(value) } });
+  const browser = fakeBrowser();
+  let submit;
+  browser.document.querySelector('#eventForm').addEventListener = (type, callback) => { if (type === 'submit') submit = callback; };
+  const { AdminDashboard } = await isolatedModule('assets/js/admin/AdminDashboard.js', shared, browser);
+  const dashboard = new AdminDashboard(); dashboard.initialize(); browser.window.emit('create');
+  assert.equal(options.get('students').includeMetadataChanges, true);
+  const receive = callbacks.get('students');
+  const docs = [];
+  receive({ docs, metadata: { fromCache: true } });
+  await submit({ preventDefault() {} }); assert.equal(messages.at(-1), 'Participant roster not ready');
+  receive({ docs, metadata: { fromCache: false } });
+  await submit({ preventDefault() {} }); assert.equal(messages.at(-1), 'Invalid attendance window');
+  receive({ docs, metadata: { fromCache: true } });
+  await submit({ preventDefault() {} }); assert.equal(messages.at(-1), 'Participant roster not ready');
+  dashboard.dispose(); assert.equal(callbacks.size, 0);
 });
 
 test('fixed role permissions deny unknown roles/actions and keep Student Manager read-only reports', async () => {
@@ -293,7 +448,7 @@ for (const role of ['head_admin', 'attendance_admin', 'student_manager']) {
     const active = new Map();
     Object.assign(shared, { currentUser: { uid: 'manager-1' }, currentUserProfile: {}, currentUserRole: role, activeView: 'dashboard', ASSIGNABLE_ROLE_LABELS: {}, db: {},
       collection: (_, name) => name, doc: (_, name, id) => `${name}/${id}`, query: value => value,
-      onSnapshot: (reference, callback) => { active.set(reference, callback); return () => active.delete(reference); }, FineModalController: class {}, Timestamp: { fromMillis: value => new Date(value) } });
+      onSnapshot: (reference, optionsOrCallback, next) => { const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : next; active.set(reference, callback); return () => active.delete(reference); }, FineModalController: class {}, Timestamp: { fromMillis: value => new Date(value) } });
     const browser = fakeBrowser();
     const { AdminDashboard } = await isolatedModule('assets/js/admin/AdminDashboard.js', shared, browser);
     const dashboard = new AdminDashboard(); dashboard.initialize();

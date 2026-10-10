@@ -1,6 +1,7 @@
-import { currentUser, currentUserProfile, showDashboardToast, openView, isCheckoutAvailable, db, Timestamp, doc, getDocFromServer, serverTimestamp, setDoc } from '../dashboard.js?v=20261010-attendance-ui';
+import { currentUser, currentUserProfile, showDashboardToast, openView, isCheckoutAvailable, db, Timestamp, doc, getDocFromServer, serverTimestamp, setDoc } from '../dashboard.js?v=20261010-attendance-fix';
 const GEOFENCE_GPS_ALLOWANCE_CAP_METERS = 20;
-import { AttendanceSubmissionService } from './AttendanceSubmissionService.js';
+import { AttendanceSubmissionService } from './AttendanceSubmissionService.js?v=20261010-attendance-fix';
+import { GeofenceBoundary } from './GeofenceBoundary.js';
 
 export class StudentAttendanceController {
   constructor({ getState, setFaceRegistration, showError, bridge, checkIn }) {
@@ -38,16 +39,6 @@ export class StudentAttendanceController {
 
 
 
-  distanceInMeters(latitudeA, longitudeA, latitudeB, longitudeB) {
-    const toRadians = (value) => value * Math.PI / 180;
-    const earthRadiusMeters = 6371000;
-    const latitudeDelta = toRadians(latitudeB - latitudeA);
-    const longitudeDelta = toRadians(longitudeB - longitudeA);
-    const a = Math.sin(latitudeDelta / 2) ** 2
-      + Math.cos(toRadians(latitudeA)) * Math.cos(toRadians(latitudeB)) * Math.sin(longitudeDelta / 2) ** 2;
-    return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }
-
   async verifiedGeofenceLocation(event) {
     let geofenceSnapshot;
     try {
@@ -60,37 +51,54 @@ export class StudentAttendanceController {
     }
 
     const geofence = geofenceSnapshot.data();
-    const centerLatitude = Number(geofence?.latitude);
-    const centerLongitude = Number(geofence?.longitude);
-    const radiusMeters = Number(geofence?.radiusMeters);
-    if (!geofenceSnapshot.exists() || geofence?.enabled !== true
-      || !Number.isFinite(centerLatitude) || centerLatitude < -90 || centerLatitude > 90
-      || !Number.isFinite(centerLongitude) || centerLongitude < -180 || centerLongitude > 180
-      || !Number.isFinite(radiusMeters) || radiusMeters <= 0) {
+    let boundary;
+    try {
+      if (!geofenceSnapshot.exists() || geofence?.enabled !== true) throw new Error('Missing boundary');
+      boundary = GeofenceBoundary.create(geofence);
+    } catch {
       const locationError = new Error("This event's attendance area needs to be configured by an administrator.");
       locationError.geofenceIssue = "configuration";
       throw locationError;
     }
 
     const position = await this.getCurrentCheckInLocation();
-    const { latitude, longitude } = position.coords;
+    const { latitude, longitude } = position.coords || {};
+    if (!Number.isFinite(latitude) || Math.abs(latitude) > 90 || !Number.isFinite(longitude) || Math.abs(longitude) > 180) {
+      const error = new Error('Your browser returned an invalid GPS location. Enable precise location and try again.');
+      error.geofenceIssue = 'location';
+      throw error;
+    }
     const reportedAccuracy = Number(position.coords.accuracy);
     const accuracyMeters = Number.isFinite(reportedAccuracy) && reportedAccuracy >= 0 ? Math.round(reportedAccuracy) : 0;
     const allowanceMeters = Math.min(accuracyMeters, GEOFENCE_GPS_ALLOWANCE_CAP_METERS);
-    const distanceMeters = this.distanceInMeters(latitude, longitude, centerLatitude, centerLongitude);
-    if (distanceMeters > radiusMeters + allowanceMeters) {
+    const result = boundary.evaluate({ latitude, longitude }, allowanceMeters);
+    const { distanceMeters } = result;
+    if (!result.inside) {
       const locationError = new Error("You are outside the attendance area.");
       locationError.geofenceIssue = "outside";
       locationError.distanceMeters = Math.round(distanceMeters);
-      locationError.radiusMeters = Math.round(radiusMeters);
+      locationError.radiusMeters = Math.round(result.radiusMeters || 0);
+      locationError.boundaryType = result.type;
       locationError.accuracyMeters = accuracyMeters;
       throw locationError;
     }
 
-    return { latitude, longitude, accuracy: accuracyMeters, distanceMeters: Math.round(distanceMeters) };
+    return { latitude, longitude, accuracy: Math.min(accuracyMeters, 100000), distanceMeters: Math.round(distanceMeters) };
+  }
+
+  submissionErrorMessage(error) {
+    if (error.code !== 'permission-denied') return error.message || 'Attendance could not be recorded. Please try again.';
+    if (error.attendanceStage === 'preflight') return 'Firestore blocked the attendance-record check before saving. Publish the latest attendance read rules and confirm your student account is active.';
+    return 'Firestore rejected the attendance save. Confirm the server attendance window, your participant-roster access, face registration, and deployed rules.';
+  }
+
+  showLocationError(error) {
+    if (error.locationErrorCode === 1) this.showError('Allow location for Presence', 'This browser has not allowed this site to use your location. Set Location to Allow in the site controls, then reload and try again.');
+    else this.showError('Location unavailable', error.message);
   }
 
   outsideGeofenceMessage(error, action) {
+    if (error.boundaryType === 'polygon') return `You are ${error.distanceMeters} m outside the attendance boundary; your GPS accuracy is ±${error.accuracyMeters} m. Move inside the venue and try to ${action} again.`;
     return `You are ${error.distanceMeters} m from the attendance area. The allowed radius is ${error.radiusMeters} m; your GPS accuracy is ±${error.accuracyMeters} m. Move closer to the venue and try to ${action} again.`;
   }
 
@@ -128,13 +136,14 @@ export class StudentAttendanceController {
       showDashboardToast("Checkout recorded", "Your attendance record now includes your checkout time.");
     } catch (error) {
       if (error.geofenceIssue === "location") {
-        this.showError("Allow location for Presence", "Your device location may be on, but this browser has not allowed this site to use it. Click the site controls icon to the left of the address bar, set Location to Allow, then reload this page and try again.");
+        this.showLocationError(error);
       } else if (error.geofenceIssue === "outside") {
         this.showError("You are outside the attendance area", this.outsideGeofenceMessage(error, "check out"));
       } else if (error.geofenceIssue === "configuration") {
         this.showError("Attendance area unavailable", error.message);
       } else {
-        showDashboardToast("Unable to check out", error.message || "Try again while you are in the attendance area.");
+        console.error('Checkout submission failed', { code: error.code, stage: error.attendanceStage });
+        showDashboardToast("Unable to check out", this.submissionErrorMessage(error));
       }
       button.disabled = false;
     } finally {
@@ -225,16 +234,14 @@ export class StudentAttendanceController {
       else showDashboardToast(savedRecord.data().arrivalStatus === "late" ? "Late attendance recorded" : "Attendance recorded", savedRecord.data().arrivalStatus === "late" ? "Your attendance was saved as Late." : "Your attendance was saved successfully.");
     } catch (error) {
       if (error.geofenceIssue === "location") {
-        this.showError("Allow location for Presence", "Your device location may be on, but this browser has not allowed this site to use it. Click the site controls icon to the left of the address bar, set Location to Allow, then reload this page and try again.");
+        this.showLocationError(error);
       } else if (error.geofenceIssue === "outside") {
         this.showError("You are outside the attendance area", this.outsideGeofenceMessage(error, "check in"));
       } else if (error.geofenceIssue === "configuration") {
         this.showError("Attendance area unavailable", error.message);
       } else {
-        const message = error.code === "permission-denied"
-          ? "Attendance was rejected by Firestore. Confirm the attendance window, your event access, and the deployed Firestore Rules."
-          : (error.message || "Attendance could not be recorded. Please try again.");
-        showDashboardToast("Attendance rejected", message);
+        console.error('Attendance submission failed', { code: error.code, stage: error.attendanceStage });
+        showDashboardToast("Attendance rejected", this.submissionErrorMessage(error));
       }
       button.disabled = false;
     }

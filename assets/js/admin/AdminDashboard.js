@@ -1,11 +1,11 @@
-import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261010-attendance-ui';
+import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261010-attendance-fix';
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
-import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261010-attendance-ui';
-import { GeofenceController } from '../controllers/GeofenceController.js';
+import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261010-attendance-fix';
+import { GeofenceController } from '../controllers/GeofenceController.js?v=20261010-attendance-fix';
 import { hasPermission } from '../core/permissions.js';
-import { AttendanceCorrectionController } from '../controllers/AttendanceCorrectionController.js?v=20261010-attendance-ui';
+import { AttendanceCorrectionController } from '../controllers/AttendanceCorrectionController.js?v=20261010-attendance-fix';
 import { AttendanceSummaryService } from '../controllers/AttendanceSummaryService.js';
-import { AttendanceHistoryController, AttendanceRepository } from '../controllers/AttendanceHistoryController.js?v=20261010-attendance-ui';
+import { AttendanceHistoryController, AttendanceRepository } from '../controllers/AttendanceHistoryController.js?v=20261010-attendance-fix';
 import { AttendanceToolbarController } from '../controllers/AttendanceToolbarController.js';
 
 export class AdminDashboard {
@@ -24,7 +24,10 @@ initialize() {
   const subscriptions = new ScopedSubscriptions({ onError: (error, key) => { console.error(key, error); showDashboardToast('Data sync unavailable', 'Check your connection and reload to retry.'); } });
   const listen = (key, views, reference, callback) => {
     if (['presence-sessions', 'legacy-presence', 'faces'].includes(key) && !can('viewStudents')) return;
-    subscriptions.register(key, views, (guard, onError) => onSnapshot(reference, guard(callback), onError));
+    subscriptions.register(key, views, (guard, onError) => key === 'students'
+      // Readiness depends on fromCache, including server confirmation with unchanged documents.
+      ? onSnapshot(reference, { includeMetadataChanges: true }, guard(callback), onError)
+      : onSnapshot(reference, guard(callback), onError));
   };
   const changeSubscriptions = event => subscriptions.setView(event.detail.viewName);
   window.addEventListener('presence:viewchange', changeSubscriptions);
@@ -245,7 +248,7 @@ initialize() {
   document.querySelector('label[for="eventNotes"]').textContent = "Description";
   document.querySelector("#eventNotes").placeholder = "Write a clear announcement or event description";
   document.querySelector("#eventLocation").closest(".field").insertAdjacentHTML("beforebegin", '<div class="field"><label for="eventType">Event type</label><select id="eventType" required><option value="Assembly">Assembly</option><option value="Meeting">Meeting</option><option value="Seminar">Seminar</option><option value="Workshop">Workshop</option><option value="School Activity">School Activity</option><option value="Ceremony">Ceremony</option><option value="Sports">Sports</option><option value="Other">Other</option></select></div>');
-  document.querySelector("#eventNotes").closest(".field").insertAdjacentHTML("beforebegin", `<fieldset class="geofence-editor field full"><legend>Attendance area</legend><label class="geofence-toggle"><input id="eventGeofenceEnabled" type="checkbox"> <span>Require location to check in</span></label><p>Choose the center of the allowed attendance area and set its radius.</p><div class="map-search-row"><input id="eventGeofenceSearch" type="search" placeholder="Search an address or place"><button id="eventGeofenceSearchButton" class="outline-button" type="button">Search</button></div><div id="eventGeofenceMap" class="geofence-map" aria-label="Event attendance area map"></div><div class="geofence-fields"><div class="field"><label for="eventGeofenceRadius">Allowed radius (meters)</label><input id="eventGeofenceRadius" type="number" min="25" max="5000" step="5" value="100"></div><div class="field"><label for="eventGeofenceAddress">Selected address</label><input id="eventGeofenceAddress" type="text" readonly placeholder="Click the map or search for a place"></div><div class="field"><label for="eventGeofenceLatitude">Latitude</label><input id="eventGeofenceLatitude" type="number" step="any" readonly></div><div class="field"><label for="eventGeofenceLongitude">Longitude</label><input id="eventGeofenceLongitude" type="number" step="any" readonly></div></div><small class="geofence-help">Click anywhere on the map to set the pin. A student must allow location access and be inside this circle to check in.</small></fieldset>`);
+  document.querySelector("#eventNotes").closest(".field").insertAdjacentHTML("beforebegin", `<fieldset class="geofence-editor field full"><legend>Attendance area</legend><label class="geofence-toggle"><input id="eventGeofenceEnabled" type="checkbox"> <span>Require location to check in</span></label><p>Choose a circle radius or draw a custom polygon boundary.</p><div class="map-search-row"><input id="eventGeofenceSearch" type="search" placeholder="Search an address or place"><button id="eventGeofenceSearchButton" class="outline-button" type="button">Search</button></div><div id="eventGeofenceMap" class="geofence-map" aria-label="Event attendance area map"></div><div class="geofence-fields"><div class="field"><label for="eventGeofenceRadius">Allowed radius (meters)</label><input id="eventGeofenceRadius" type="number" min="25" max="5000" step="5" value="100"></div><div class="field"><label for="eventGeofenceAddress">Selected address</label><input id="eventGeofenceAddress" type="text" readonly placeholder="Click the map or search for a place"></div><div class="field"><label for="eventGeofenceLatitude">Latitude</label><input id="eventGeofenceLatitude" type="number" step="any" readonly></div><div class="field"><label for="eventGeofenceLongitude">Longitude</label><input id="eventGeofenceLongitude" type="number" step="any" readonly></div></div><small class="geofence-help">Circle: click to set the center. Polygon: add 3–10 points around the area, then close the boundary. Students must allow location access.</small></fieldset>`);
   document.querySelector(".content").insertAdjacentHTML("beforeend", `<section class="view-section" data-section="geofence" hidden><div class="section-head"><div><p class="eyebrow">Attendance setup</p><h2>Geofence Locations</h2><p>Select an event and update the area where students may check in.</p></div></div><article class="panel geofence-manager-panel"><div class="field"><label for="geofenceEventSelect">Event</label><select id="geofenceEventSelect"><option value="">Select an event</option></select></div><div id="geofenceManagerContent" hidden><div class="geofence-manager-head"><div><strong id="geofenceManagerEventName"></strong><small id="geofenceManagerEventDetails"></small></div><label class="geofence-toggle"><input id="managerGeofenceEnabled" type="checkbox"> <span>Require location to check in</span></label></div><div class="map-search-row"><input id="managerGeofenceSearch" type="search" placeholder="Search an address or place"><button id="managerGeofenceSearchButton" class="outline-button" type="button">Search</button></div><div id="managerGeofenceMap" class="geofence-map" aria-label="Selected event attendance area map"></div><div class="geofence-fields"><div class="field"><label for="managerGeofenceRadius">Allowed radius (meters)</label><input id="managerGeofenceRadius" type="number" min="25" max="5000" step="5" value="100"></div><div class="field"><label for="managerGeofenceAddress">Selected address</label><input id="managerGeofenceAddress" type="text" readonly></div><div class="field"><label for="managerGeofenceLatitude">Latitude</label><input id="managerGeofenceLatitude" type="number" step="any" readonly></div><div class="field"><label for="managerGeofenceLongitude">Longitude</label><input id="managerGeofenceLongitude" type="number" step="any" readonly></div></div><div class="form-actions"><button id="geofenceEditEvent" class="outline-button" type="button">Edit full event</button><button id="saveManagerGeofence" class="primary-button" type="button">Save attendance area</button></div></div><div id="geofenceManagerEmpty" class="empty-state">Select an event to view or change its attendance area.</div></article></section>`);
   document.querySelector("#adminProfileEmail").value = currentUser.email || SUPER_ADMIN_EMAIL;
 
@@ -276,8 +279,9 @@ initialize() {
     if (!can('manageGeofences')) return;
     const selectedEvent = events.find((event) => event.id === geofenceEventSelect.value);
     if (!selectedEvent) return;
-    const geofence = managerGeofenceEditor.value();
-    if (geofence.enabled && (!Number.isFinite(geofence.latitude) || !Number.isFinite(geofence.longitude))) return showDashboardToast("Choose an attendance area", "Click the map or search for the event location before saving.");
+    let geofence;
+    try { geofence = managerGeofenceEditor.validate(); }
+    catch (error) { return showDashboardToast('Choose a valid attendance area', error.message); }
     try {
       const batch = writeBatch(db);
       batch.set(doc(db, "eventGeofences", selectedEvent.id), geofence);
@@ -1120,8 +1124,9 @@ initialize() {
     if (checkInCutoff <= timeIn || checkInCutoff > timeOut) return showDashboardToast("Invalid check-in cutoff", "The check-in cutoff must be after Time In and no later than Time Out.");
     if (checkOutCutoff <= timeOut) return showDashboardToast("Invalid checkout cutoff", "The checkout cutoff must be after Time Out.");
     const id = document.querySelector("#editingEventId").value;
-    const requestedGeofence = eventGeofenceEditor.value();
-    if (requestedGeofence.enabled && (!Number.isFinite(requestedGeofence.latitude) || !Number.isFinite(requestedGeofence.longitude))) return showDashboardToast("Choose an attendance area", "Click the map or search for the event location before saving.");
+    let requestedGeofence;
+    try { requestedGeofence = eventGeofenceEditor.validate(); }
+    catch (error) { return showDashboardToast('Choose a valid attendance area', error.message); }
     const geofence = requestedGeofence.enabled ? requestedGeofence : { enabled: false };
     const record = { name: document.querySelector("#eventName").value.trim(), type: document.querySelector("#eventType").value, date, location: document.querySelector("#eventLocation").value.trim(), timeIn, checkInCutoff, timeOut, checkOutCutoff, audience: document.querySelector("#eventAudience").value, description: document.querySelector("#eventNotes").value.trim(), requiresGeofence: geofence.enabled, openAt: Timestamp.fromDate(new Date(`${date}T${timeIn}`)), checkInClosesAt: Timestamp.fromDate(new Date(`${date}T${checkInCutoff}`)), closeAt: Timestamp.fromDate(new Date(`${date}T${timeOut}`)), checkOutClosesAt: Timestamp.fromDate(new Date(`${date}T${checkOutCutoff}`)), updatedAt: serverTimestamp() };
     const duplicate = events.find((event) => event.id !== id && duplicateEventSignature(event) === duplicateEventSignature(record));
@@ -1764,7 +1769,7 @@ initialize() {
     return () => attendanceSyncService.stop();
   });
   const disposeListeners = this.dispose;
-  this.dispose = () => { disposeListeners(); attendanceRealtimeBridge.close(); window.clearTimeout(adminEventStatusTimer); window.cancelAnimationFrame(studentRenderFrame); };
+  this.dispose = () => { disposeListeners(); eventGeofenceEditor.dispose(); managerGeofenceEditor.dispose(); attendanceRealtimeBridge.close(); window.clearTimeout(adminEventStatusTimer); window.cancelAnimationFrame(studentRenderFrame); };
   if (can('viewFines')) listen('fines', ["assign-fine","assigned-fines","modify-students","profile"], collection(db, "fines"), (snapshot) => {
     fines = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     if (activeView === "assigned-fines") renderAdminFines();

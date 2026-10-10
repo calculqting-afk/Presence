@@ -1,15 +1,18 @@
 import { collection, onSnapshot, getDocsFromServer } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { db } from '../../../config/firebase-config.js?v=20261005-operational-reset';
-import { currentUser, currentUserRole, formatEventTime } from '../dashboard.js?v=20261010-attendance-ui';
+import { currentUser, currentUserRole, formatEventTime } from '../dashboard.js?v=20261010-attendance-fix';
 
 export class AttendancePolicy {
   constructor(windows) { this.windows = windows; }
 
   evaluateCheckIn(event, now = new Date()) {
     const { eventOpenDate, eventCloseDate, eventCheckInCloseDate } = this.windows;
-    if (!event || now < eventOpenDate(event)) return { available: false, reason: "not-open" };
-    if (now >= eventCloseDate(event)) return { available: false, reason: "event-started" };
-    return { available: true, arrivalStatus: now <= eventCheckInCloseDate(event) ? "present" : "late" };
+    if (!event) return { available: false, reason: 'not-open' };
+    const open = eventOpenDate(event), close = eventCloseDate(event), cutoff = eventCheckInCloseDate(event);
+    if (![open, close, cutoff, now].every(value => Number.isFinite(value?.getTime?.())) || open >= close || cutoff < open || cutoff > close) return { available: false, reason: 'invalid-window' };
+    if (now < open) return { available: false, reason: "not-open" };
+    if (now >= close) return { available: false, reason: "event-started" };
+    return { available: true, arrivalStatus: now <= cutoff ? "present" : "late" };
   }
 }
 

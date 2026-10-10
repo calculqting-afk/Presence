@@ -8,7 +8,9 @@ export class AttendanceSubmissionService {
     if (this.pending.has(reference.id)) return { state: 'busy' };
     this.pending.add(reference.id);
     try {
-      const previous = await this.read(reference);
+      let previous;
+      try { previous = await this.read(reference); }
+      catch (error) { error.attendanceStage = 'preflight'; throw error; }
       if (previous.exists() && matches(previous.data())) return { state: 'existing', snapshot: previous };
       const timer = setTimeout(() => this.onWaiting(reference), this.waitMs);
       try { await this.write(reference, payload, options); }
@@ -20,6 +22,7 @@ export class AttendanceSubmissionService {
         } catch {
           if (['unavailable', 'deadline-exceeded', 'network-request-failed'].includes(error.code)) return { state: 'unknown' };
         }
+        error.attendanceStage = 'write';
         throw error;
       } finally { clearTimeout(timer); }
       try {

@@ -74,18 +74,42 @@ service cloud.firestore {
       return !(key in data) || shortText(data[key], maximum);
     }
 
+    function validBoundaryPoint(point) {
+      return point is map && point.keys().hasOnly(["latitude", "longitude"])
+        && point.keys().hasAll(["latitude", "longitude"])
+        && point.latitude is number && point.latitude >= -85 && point.latitude <= 85
+        && point.longitude is number && point.longitude >= -180 && point.longitude <= 180;
+    }
+
+    function validBoundaryVertices(points) {
+      return points is list && points.size() >= 3 && points.size() <= 10
+        && validBoundaryPoint(points[0]) && validBoundaryPoint(points[1]) && validBoundaryPoint(points[2])
+        && (points.size() < 4 || validBoundaryPoint(points[3]))
+        && (points.size() < 5 || validBoundaryPoint(points[4]))
+        && (points.size() < 6 || validBoundaryPoint(points[5]))
+        && (points.size() < 7 || validBoundaryPoint(points[6]))
+        && (points.size() < 8 || validBoundaryPoint(points[7]))
+        && (points.size() < 9 || validBoundaryPoint(points[8]))
+        && (points.size() < 10 || validBoundaryPoint(points[9]));
+    }
+
     function validGeofence(geofence) {
       return geofence is map
-        && geofence.keys().hasOnly(["enabled", "latitude", "longitude", "radiusMeters", "address"])
+        && geofence.keys().hasOnly(["enabled", "type", "vertices", "latitude", "longitude", "radiusMeters", "address"])
         && geofence.keys().hasAll(["enabled"])
         && geofence.enabled is bool
         && optionalShortText(geofence, "address", 500)
-        && (!geofence.enabled || (
+        && (!("type" in geofence) || geofence.type in ["circle", "polygon"])
+        && (!geofence.enabled || (("type" in geofence && geofence.type == "polygon") ? (
+          geofence.keys().hasAll(["vertices"]) && validBoundaryVertices(geofence.vertices)
+          && !geofence.keys().hasAny(["latitude", "longitude", "radiusMeters"])
+        ) : (
           geofence.keys().hasAll(["latitude", "longitude", "radiusMeters"])
           && geofence.latitude is number && geofence.latitude >= -90 && geofence.latitude <= 90
           && geofence.longitude is number && geofence.longitude >= -180 && geofence.longitude <= 180
           && geofence.radiusMeters is number && geofence.radiusMeters > 0 && geofence.radiusMeters <= 10000
-        ));
+          && !("vertices" in geofence)
+        )));
     }
 
     function validEvent(data) {
@@ -381,7 +405,17 @@ service cloud.firestore {
     }
 
     match /attendance/{attendanceId} {
-      allow read: if canViewAttendanceReports()
+      // A student's deterministic document may not exist before the first check-in.
+      // Only missing documents in their own namespace can use this exception.
+      allow get: if canViewAttendanceReports()
+        || (isStudent() && (
+          exists(/databases/$(database)/documents/attendance/$(attendanceId))
+            ? resource.data.studentUid == request.auth.uid
+            : (request.auth.uid.matches('^[A-Za-z0-9_-]+$')
+              && attendanceId.matches('^' + request.auth.uid + '_[A-Za-z0-9_-]+$'))
+        ));
+      // Queries must still be constrained to the student's own records.
+      allow list: if canViewAttendanceReports()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
       allow create: if (canManageAttendance()
           && request.resource.data.keys().hasAll(["correctionId", "recordSource", "correctedBy", "correctedAt", "correctionReason"])
