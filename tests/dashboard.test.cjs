@@ -6,6 +6,13 @@ const vm = require('node:vm');
 const { pathToFileURL } = require('node:url');
 
 const root = path.resolve(__dirname, '..');
+test('event form pairs each attendance opening with its cutoff', () => {
+  const html = fs.readFileSync(path.join(root, 'pages/admin-dashboard.html'), 'utf8');
+  const form = html.match(/<form id="eventForm">([\s\S]*?)<\/form>/)[1];
+  assert.match(form, /class="field full"><label for="eventLocation"/);
+  const times = [...form.matchAll(/<label for="(eventTimeIn|eventCheckInCutoff|eventTimeOut|eventCheckOutCutoff)"/g)].map(match => match[1]);
+  assert.deepEqual(times, ['eventTimeIn', 'eventCheckInCutoff', 'eventTimeOut', 'eventCheckOutCutoff']);
+});
 async function isolatedModule(relative, shared = {}, globals = {}) {
   const context = vm.createContext({ console, setTimeout, clearTimeout, ...globals });
   const modules = new Map();
