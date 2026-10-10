@@ -1,8 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f5f9ff">
+  <script src="assets/js/login-theme.js?v=20261010-theme"></script>
   <meta name="description" content="Presence — a simple, reliable attendance portal for students and administrators.">
   <title>Presence — Attendance, made simple.</title>
   <link rel="icon" type="image/png" sizes="any" href="assets/images/presence-logo.png?v=20260926">
@@ -10,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/css/style.css?v=20260924-performance">
+  <link rel="stylesheet" href="assets/css/style.css?v=20261010-theme">
 </head>
 <body>
   <div class="page-shell">
@@ -19,9 +22,16 @@
         <span class="brand-mark" aria-hidden="true"><span></span></span>
         <span>Presence</span>
       </a>
+      <div class="header-actions">
       <div class="system-status" aria-label="System status">
         <span class="status-dot"></span>
         System online
+      </div>
+      <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch to dark mode" aria-pressed="false" title="Switch to dark mode">
+        <svg class="theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20.6 13.2A8.7 8.7 0 0 1 10.8 3.4 8.7 8.7 0 1 0 20.6 13.2Z"/></svg>
+        <svg class="theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4 19 5"/></svg>
+        <span id="themeToggleLabel">Dark</span>
+      </button>
       </div>
     </header>
 
