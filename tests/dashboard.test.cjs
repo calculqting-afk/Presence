@@ -690,6 +690,27 @@ for (const role of ['admin', 'student']) test(`the real ${role} bootstrap evalua
   entry.namespace.sessionState.dashboard.dispose();
 });
 
+test('student identity handoff is display-only, user-scoped, expiring and storage-failure safe', async () => {
+  const { StudentIdentityController } = await isolatedModule('assets/js/controllers/StudentIdentityController.js');
+  const records = new Map(); let now = 1000;
+  const storage = { getItem: key => records.get(key), setItem: (key, value) => records.set(key, value), removeItem: key => records.delete(key) };
+  const nodes = new Map();
+  const document = { querySelectorAll: selector => { if (!nodes.has(selector)) nodes.set(selector, [{ textContent: '', removeAttribute() {} }]); return nodes.get(selector); } };
+  const controller = new StudentIdentityController({ storage, document, now: () => now });
+  controller.save('one', { firstName: 'Test', lastName: 'Student', section: '2A', course: 'IT', role: 'super_admin', active: true, password: 'never cache', mustChangePassword: false });
+  assert.equal(controller.restore('one'), true);
+  assert.equal(nodes.get('[data-student-name]')[0].textContent, 'Test Student');
+  const saved = JSON.parse(records.get(controller.key));
+  assert.equal(saved.identity.role, undefined); assert.equal(saved.identity.active, undefined); assert.equal(saved.identity.password, undefined);
+  assert.equal(controller.restore('two'), false); assert.equal(records.size, 0);
+  controller.save('one', { firstName: 'Test', photoDataUrl: 'javascript:alert(1)' });
+  controller.restore('one'); assert.equal(nodes.get('[data-student-photo]')[0].hidden, true);
+  now += 15 * 60 * 1000 + 1; assert.equal(controller.restore('one'), false);
+  records.set(controller.key, '{broken'); assert.equal(controller.restore('one'), false);
+  controller.storage = { getItem() { throw Error('blocked'); }, setItem() { throw Error('quota'); }, removeItem() { throw Error('blocked'); } };
+  assert.equal(controller.restore('one'), false); controller.save('one', { firstName: 'Test' }); controller.clear();
+});
+
 test('dashboard entry points use the same shared-module version', () => {
   let entry;
   for (const role of ['student', 'admin']) {

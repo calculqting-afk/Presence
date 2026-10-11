@@ -1,6 +1,6 @@
-import { currentUser, currentUserProfile, showDashboardToast, openView, isCheckoutAvailable, db, Timestamp, doc, getDocFromServer, serverTimestamp, setDoc } from '../dashboard.js?v=20261011-student-startup';
+import { currentUser, currentUserProfile, showDashboardToast, openView, isCheckoutAvailable, db, Timestamp, doc, getDocFromServer, serverTimestamp, setDoc } from '../dashboard.js?v=20261011-fast-login';
 const GEOFENCE_GPS_ALLOWANCE_CAP_METERS = 20;
-import { AttendanceSubmissionService } from './AttendanceSubmissionService.js?v=20261011-student-startup';
+import { AttendanceSubmissionService } from './AttendanceSubmissionService.js?v=20261011-fast-login';
 import { GeofenceBoundary } from './GeofenceBoundary.js';
 import { ButtonLoadingController } from './ButtonLoadingController.js';
 

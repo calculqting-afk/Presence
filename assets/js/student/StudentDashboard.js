@@ -1,10 +1,11 @@
 import { ControllerScope } from '../core/ControllerScope.js';
-import { StudentAttendanceController } from '../controllers/StudentAttendanceController.js?v=20261011-student-startup';
-import { currentUser, currentUserProfile, escapeHtml, formatBirthday, FineModalController, showDashboardToast, createNotification, uploadFacePhotoToDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineTimestamp, getFineHistory, updateDashboardGreeting, createDeviceSessionToken, auth, db, signOut, updatePassword, Timestamp, collection, deleteField, doc, getDoc, getDocFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch, sessionState } from '../dashboard.js?v=20261011-student-startup';
+import { StudentIdentityController } from '../controllers/StudentIdentityController.js';
+import { StudentAttendanceController } from '../controllers/StudentAttendanceController.js?v=20261011-fast-login';
+import { currentUser, currentUserProfile, escapeHtml, formatBirthday, FineModalController, showDashboardToast, createNotification, uploadFacePhotoToDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineTimestamp, getFineHistory, updateDashboardGreeting, createDeviceSessionToken, auth, db, signOut, updatePassword, Timestamp, collection, deleteField, doc, getDoc, getDocFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch, sessionState } from '../dashboard.js?v=20261011-fast-login';
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
-import { AttendancePolicy, LateCheckInModal, AttendanceCheckInController, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261011-student-startup';
+import { AttendancePolicy, LateCheckInModal, AttendanceCheckInController, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261011-fast-login';
 import { AttendanceSummaryService } from '../controllers/AttendanceSummaryService.js';
-import { StudentAttendanceListController } from '../controllers/StudentAttendanceListController.js?v=20261011-student-startup';
+import { StudentAttendanceListController } from '../controllers/StudentAttendanceListController.js?v=20261011-fast-login';
 import { AttendanceToolbarController } from '../controllers/AttendanceToolbarController.js';
 import { EventSchedulePresenter } from '../controllers/EventSchedulePresenter.js';
 export class StudentDashboard {
@@ -16,6 +17,7 @@ export class StudentDashboard {
     this.document = document;
     this.window = window;
     this.sessionStorage = sessionStorage;
+    this.identity = new StudentIdentityController({ document, storage: sessionStorage });
     this.scope = new ControllerScope();
     this.listen = this.listen.bind(this);
     this.changeSubscriptions = this.changeSubscriptions.bind(this);
@@ -292,6 +294,7 @@ export class StudentDashboard {
   applyProfile(profile) {
     if (!this.scope.initialized || !profile || !Object.keys(profile).length) return;
     this.studentProfile = { ...profile };
+    this.identity.save(currentUser.uid, profile);
     this.renderProfile();
     this.scheduleEventRender();
     if (this.studentProfile.mustChangePassword === true) this.openRequiredPasswordChangeModal();

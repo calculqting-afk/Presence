@@ -1,6 +1,7 @@
 import { ControllerScope } from '../core/ControllerScope.js';
+import { StudentIdentityController } from './StudentIdentityController.js';
 import { AuthActionController } from './AuthActionController.js';
-import { dashboardRole, pageCopy, currentUser, currentUserRole, currentUserProfile, activeView, previousView, sessionState, ROLE_VIEWS, ROLE_ACCESS_LABELS, roleLabel, renderView, openView, setDashboardViewState, auth, db, signOut, setDoc, doc, serverTimestamp, showDashboardToast } from '../dashboard.js?v=20261011-student-startup';
+import { dashboardRole, pageCopy, currentUser, currentUserRole, currentUserProfile, activeView, previousView, sessionState, ROLE_VIEWS, ROLE_ACCESS_LABELS, roleLabel, renderView, openView, setDashboardViewState, auth, db, signOut, setDoc, doc, serverTimestamp, showDashboardToast } from '../dashboard.js?v=20261011-fast-login';
 export class DashboardNavigationController {
   constructor({
     document = globalThis.document,
@@ -96,6 +97,7 @@ export class DashboardNavigationController {
             await signOut(auth);
             try {
               dashboard.sessionStorage.removeItem("presenceSession");
+              new StudentIdentityController({ storage: dashboard.sessionStorage }).clear();
               dashboard.sessionStorage.removeItem("presenceDeviceSession");
             } catch {}
             sessionState.dashboard?.dispose();

@@ -1,12 +1,12 @@
 import { ControllerScope } from '../core/ControllerScope.js';
-import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261011-student-startup';
+import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261011-fast-login';
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
-import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261011-student-startup';
-import { GeofenceController } from '../controllers/GeofenceController.js?v=20261011-student-startup';
-import { hasPermission } from '../core/permissions.js?v=20261011-student-startup';
-import { AttendanceCorrectionController } from '../controllers/AttendanceCorrectionController.js?v=20261011-student-startup';
+import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261011-fast-login';
+import { GeofenceController } from '../controllers/GeofenceController.js?v=20261011-fast-login';
+import { hasPermission } from '../core/permissions.js?v=20261011-fast-login';
+import { AttendanceCorrectionController } from '../controllers/AttendanceCorrectionController.js?v=20261011-fast-login';
 import { AttendanceSummaryService } from '../controllers/AttendanceSummaryService.js';
-import { AttendanceHistoryController, AttendanceRepository } from '../controllers/AttendanceHistoryController.js?v=20261011-student-startup';
+import { AttendanceHistoryController, AttendanceRepository } from '../controllers/AttendanceHistoryController.js?v=20261011-fast-login';
 import { AttendanceToolbarController } from '../controllers/AttendanceToolbarController.js';
 import { EventSchedulePresenter } from '../controllers/EventSchedulePresenter.js';
 import { StudentActionsPresenter } from '../controllers/StudentActionsPresenter.js';

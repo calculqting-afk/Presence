@@ -9,6 +9,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 import { AuthActionController } from './controllers/AuthActionController.js';
+import { StudentIdentityController } from './controllers/StudentIdentityController.js';
 import { SurveyLinkService } from './controllers/SurveyLinkService.js';
 import { SurveyEntryController } from './controllers/SurveyEntryController.js';
 
@@ -25,6 +26,7 @@ const toastMessage = document.querySelector("#toastMessage");
 const helpDialog = document.querySelector("#helpDialog");
 let toastTimer;
 const loginAction = new AuthActionController();
+const studentIdentity = new StudentIdentityController();
 window.addEventListener('pagehide', () => loginAction.dispose(), { once: true });
 const surveyEntry = new SurveyEntryController({ auth, subscribe: onAuthStateChanged, isLoginBusy: () => loginAction.busy,
   resolveRole: async user => {
@@ -103,11 +105,11 @@ form.addEventListener("submit", async (event) => {
           assignedRole: isSuperAdmin ? "super_admin" : (studentRecord?.data()?.role === "viewer" ? "student" : studentRecord?.data()?.role || "student")
         }));
         showToast(role === "admin" ? "Admin access verified" : "Welcome to Presence", "Your account was verified successfully.");
-        window.setTimeout(() => {
-          const surveyId = new SurveyLinkService({ href: window.location.href }).eventId();
-          const destination = role === "admin" ? "pages/admin-dashboard.html" : "pages/student-dashboard.html";
-          window.location.href = destination + (surveyId ? `?survey=${encodeURIComponent(surveyId)}` : '');
-        }, 450);
+        if (role === 'student') studentIdentity.save(credential.user.uid, studentRecord.data());
+        else studentIdentity.clear();
+        const surveyId = new SurveyLinkService({ href: window.location.href }).eventId();
+        const destination = role === "admin" ? "pages/admin-dashboard.html" : "pages/student-dashboard.html";
+        window.location.href = destination + (surveyId ? `?survey=${encodeURIComponent(surveyId)}` : '');
       } catch (error) {
         const permissionDenied = error.code === "permission-denied"
           || error.code === "firestore/permission-denied"

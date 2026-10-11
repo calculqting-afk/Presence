@@ -1,14 +1,14 @@
 import { FineModalController } from './controllers/FineModalController.js';
 import { NotificationService } from './controllers/NotificationService.js';
 import { DashboardGreetingController } from './controllers/DashboardGreetingController.js';
-import { DashboardApplication } from './controllers/DashboardApplication.js?v=20261011-student-startup';
+import { DashboardApplication } from './controllers/DashboardApplication.js?v=20261011-fast-login';
 import { DashboardNavigationController } from './controllers/DashboardNavigationController.js';
 import { NotificationCenterController } from './controllers/NotificationCenterController.js';
 import { DashboardSessionService } from './controllers/DashboardSessionService.js';
 import { DashboardToastController } from './controllers/DashboardToastController.js';
 import { FaceRegistrationService } from './controllers/FaceRegistrationService.js';
 import { SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js?v=20261005-operational-reset";
-import { ROLE_VIEWS } from './core/permissions.js?v=20261011-student-startup';
+import { ROLE_VIEWS } from './core/permissions.js?v=20261011-fast-login';
 import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
   Timestamp,

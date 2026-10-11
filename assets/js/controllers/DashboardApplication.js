@@ -1,7 +1,8 @@
 import { ControllerScope } from '../core/ControllerScope.js';
-import { waitForUser, verifyRole, auth, signOut, wireCommonNavigation, wireNotificationCenter, applyRoleNavigation, dashboardRole, currentUserProfile, currentUserRole, updateDashboardGreeting, sessionState, db, escapeHtml, openView, showDashboardToast, initializeDashboardHistory } from '../dashboard.js?v=20261011-student-startup';
-import { hasPermission } from '../core/permissions.js?v=20261011-student-startup';
-import { SurveyController } from './SurveyController.js?v=20261011-student-startup';
+import { StudentIdentityController } from './StudentIdentityController.js';
+import { waitForUser, verifyRole, auth, signOut, wireCommonNavigation, wireNotificationCenter, applyRoleNavigation, dashboardRole, currentUserProfile, currentUserRole, updateDashboardGreeting, sessionState, db, escapeHtml, openView, showDashboardToast, initializeDashboardHistory } from '../dashboard.js?v=20261011-fast-login';
+import { hasPermission } from '../core/permissions.js?v=20261011-fast-login';
+import { SurveyController } from './SurveyController.js?v=20261011-fast-login';
 import { SurveyRepository } from './SurveyRepository.js?v=20261011-survey-archive';
 import { SurveyDeletionService } from './SurveyDeletionService.js';
 import { SurveyLocationService } from './SurveyLocationService.js?v=20261010-location-retry';
@@ -9,7 +10,7 @@ export class DashboardApplication {
   constructor({
     document = globalThis.document,
     window = globalThis.window,
-    loadDashboard = role => role === 'student' ? import('../student/StudentDashboard.js?v=20261011-student-startup') : import('../admin/AdminDashboard.js?v=20261011-student-startup'),
+    loadDashboard = role => role === 'student' ? import('../student/StudentDashboard.js?v=20261011-fast-login') : import('../admin/AdminDashboard.js?v=20261011-fast-login'),
     cleanupShared = () => {}
   } = {}) {
     Object.assign(this, {
@@ -19,6 +20,7 @@ export class DashboardApplication {
       cleanupShared
     });
     this.scope = new ControllerScope();
+    this.identity = new StudentIdentityController({ document });
   }
   initialize() {
     if (this.initialization) return this.initialization;
@@ -34,12 +36,18 @@ export class DashboardApplication {
       .then(module => ({ module }), error => ({ error }));
     const currentUser = await waitForUser();
     if (!isCurrent()) return;
+    if (currentUser && dashboardRole === 'student') this.identity.restore(currentUser.uid);
     const authorized = currentUser && (await verifyRole(currentUser));
     if (!isCurrent()) return;
     if (!authorized) {
+      this.identity.clear();
       if (currentUser) await signOut(auth);
       this.window.location.replace("../index.html");
       return;
+    }
+    if (dashboardRole === 'student') {
+      this.identity.save(currentUser.uid, currentUserProfile);
+      this.identity.render(currentUserProfile);
     }
     wireCommonNavigation();
     wireNotificationCenter();
