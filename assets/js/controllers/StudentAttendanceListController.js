@@ -24,11 +24,12 @@ export class StudentAttendanceListController {
     this.previous.addEventListener('click', this.onPrevious); this.next.addEventListener('click', this.onNext);
   }
   select(records) {
+    const eventsById = new Map(this.getEvents().map(event => [event.id, event]));
     const value = id => document.querySelector(id).value;
     const from = value('#studentAttendanceFrom'), to = value('#studentAttendanceTo');
     const search = value('#studentAttendanceSearch').trim().toLowerCase(), status = value('#studentAttendanceStatus');
     const matches = records.filter(record => {
-      const review = this.summary.needsReview(record, this.getEvents().find(event => event.id === record.eventId));
+      const review = this.summary.needsReview(record, eventsById.get(record.eventId));
       return (!from || record.eventDate >= from) && (!to || record.eventDate <= to)
         && (!search || (record.eventName || '').toLowerCase().includes(search))
         && (!status || (status === 'review' ? review : status === 'completed' ? Boolean(record.checkedOutAt) : !record.checkedOutAt && !review));

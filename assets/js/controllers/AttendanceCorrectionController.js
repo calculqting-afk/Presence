@@ -1,4 +1,4 @@
-import { hasPermission, requirePermission } from '../core/permissions.js?v=20261011-fast-login';
+import { hasPermission, requirePermission } from '../core/permissions.js?v=20261011-optimized';
 import { runTransaction, doc, collection, Timestamp, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 
 export function correctionValues({ checkIn, checkOut, arrival, reason }) {

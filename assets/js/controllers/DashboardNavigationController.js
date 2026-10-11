@@ -1,7 +1,7 @@
 import { ControllerScope } from '../core/ControllerScope.js';
 import { StudentIdentityController } from './StudentIdentityController.js';
 import { AuthActionController } from './AuthActionController.js';
-import { dashboardRole, pageCopy, currentUser, currentUserRole, currentUserProfile, activeView, previousView, sessionState, ROLE_VIEWS, ROLE_ACCESS_LABELS, roleLabel, renderView, openView, setDashboardViewState, auth, db, signOut, setDoc, doc, serverTimestamp, showDashboardToast } from '../dashboard.js?v=20261011-fast-login';
+import { dashboardRole, pageCopy, currentUser, currentUserRole, currentUserProfile, activeView, previousView, sessionState, ROLE_VIEWS, ROLE_ACCESS_LABELS, roleLabel, renderView, openView, setDashboardViewState, auth, db, signOut, setDoc, doc, serverTimestamp, showDashboardToast } from '../dashboard.js?v=20261011-optimized';
 export class DashboardNavigationController {
   constructor({
     document = globalThis.document,

@@ -1,16 +1,14 @@
 import { ControllerScope } from '../core/ControllerScope.js';
 import { StudentIdentityController } from './StudentIdentityController.js';
-import { waitForUser, verifyRole, auth, signOut, wireCommonNavigation, wireNotificationCenter, applyRoleNavigation, dashboardRole, currentUserProfile, currentUserRole, updateDashboardGreeting, sessionState, db, escapeHtml, openView, showDashboardToast, initializeDashboardHistory } from '../dashboard.js?v=20261011-fast-login';
-import { hasPermission } from '../core/permissions.js?v=20261011-fast-login';
-import { SurveyController } from './SurveyController.js?v=20261011-fast-login';
-import { SurveyRepository } from './SurveyRepository.js?v=20261011-survey-archive';
-import { SurveyDeletionService } from './SurveyDeletionService.js';
-import { SurveyLocationService } from './SurveyLocationService.js?v=20261010-location-retry';
+import { waitForUser, verifyRole, auth, signOut, wireCommonNavigation, wireNotificationCenter, applyRoleNavigation, dashboardRole, currentUserProfile, currentUserRole, updateDashboardGreeting, sessionState, db, escapeHtml, openView, showDashboardToast, initializeDashboardHistory } from '../dashboard.js?v=20261011-optimized';
+import { hasPermission } from '../core/permissions.js?v=20261011-optimized';
+import { LazySurveyController } from './LazySurveyController.js';
+import { DashboardPerformanceController } from './DashboardPerformanceController.js';
 export class DashboardApplication {
   constructor({
     document = globalThis.document,
     window = globalThis.window,
-    loadDashboard = role => role === 'student' ? import('../student/StudentDashboard.js?v=20261011-fast-login') : import('../admin/AdminDashboard.js?v=20261011-fast-login'),
+    loadDashboard = role => role === 'student' ? import('../student/StudentDashboard.js?v=20261011-optimized') : import('../admin/AdminDashboard.js?v=20261011-optimized'),
     cleanupShared = () => {}
   } = {}) {
     Object.assign(this, {
@@ -21,6 +19,7 @@ export class DashboardApplication {
     });
     this.scope = new ControllerScope();
     this.identity = new StudentIdentityController({ document });
+    this.metrics = new DashboardPerformanceController({ role: dashboardRole, performance: window.performance });
   }
   initialize() {
     if (this.initialization) return this.initialization;
@@ -29,6 +28,7 @@ export class DashboardApplication {
   }
   async start() {
     if (!this.scope.initialize()) return;
+    this.metrics.start('startup'); this.metrics.start('profile'); this.metrics.start('events-first-data');
     const isCurrent = () => this.scope.initialized;
     // Download code while authentication/profile verification is in flight.
     // Capture failures now; only surface them after access has been verified.
@@ -54,6 +54,7 @@ export class DashboardApplication {
     applyRoleNavigation();
     const displayName = dashboardRole === "admin" ? [currentUserProfile.firstName, currentUserProfile.lastName].filter(Boolean).join(" ") || "Admin" : currentUserProfile.firstName || "Student";
     updateDashboardGreeting(displayName);
+    this.metrics.finish('profile');
     const result = await dashboardModule;
     if (!isCurrent()) return;
     if (result.error) throw result.error;
@@ -61,39 +62,29 @@ export class DashboardApplication {
     const Dashboard = dashboardRole === "student" ? module.StudentDashboard : module.AdminDashboard;
     const dashboard = new Dashboard({
       document: this.document,
-      window: this.window
+      window: this.window,
+      metrics: this.metrics
     });
     this.dashboard = dashboard;
     sessionState.dashboard = this;
     this.scope.addCleanup(() => dashboard.dispose());
     dashboard.initialize();
     if (currentUserRole === 'student' || hasPermission(currentUserRole, 'manageSurveys')) {
-      const repository = new SurveyRepository({
-        db,
-        uid: currentUser.uid,
-        profile: () => currentUserProfile
-      });
-      const surveys = new SurveyController({
-        repository,
-        locationService: new SurveyLocationService({
-          loadBoundary: eventId => repository.boundary(eventId)
-        }),
-        profile: () => ({
-          ...currentUserProfile,
-          uid: currentUser.uid
-        }),
-        canManage: hasPermission(currentUserRole, 'manageSurveys'),
-        escapeHtml,
-        openView,
-        showToast: showDashboardToast,
-        deletionService: new SurveyDeletionService({
-          repository
-        })
+      const surveys = new LazySurveyController({ document: this.document, window: this.window, openView, showToast: showDashboardToast,
+        load: async () => {
+          this.metrics.start('survey-module');
+          const { createSurveyFeature } = await import('./SurveyFeature.js?v=20261011-optimized');
+          this.metrics.finish('survey-module');
+          return createSurveyFeature({ db, uid: currentUser.uid, profile: () => currentUserProfile,
+            document: this.document, window: this.window, canManage: hasPermission(currentUserRole, 'manageSurveys'),
+            escapeHtml, openView, showToast: showDashboardToast });
+        }
       });
       surveys.initialize();
       this.scope.addCleanup(() => surveys.dispose());
       if (surveys.pendingEventId) {
         initializeDashboardHistory();
+        this.metrics.finish('startup');
         openView('surveys');
         this.scope.listen(this.window, 'beforeunload', () => this.dispose(), {
           once: true
@@ -105,6 +96,7 @@ export class DashboardApplication {
       once: true
     });
     initializeDashboardHistory();
+    this.metrics.finish('startup');
   }
   dispose() {
     if (this.disposed) return;

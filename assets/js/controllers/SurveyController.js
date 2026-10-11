@@ -2,7 +2,7 @@ import { SurveyPolicy } from './SurveyPolicy.js';
 import { SurveyLinkService } from './SurveyLinkService.js';
 import { ButtonLoadingController } from './ButtonLoadingController.js';
 import { SurveyResponseList } from './SurveyResponseList.js';
-import { SurveyConfirmationController } from './SurveyConfirmationController.js?v=20261011-fast-login';
+import { SurveyConfirmationController } from './SurveyConfirmationController.js?v=20261011-optimized';
 
 export class SurveyController {
   constructor({ repository, locationService, profile, canManage, escapeHtml, openView, showToast, qr = () => globalThis.qrcode, document: ownerDocument = globalThis.document, window: ownerWindow = globalThis.window, policy = new SurveyPolicy(), deletionService }) {
@@ -49,8 +49,9 @@ export class SurveyController {
   async refresh() {
     const generation = ++this.generation;
     this.section.querySelector('[data-survey-list]').textContent = 'Loading events…';
-    const recent = await this.repository.events();
-    const archives = this.canManage ? await this.repository.archivedEvents() : [];
+    const [recent, archives] = await Promise.all([
+      this.repository.events(), this.canManage ? this.repository.archivedEvents() : Promise.resolve([])
+    ]);
     const events = [...new Map([...recent, ...archives].map(event => [event.id, event])).values()];
     if (generation !== this.generation || !this.visible) return;
     this.events = events.filter(event => this.canManage || (event.hasSurvey && !event.surveyArchived && this.policy.eligible(this.profile(), event)));
@@ -60,7 +61,6 @@ export class SurveyController {
       if (generation !== this.generation || !this.visible) return;
       if (event && (this.canManage || (event.hasSurvey && !event.surveyArchived && this.policy.eligible(this.profile(), event)))) this.events.unshift(event);
     }
-    this.renderList();
     const id = this.pendingEventId || this.selectedEvent?.id;
     if (this.pendingEventId && this.canManage) this.archivePanel = Boolean(this.events.find(event => event.id === this.pendingEventId)?.surveyArchived);
     this.renderList();
@@ -201,10 +201,12 @@ export class SurveyController {
     try { this.window.localStorage.setItem(this.draftKey(question), event.target.value); } catch {}
   }
   async showQR() {
+    const generation = this.generation;
     const panel = this.workspace.querySelector('[data-survey-qr-panel]'), url = this.links.url(this.selectedEvent.id);
     panel.hidden = false; panel.innerHTML = `<label>Survey link<input readonly value="${this.escapeHtml(url)}"></label><div data-survey-code></div><button type="button" class="outline-button" data-copy-survey-link>Copy link</button>`;
     try {
-      const factory = this.qr();
+      const factory = await this.qr();
+      if (generation !== this.generation || !this.visible) return;
       if (typeof factory !== 'function') throw new Error('QR library unavailable. Use the link above.');
       const code = factory(0, 'M'); code.addData(url); code.make();
       panel.querySelector('[data-survey-code]').innerHTML = code.createSvgTag({ scalable: true, margin: 4 });

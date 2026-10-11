@@ -527,10 +527,27 @@ for (const role of ['Student', 'Admin']) {
       browser.window.emit('modify-students');
       assert.equal(active.has('presenceSessions'), true); assert.equal(active.has('faceRegistrations'), true);
       browser.window.emit('dashboard'); assert.equal(active.has('presenceSessions'), false);
+      browser.window.emit('geofence'); assert.equal(active.has('students'), false);
+      browser.window.emit('create'); assert.equal(active.has('students'), true);
+      const queued = new Map(); let token = 0, filtered = 0;
+      browser.window.setTimeout = (handler, delay) => { assert.equal(delay, 200); queued.set(++token, handler); return token; };
+      browser.window.clearTimeout = id => queued.delete(id);
+      dashboard.resetStudentDirectoryPage = () => filtered++;
+      await dashboard.studentSearch.emit('input'); await dashboard.studentSearch.emit('input');
+      assert.equal(queued.size, 1); assert.equal(filtered, 0);
+      [...queued.values()][0](); assert.equal(filtered, 1);
     } else {
       assert.equal(active.has('dismissedHistory'), false);
       browser.window.emit('history'); assert.equal(active.has('dismissedHistory'), true);
       browser.window.emit('dashboard'); assert.equal(active.has('dismissedHistory'), false);
+      browser.window.emit('surveys'); assert.equal(active.has('events'), false); assert.equal(active.has('attendance'), false);
+      browser.window.emit('attendances'); assert.equal(active.has('events'), true); assert.equal(active.has('attendance'), true);
+      const grid = browser.document.querySelector('#studentEventGrid'); let markup = '', writes = 0;
+      Object.defineProperty(grid, 'innerHTML', { get: () => markup, set: value => { markup = value; writes++; } });
+      browser.window.emit('events'); dashboard.renderEvents(); dashboard.renderEvents();
+      assert.equal(writes, 1, 'unchanged event markup should retain existing elements');
+      browser.window.emit('profile'); dashboard.renderEvents(); dashboard.renderMyAttendances();
+      assert.equal(writes, 1, 'hidden event screen must not render');
     }
     assert.ok(started.length > 0);
     dashboard.dispose(); assert.equal(active.size, 0);
@@ -672,6 +689,7 @@ for (const role of ['admin', 'student']) test(`the real ${role} bootstrap evalua
   await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve));
   assert.equal(surveySections,1, browser.document.querySelector('#dashboardToastMessage').textContent); assert.equal(notificationPanels,1); assert.equal(logoutPanels,1);
   assert.equal(entry.namespace.currentUserRole, role === 'admin' ? 'super_admin' : 'student'); assert.equal(entry.namespace.sessionState.dashboard.dashboard.constructor.name, role === 'admin' ? 'AdminDashboard' : 'StudentDashboard');
+  assert.equal([...modules.keys()].some(file => path.basename(file) === 'SurveyController.js'), false, 'survey implementation must not load at startup');
   if (role === 'student') {
     const controller = entry.namespace.sessionState.dashboard.dashboard;
     // onSnapshot deliberately never delivers: the verified profile must render anyway.

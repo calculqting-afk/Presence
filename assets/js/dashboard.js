@@ -1,14 +1,14 @@
 import { FineModalController } from './controllers/FineModalController.js';
 import { NotificationService } from './controllers/NotificationService.js';
 import { DashboardGreetingController } from './controllers/DashboardGreetingController.js';
-import { DashboardApplication } from './controllers/DashboardApplication.js?v=20261011-fast-login';
+import { DashboardApplication } from './controllers/DashboardApplication.js?v=20261011-optimized';
 import { DashboardNavigationController } from './controllers/DashboardNavigationController.js';
 import { NotificationCenterController } from './controllers/NotificationCenterController.js';
 import { DashboardSessionService } from './controllers/DashboardSessionService.js';
 import { DashboardToastController } from './controllers/DashboardToastController.js';
 import { FaceRegistrationService } from './controllers/FaceRegistrationService.js';
 import { SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js?v=20261005-operational-reset";
-import { ROLE_VIEWS } from './core/permissions.js?v=20261011-fast-login';
+import { ROLE_VIEWS } from './core/permissions.js?v=20261011-optimized';
 import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
   Timestamp,
@@ -61,7 +61,6 @@ const pageCopy = {
 
 export const sessionState = { mediaStream: null, presenceHeartbeatTimer: null, presenceSessionId: null, studentLoggedOut: false, dashboard: null };
 let currentUser;
-let toastTimer;
 let activeView;
 let previousView = "dashboard";
 let currentUserRole = "student";
@@ -110,7 +109,7 @@ function formatBirthday(value) {
 
 // Spark-plan client-side policy. Firestore Rules repeat the same time-window
 // checks so the recorded arrival label cannot be changed after check-in.
-function showDashboardToast(titleText, messageText) { toastController.show(titleText, messageText); toastTimer = toastController.timer; }
+function showDashboardToast(titleText, messageText) { toastController.show(titleText, messageText); }
 
 function createNotification(notification) { return notificationService.create(notification); }
 
@@ -305,4 +304,4 @@ initialize().catch((error) => {
   showDashboardToast("Unable to load Presence", error.message);
 });
 
-export { setDashboardViewState, dashboardRole, FACE_UPLOAD_WEB_APP_URL, pageCopy, currentUser, toastTimer, activeView, previousView, currentUserRole, currentUserProfile, ROLE_VIEWS, ROLE_ACCESS_LABELS, NOTIFICATION_CATEGORIES_BY_ROLE, canReceiveNotification, escapeHtml, ROLE_LABELS, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, formatNotificationTime, uploadFacePhotoToDrive, resetFacePhotoInDrive, waitForFaceRegistration, wireNotificationCenter, renderView, openView, applyRoleNavigation, initializeDashboardHistory, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineEventDate, formatFineTimestamp, getFineHistory, fineDetailsMarkup, studentFineInfoMarkup, studentFineDetailsMarkup, getDashboardGreeting, updateDashboardGreeting, createDeviceSessionToken, waitForUser, verifyRole, wireCommonNavigation, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch };
+export { setDashboardViewState, dashboardRole, FACE_UPLOAD_WEB_APP_URL, pageCopy, currentUser, activeView, previousView, currentUserRole, currentUserProfile, ROLE_VIEWS, ROLE_ACCESS_LABELS, NOTIFICATION_CATEGORIES_BY_ROLE, canReceiveNotification, escapeHtml, ROLE_LABELS, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, formatNotificationTime, uploadFacePhotoToDrive, resetFacePhotoInDrive, waitForFaceRegistration, wireNotificationCenter, renderView, openView, applyRoleNavigation, initializeDashboardHistory, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineEventDate, formatFineTimestamp, getFineHistory, fineDetailsMarkup, studentFineInfoMarkup, studentFineDetailsMarkup, getDashboardGreeting, updateDashboardGreeting, createDeviceSessionToken, waitForUser, verifyRole, wireCommonNavigation, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch };

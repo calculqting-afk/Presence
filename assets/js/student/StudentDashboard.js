@@ -1,24 +1,27 @@
 import { ControllerScope } from '../core/ControllerScope.js';
 import { StudentIdentityController } from '../controllers/StudentIdentityController.js';
-import { StudentAttendanceController } from '../controllers/StudentAttendanceController.js?v=20261011-fast-login';
-import { currentUser, currentUserProfile, escapeHtml, formatBirthday, FineModalController, showDashboardToast, createNotification, uploadFacePhotoToDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineTimestamp, getFineHistory, updateDashboardGreeting, createDeviceSessionToken, auth, db, signOut, updatePassword, Timestamp, collection, deleteField, doc, getDoc, getDocFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch, sessionState } from '../dashboard.js?v=20261011-fast-login';
+import { StudentAttendanceController } from '../controllers/StudentAttendanceController.js?v=20261011-optimized';
+import { currentUser, currentUserProfile, escapeHtml, formatBirthday, FineModalController, showDashboardToast, createNotification, uploadFacePhotoToDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineTimestamp, getFineHistory, updateDashboardGreeting, createDeviceSessionToken, auth, db, signOut, updatePassword, collection, deleteField, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch, sessionState } from '../dashboard.js?v=20261011-optimized';
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
-import { AttendancePolicy, LateCheckInModal, AttendanceCheckInController, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261011-fast-login';
+import { AttendancePolicy, LateCheckInModal, AttendanceCheckInController, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261011-optimized';
 import { AttendanceSummaryService } from '../controllers/AttendanceSummaryService.js';
-import { StudentAttendanceListController } from '../controllers/StudentAttendanceListController.js?v=20261011-fast-login';
+import { StudentAttendanceListController } from '../controllers/StudentAttendanceListController.js?v=20261011-optimized';
 import { AttendanceToolbarController } from '../controllers/AttendanceToolbarController.js';
 import { EventSchedulePresenter } from '../controllers/EventSchedulePresenter.js';
 export class StudentDashboard {
   constructor({
     document = globalThis.document,
     window = globalThis.window,
-    sessionStorage = globalThis.sessionStorage
+    sessionStorage = globalThis.sessionStorage,
+    metrics
   } = {}) {
     this.document = document;
     this.window = window;
     this.sessionStorage = sessionStorage;
+    this.metrics = metrics;
     this.identity = new StudentIdentityController({ document, storage: sessionStorage });
     this.scope = new ControllerScope();
+    this.lastMarkup = new WeakMap();
     this.listen = this.listen.bind(this);
     this.changeSubscriptions = this.changeSubscriptions.bind(this);
     this.updatePresence = this.updatePresence.bind(this);
@@ -99,6 +102,7 @@ export class StudentDashboard {
       dashboard.window.removeEventListener('presence:viewchange', dashboard.changeSubscriptions);
     });
     dashboard.events = [];
+    dashboard.eventsById = new Map();
     dashboard.attendance = [];
     dashboard.attendanceConfirmed = false;
     dashboard.fines = [];
@@ -251,16 +255,18 @@ export class StudentDashboard {
       }
       dashboard.applyProfile(snapshot.data());
     });
-    dashboard.listen('events', ["*"], query(collection(db, "events"), orderBy("openAt", "asc")), snapshot => {
+    dashboard.listen('events', ["dashboard", "events", "history", "attendances"], query(collection(db, "events"), orderBy("openAt", "asc")), snapshot => {
       dashboard.events = snapshot.docs.map(item => ({
         id: item.id,
         ...item.data()
       }));
+      dashboard.eventsById = new Map(dashboard.events.map(event => [event.id, event]));
+      dashboard.metrics?.finish('events-first-data');
       dashboard.scheduleEventRender();
       dashboard.renderMyAttendances();
       dashboard.scheduleEventStatusRefresh();
     });
-    dashboard.listen('attendance', ["*"], query(collection(db, "attendance"), where("studentUid", "==", currentUser.uid)), snapshot => {
+    dashboard.listen('attendance', ["dashboard", "events", "history", "attendances", "profile", "fines"], query(collection(db, "attendance"), where("studentUid", "==", currentUser.uid)), snapshot => {
       dashboard.attendanceConfirmed = !snapshot.metadata?.fromCache;
       dashboard.attendance = snapshot.docs.map(item => ({
         id: item.id,
@@ -302,13 +308,17 @@ export class StudentDashboard {
   }
   listen(key, views, reference, callback) {
     const dashboard = this;
-    return dashboard.subscriptions.register(key, views, (guard, onError) => onSnapshot(reference, {
-      includeMetadataChanges: true
-    }, guard(callback), onError));
+    return dashboard.subscriptions.register(key, views, (guard, onError) => key === 'attendance'
+      ? onSnapshot(reference, { includeMetadataChanges: true }, guard(callback), onError)
+      : onSnapshot(reference, guard(callback), onError));
   }
   changeSubscriptions(event) {
     const dashboard = this;
-    return dashboard.subscriptions.setView(event.detail.viewName);
+    dashboard.view = event.detail.viewName;
+    dashboard.subscriptions.setView(dashboard.view);
+    dashboard.scheduleEventRender();
+    dashboard.renderMyAttendances();
+    if (dashboard.view === 'fines') dashboard.renderFines();
   }
   async updatePresence(status = "online", silent = false) {
     const dashboard = this;
@@ -402,6 +412,8 @@ export class StudentDashboard {
   }
   renderEvents() {
     const dashboard = this;
+    if (!['dashboard', 'events', 'history'].includes(dashboard.view)) return;
+    if (dashboard.view === 'history') { dashboard.renderAttendanceSummary(); return; }
     const attendanceByEventId = new Map(dashboard.attendance.map(record => [record.eventId, record]));
     const activeEvents = dashboard.events.filter(event => !isEventFinished(event) && (attendanceByEventId.has(event.id) || dashboard.summaryService.eligibility({
       ...dashboard.studentProfile,
@@ -410,10 +422,10 @@ export class StudentDashboard {
     const eventGrid = dashboard.document.querySelector("#studentEventGrid");
     const timeline = dashboard.document.querySelector("#studentEventTimeline");
     if (!activeEvents.length) {
-      eventGrid.innerHTML = '<div class="empty-state panel event-empty">No open or upcoming events.</div>';
-      timeline.innerHTML = '<div class="empty-state">No open or upcoming events.</div>';
+      if (dashboard.view === 'events') dashboard.updateMarkup(eventGrid, '<div class="empty-state panel event-empty">No open or upcoming events.</div>');
+      if (dashboard.view === 'dashboard') dashboard.updateMarkup(timeline, '<div class="empty-state">No open or upcoming events.</div>');
     } else {
-      eventGrid.innerHTML = activeEvents.map(event => {
+      if (dashboard.view === 'events') dashboard.updateMarkup(eventGrid, activeEvents.map(event => {
         const status = getEventStatus(event);
         const checkInResult = dashboard.attendanceCheckInController.policy.evaluateCheckIn(event);
         const attendanceRecord = attendanceByEventId.get(event.id);
@@ -429,10 +441,10 @@ export class StudentDashboard {
         const action = checkoutOpen ? `data-check-out-event="${escapeHtml(event.id)}"` : `data-attend-event="${escapeHtml(event.id)}"`;
         const buttonClass = checkoutOpen || !attended && checkInResult.available ? "primary-button" : "outline-button";
         return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div>${dashboard.schedulePresenter.render(event)}${missedCheckInMessage}${event.hasSurvey && !event.surveyArchived ? `<div class="survey-student-tools"><button class="outline-button" type="button" data-survey-event="${escapeHtml(event.id)}">Open / resume survey</button></div>` : ""}<div class="event-card-actions">${attendanceBadge}<button class="${buttonClass} attendance-action-button" type="button" ${action} ${disabled ? "disabled" : ""}>${buttonText}</button></div></div></article>`;
-      }).join("");
-      timeline.innerHTML = `<div class="timeline">${activeEvents.slice(0, 4).map(event => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${attendanceByEventId.has(event.id) ? '<span class="badge green">Attended</span>' : eventStatusBadge(getEventStatus(event))}</div>`).join("")}</div>`;
+      }).join(""));
+      if (dashboard.view === 'dashboard') dashboard.updateMarkup(timeline, `<div class="timeline">${activeEvents.slice(0, 4).map(event => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${attendanceByEventId.has(event.id) ? '<span class="badge green">Attended</span>' : eventStatusBadge(getEventStatus(event))}</div>`).join("")}</div>`);
     }
-    dashboard.attendanceController.syncLoadingButtons();
+    if (dashboard.view === 'events') dashboard.attendanceController.syncLoadingButtons();
     dashboard.renderAttendanceSummary();
   }
   scheduleEventRender() {
@@ -442,6 +454,12 @@ export class StudentDashboard {
       dashboard.eventRenderFrame = undefined;
       dashboard.renderEvents();
     });
+  }
+  updateMarkup(target, markup) {
+    if (this.lastMarkup.get(target) === markup) return false;
+    target.innerHTML = markup;
+    this.lastMarkup.set(target, markup);
+    return true;
   }
   scheduleEventStatusRefresh() {
     const dashboard = this;
@@ -457,6 +475,7 @@ export class StudentDashboard {
   }
   renderAttendanceSummary() {
     const dashboard = this;
+    if (!['dashboard', 'history'].includes(dashboard.view)) return;
     const result = dashboard.summaryService.summarize({
       ...dashboard.studentProfile,
       uid: currentUser.uid
@@ -479,9 +498,12 @@ export class StudentDashboard {
     dashboard.document.querySelector("#absenceMeta").textContent = `${absences.length} confirmed absences · ${result.unverified.length} historical events unverified · ${result.review.length} checkouts need review`;
     dashboard.document.querySelector("#absenceSummaryCard").setAttribute("aria-label", absences.length ? `View details for ${absences.length} absence${absences.length === 1 ? "" : "s"}` : "View absence details");
     dashboard.document.querySelector("#daysPresentMeta").textContent = presentDays ? `${presentDays} unique event day${presentDays === 1 ? "" : "s"}` : "Based on attended events";
+    if (dashboard.view !== 'history') return;
+    const reviewIds = new Set(result.review.map(record => record.eventId));
+    const absenceIds = new Set(absences.map(event => event.id));
     const records = closedEvents.filter(event => !dashboard.dismissedIds.has(event.id)).map(event => ({
       event,
-      status: attendedIds.has(event.id) ? result.review.some(record => record.eventId === event.id) ? 'Needs review' : 'Attended' : absences.some(item => item.id === event.id) ? 'Absent' : 'Eligibility unverified'
+      status: attendedIds.has(event.id) ? reviewIds.has(event.id) ? 'Needs review' : 'Attended' : absenceIds.has(event.id) ? 'Absent' : 'Eligibility unverified'
     }));
     const history = dashboard.document.querySelector("#studentEventHistory");
     if (!records.length) {
@@ -498,6 +520,7 @@ export class StudentDashboard {
   }
   renderMyAttendances() {
     const dashboard = this;
+    if (dashboard.view !== 'attendances') return;
     const container = dashboard.document.querySelector("#studentAttendanceList");
     const records = dashboard.attendanceList.select(dashboard.attendance.slice().sort((first, second) => {
       const firstTime = first.checkedInAt?.seconds || first.attendedAt?.seconds || 0;
@@ -511,7 +534,7 @@ export class StudentDashboard {
       return;
     }
     container.innerHTML = records.map(record => {
-      const event = dashboard.events.find(item => item.id === record.eventId) || record;
+      const event = dashboard.eventsById.get(record.eventId) || record;
       const checkedInAt = record.checkedInAt || record.attendedAt;
       const completed = Boolean(record.checkedOutAt);
       const readyToCheckOut = !completed && record.status === "checked-in" && isCheckoutAvailable(event);

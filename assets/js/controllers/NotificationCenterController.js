@@ -1,5 +1,5 @@
 import { ControllerScope } from '../core/ControllerScope.js';
-import { db, currentUser, currentUserRole, dashboardRole, escapeHtml, formatNotificationTime, query, collection, where, onSnapshot, setDoc, doc, serverTimestamp, writeBatch, showDashboardToast, openView, canReceiveNotification } from '../dashboard.js?v=20261011-fast-login';
+import { db, currentUser, currentUserRole, dashboardRole, escapeHtml, formatNotificationTime, query, collection, where, onSnapshot, setDoc, doc, serverTimestamp, writeBatch, showDashboardToast, openView, canReceiveNotification } from '../dashboard.js?v=20261011-optimized';
 export class NotificationCenterController {
   constructor({
     document = globalThis.document,

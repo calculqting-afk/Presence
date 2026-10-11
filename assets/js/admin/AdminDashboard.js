@@ -1,12 +1,12 @@
 import { ControllerScope } from '../core/ControllerScope.js';
-import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261011-fast-login';
+import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261011-optimized';
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
-import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261011-fast-login';
-import { GeofenceController } from '../controllers/GeofenceController.js?v=20261011-fast-login';
-import { hasPermission } from '../core/permissions.js?v=20261011-fast-login';
-import { AttendanceCorrectionController } from '../controllers/AttendanceCorrectionController.js?v=20261011-fast-login';
+import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261011-optimized';
+import { GeofenceController } from '../controllers/GeofenceController.js?v=20261011-optimized';
+import { hasPermission } from '../core/permissions.js?v=20261011-optimized';
+import { AttendanceCorrectionController } from '../controllers/AttendanceCorrectionController.js?v=20261011-optimized';
 import { AttendanceSummaryService } from '../controllers/AttendanceSummaryService.js';
-import { AttendanceHistoryController, AttendanceRepository } from '../controllers/AttendanceHistoryController.js?v=20261011-fast-login';
+import { AttendanceHistoryController, AttendanceRepository } from '../controllers/AttendanceHistoryController.js?v=20261011-optimized';
 import { AttendanceToolbarController } from '../controllers/AttendanceToolbarController.js';
 import { EventSchedulePresenter } from '../controllers/EventSchedulePresenter.js';
 import { StudentActionsPresenter } from '../controllers/StudentActionsPresenter.js';
@@ -454,7 +454,11 @@ export class AdminDashboard {
   }
   wireDirectoryFilters() {
     const dashboard = this;
-    dashboard.scope.listen(dashboard.studentSearch, "input", dashboard.resetStudentDirectoryPage);
+    dashboard.scope.listen(dashboard.studentSearch, "input", () => {
+      dashboard.window.clearTimeout(dashboard.studentSearchTimer);
+      dashboard.studentSearchTimer = dashboard.window.setTimeout(dashboard.resetStudentDirectoryPage, 200);
+    });
+    dashboard.scope.addCleanup(() => dashboard.window.clearTimeout(dashboard.studentSearchTimer));
     [dashboard.studentCourseFilter, dashboard.studentSectionFilter, dashboard.studentFaceFilter, dashboard.studentAccountFilter, dashboard.studentAttendanceFilter, dashboard.studentFineFilter, dashboard.studentSort].forEach(filter => dashboard.scope.listen(filter, "change", dashboard.resetStudentDirectoryPage));
     dashboard.scope.listen(dashboard.document.querySelector("#clearStudentFilters"), "click", dashboard.handleClearStudentFiltersClick);
     dashboard.scope.listen(dashboard.previousStudentPage, "click", dashboard.handlePreviousStudentPageClick);
@@ -494,7 +498,7 @@ export class AdminDashboard {
       if (["dashboard", "attendance-line"].includes(activeView)) dashboard.renderAttendanceLine();
       dashboard.scheduleAdminEventStatusRefresh();
     });
-    dashboard.listen('students', ["*"], collection(db, "students"), snapshot => {
+    dashboard.listen('students', ["dashboard", "create", "modify-events", "past-events", "modify-students", "assign-fine", "attendance-line", "profile"], collection(db, "students"), snapshot => {
       dashboard.studentsLoaded = !snapshot.metadata?.fromCache;
       dashboard.students = snapshot.docs.map(item => ({
         uid: item.id,

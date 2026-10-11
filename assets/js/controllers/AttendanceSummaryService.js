@@ -27,6 +27,7 @@ export class AttendanceSummaryService {
   }
 
   summarize(student, events, records, { coverageFrom = '', coverageConfirmed = true } = {}) {
+    const eventsById = new Map(events.map(event => [event.id, event]));
     const own = records.filter(record => record.studentUid === student.uid);
     const attended = new Set(own.map(record => record.eventId));
     const absences = [], unverified = [];
@@ -39,7 +40,7 @@ export class AttendanceSummaryService {
     }
     return { absences, unverified, attendedIds: attended, attendedCount: own.length,
       presentDays: new Set(own.map(record => record.eventDate)).size,
-      review: own.filter(record => this.needsReview(record, events.find(event => event.id === record.eventId))) };
+      review: own.filter(record => this.needsReview(record, eventsById.get(record.eventId))) };
   }
 
   today(students, events, records, date) {
