@@ -1,6 +1,6 @@
 // Native dialog provides modal focus containment and Escape handling.
 export class SurveyConfirmationController {
-  constructor({ document = globalThis.document, now = () => Date.now(), schedule = callback => setInterval(callback, 200), cancelTimer = clearInterval } = {}) { Object.assign(this, { document, now, schedule, cancelTimer }); }
+  constructor({ document = globalThis.document, now = () => Date.now(), schedule = callback => setInterval(callback, 200), cancelTimer = timer => clearInterval(timer) } = {}) { Object.assign(this, { document, now, schedule, cancelTimer }); }
   open(enabled, options = {}) {
     if (this.resolve) return Promise.resolve(false);
     if (!this.dialog) {
@@ -32,12 +32,19 @@ export class SurveyConfirmationController {
     const confirm = this.dialog.querySelector('[data-confirm]');
     confirm.disabled = seconds > 0;
     confirm.textContent = seconds ? `Wait ${seconds}s` : this.confirmLabel;
-    if (!seconds && this.timer != null) { this.cancelTimer(this.timer); this.timer = null; }
+    if (!seconds) this.stopCountdown();
+  }
+  stopCountdown() {
+    if (this.timer == null) return;
+    const timer = this.timer; this.timer = null;
+    this.cancelTimer(timer);
   }
   finish(value) {
     if (value && this.now() < this.readyAt) return;
-    if (this.timer != null) { this.cancelTimer(this.timer); this.timer = null; }
-    const resolve = this.resolve; this.resolve = null; this.dialog?.close(); resolve?.(value);
+    const resolve = this.resolve; this.resolve = null;
+    // Always settle the action, even if browser timer/dialog cleanup fails.
+    try { this.stopCountdown(); }
+    finally { try { this.dialog?.close(); } finally { resolve?.(value); } }
   }
   dispose() { this.finish(false); this.dialog?.remove(); this.dialog = null; }
 }

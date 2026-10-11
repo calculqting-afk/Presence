@@ -299,6 +299,50 @@ test('destructive confirmation requires five elapsed seconds, an explicit click,
   const next = controller.open(false, { countdown: 5 }); controller.finish(false); assert.equal(await next, false); assert.equal(cancelled, 2);
 });
 
+test('confirmation button clicks use receiver-safe timer cleanup and settle once', async () => {
+  let now = 1000, tick, cancelled = 0, closed = 0;
+  const context = vm.createContext({
+    setInterval(fn) { tick = fn; return 7; },
+    clearInterval: function(timer) {
+      'use strict';
+      // Browser APIs must not be invoked as methods of our controller.
+      assert.equal(this, undefined); assert.equal(timer, 7); cancelled++;
+    }
+  });
+  const source = fs.readFileSync(path.join(root, 'assets/js/controllers/SurveyConfirmationController.js'), 'utf8');
+  const module = new vm.SourceTextModule(source, { context });
+  await module.link(() => {}); await module.evaluate();
+  const nodes = new Map();
+  const get = key => {
+    if (!nodes.has(key)) nodes.set(key, {
+      listeners: {}, textContent: '', disabled: false, focus() {},
+      addEventListener(type, handler) { this.listeners[type] = handler; },
+      click() { if (!this.disabled) this.listeners.click?.(); }
+    });
+    return nodes.get(key);
+  };
+  const dialog = { setAttribute() {}, querySelector: get, addEventListener() {}, showModal() {}, close() { closed++; }, remove() {} };
+  const controller = new module.namespace.SurveyConfirmationController({ document: { createElement: () => dialog, body: { append() {} } }, now: () => now });
+  const cancelledAction = controller.open(false, { countdown: 5 });
+  get('[data-cancel]').click(); assert.equal(await cancelledAction, false);
+  assert.equal(cancelled, 1); assert.equal(closed, 1);
+  const confirmedAction = controller.open(false, { countdown: 5, label: 'Delete permanently' });
+  get('[data-confirm]').click(); assert.ok(controller.resolve);
+  now += 5000; tick(); assert.equal(get('[data-confirm]').textContent, 'Delete permanently');
+  get('[data-confirm]').click(); assert.equal(await confirmedAction, true);
+  assert.equal(cancelled, 2); assert.equal(closed, 2); assert.equal(controller.resolve, null);
+});
+
+test('confirmation still closes and resolves if timer cleanup throws', async () => {
+  const { SurveyConfirmationController } = await moduleAt('SurveyConfirmationController');
+  const node = { addEventListener() {}, focus() {} }; let closed = 0;
+  const dialog = { setAttribute() {}, querySelector: () => node, addEventListener() {}, showModal() {}, close() { closed++; } };
+  const controller = new SurveyConfirmationController({ document: { createElement: () => dialog, body: { append() {} } }, schedule: () => 1, cancelTimer: () => { throw Error('timer cleanup'); } });
+  const pending = controller.open(false, { countdown: 5 });
+  assert.throws(() => controller.finish(false), /timer cleanup/);
+  assert.equal(await pending, false); assert.equal(closed, 1); assert.equal(controller.timer, null);
+});
+
 test('survey deletion removes every review before its response and supports resuming a partial failure', async () => {
   const { SurveyDeletionService } = await moduleAt('SurveyDeletionService');
   const responses = [{ id: 'a', kind: 'response' }, { id: 'b', kind: 'response' }];

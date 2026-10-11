@@ -23,7 +23,7 @@ test('student action presentation omits forbidden controls for every role and pr
   }
   const admin = fs.readFileSync(path.join(root, 'assets/js/admin/AdminDashboard.js'), 'utf8');
   assert.equal((admin.match(/studentActions.render\(/g) || []).length, 2);
-  assert.match(fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8'), /Manage student details and face registration/);
+  assert.match(fs.readFileSync(path.join(root, 'assets/js/controllers/DashboardNavigationController.js'), 'utf8'), /Manage student details and face registration/);
 });
 
 test('authentication progress blocks duplicates, restores failures and remains locked for redirect', async () => {
@@ -59,7 +59,7 @@ test('login and both dashboard pages load shared authentication progress styles'
   const css = fs.readFileSync(path.join(root, 'assets/css/button-loading.css'), 'utf8');
   assert.match(css, /prefers-reduced-motion/);
   assert.match(fs.readFileSync(path.join(root, 'assets/js/script.js'), 'utf8'), /loginAction.run/);
-  assert.match(fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8'), /logoutAction.run/);
+  assert.match(fs.readFileSync(path.join(root, 'assets/js/controllers/DashboardNavigationController.js'), 'utf8'), /logoutAction.run/);
 });
 
 test('button loading state restores labels and accessibility and survives replacement buttons', async () => {
@@ -139,7 +139,7 @@ async function isolatedModule(relative, shared = {}, globals = {}) {
       collection: (...args) => ({ path: args.join('/') }), doc: (...args) => ({ path: args.join('/'), id: args.length === 1 ? 'audit-1' : args.at(-1) }),
       Timestamp: { fromDate: date => date }, serverTimestamp: () => 'server-time', runTransaction: async () => {},
       query: (...args) => args, where: (...args) => args, orderBy: (...args) => args, limit: size => ({ limit: size }), startAfter: cursor => ({ cursor }),
-      onSnapshot: () => () => {}, getDocsFromServer: async () => ({ docs: [] })
+      onSnapshot: () => () => {}, getDocsFromServer: async () => ({ docs: [] }), getDocFromServer: async () => ({ exists: () => false }), writeBatch: () => ({ set() {}, delete() {}, commit: async () => {} })
     });
     return load(path.resolve(path.dirname(referencing.identifier), specifier.split('?')[0]));
   });
@@ -497,13 +497,14 @@ function fakeBrowser() {
   const nodes = new Map(); const listeners = new Map();
   const element = selector => {
     if (!nodes.has(selector)) {
-      const node = { value: '', checked: false, hidden: true, disabled: false, dataset: {}, style: {}, textContent: '', innerHTML: '', classList: { add() {}, remove() {}, toggle() {} }, addEventListener() {}, removeEventListener() {}, insertAdjacentHTML() {}, setAttribute() {}, removeAttribute() {}, toggleAttribute() {}, focus() {}, reset() {}, closest: () => node, querySelector: child => element(child), querySelectorAll: child => child === 'th' ? [element('th0'), element('th1'), element('th2'), element('th3')] : [] };
+      const handlers = new Map();
+      const node = { handlers, value: '', checked: false, hidden: true, disabled: false, dataset: {}, style: {}, textContent: '', innerHTML: '', classList: { add() {}, remove() {}, toggle() {} }, addEventListener(type, callback) { if (!handlers.has(type)) handlers.set(type, new Set()); handlers.get(type).add(callback); }, removeEventListener(type, callback) { handlers.get(type)?.delete(callback); }, async emit(type, event = {}) { for (const callback of handlers.get(type) || []) await callback(event); }, insertAdjacentHTML() {}, setAttribute() {}, removeAttribute() {}, toggleAttribute() {}, focus() {}, reset() {}, remove() {}, closest: () => node, querySelector: child => element(child), querySelectorAll: child => child === 'th' ? [element('th0'), element('th1'), element('th2'), element('th3')] : [] };
       nodes.set(selector, node);
     }
     return nodes.get(selector);
   };
   const document = { querySelector: element, querySelectorAll: () => [], body: element('body'), addEventListener() {}, removeEventListener() {} };
-  const window = { addEventListener: (name, callback) => { if (!listeners.has(name)) listeners.set(name, new Set()); listeners.get(name).add(callback); }, removeEventListener: (name, callback) => listeners.get(name)?.delete(callback), emit: viewName => { for (const callback of listeners.get('presence:viewchange') || []) callback({ detail: { viewName } }); }, matchMedia: () => ({ matches: false, addEventListener() {} }), setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {}, requestAnimationFrame: () => 1, cancelAnimationFrame() {} };
+  const window = { addEventListener: (name, callback) => { if (!listeners.has(name)) listeners.set(name, new Set()); listeners.get(name).add(callback); }, removeEventListener: (name, callback) => listeners.get(name)?.delete(callback), emit: viewName => { for (const callback of listeners.get('presence:viewchange') || []) callback({ detail: { viewName } }); }, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {}, requestAnimationFrame: () => 1, cancelAnimationFrame() {} };
   return { document, window, sessionStorage: { getItem: () => null, setItem() {} } };
 }
 
@@ -518,6 +519,8 @@ for (const role of ['Student', 'Admin']) {
     const module = await isolatedModule(`assets/js/${role.toLowerCase()}/${role}Dashboard.js`, shared, browser);
     const dashboard = new module[`${role}Dashboard`]();
     dashboard.initialize();
+    const initialSubscriptions = started.length;
+    dashboard.initialize(); assert.equal(started.length, initialSubscriptions);
     browser.window.emit('dashboard');
     if (role === 'Admin') {
       assert.equal(active.has('presenceSessions'), false); assert.equal(active.has('faceRegistrations'), false);
@@ -534,11 +537,180 @@ for (const role of ['Student', 'Admin']) {
   });
 }
 
+test('controller scope cleans listeners, mounted elements and every cleanup even on failure', async () => {
+  const { ControllerScope } = await isolatedModule('assets/js/core/ControllerScope.js');
+  const scope = new ControllerScope(); const browser = fakeBrowser(); const target = browser.document.querySelector('#scope');
+  scope.initialize(); assert.equal(scope.initialize(), false);
+  let clicks = 0, removed = 0, cleaned = 0;
+  scope.listen(target, 'click', () => clicks++); await target.emit('click'); assert.equal(clicks, 1);
+  const container = { childNodes: [], insertAdjacentHTML() { this.childNodes.push({ remove() { removed++; } }); } };
+  scope.mount(container, 'beforeend', '<p>Owned content</p>');
+  scope.addCleanup(() => cleaned++); scope.addCleanup(() => { throw Error('failed cleanup'); });
+  assert.throws(() => scope.dispose(), /failed cleanup/);
+  await target.emit('click'); assert.equal(clicks, 1); assert.equal(removed, 1); assert.equal(cleaned, 1);
+  scope.dispose(); assert.equal(scope.initialize(), true); scope.dispose();
+});
+
+test('dashboard session service verifies each role and discards late authentication work', async () => {
+  const { DashboardSessionService } = await isolatedModule('assets/js/controllers/DashboardSessionService.js');
+  let unsubscribed = 0, published = 0, callback, resolveProfile;
+  const user = { uid: 'student', email: 'student@test.local' };
+  const service = new DashboardSessionService({ auth: {}, dashboardRole: 'admin', superAdminEmail: 'owner@test.local', subscribe: (_, next) => { callback = next; return () => unsubscribed++; }, loadStudent: () => new Promise(resolve => { resolveProfile = resolve; }), onState: () => published++ });
+  const waiting = service.waitForUser(); callback(user); assert.equal(await waiting, user); assert.equal(unsubscribed, 1);
+  const verification = service.verifyRole(user); service.dispose(); resolveProfile({ data: () => ({ role: 'head_admin', active: true }), exists: () => true });
+  assert.equal(await verification, false); assert.equal(published, 0);
+  const pending = service.waitForUser(); service.dispose(); assert.equal(await pending, null); assert.equal(unsubscribed, 2);
+  for (const role of ['student', 'student_manager', 'attendance_admin', 'head_admin', 'viewer', 'unknown']) {
+    service.loadStudent = async () => ({ data: () => ({ role, active: true }), exists: () => true });
+    service.dashboardRole = 'admin'; assert.equal(await service.verifyRole(user), ['student_manager','attendance_admin','head_admin'].includes(role));
+    service.dashboardRole = 'student'; assert.equal(await service.verifyRole(user), ['student','viewer'].includes(role));
+  }
+  service.loadStudent = () => { throw Error('super admin must not need a student record'); }; service.dashboardRole = 'admin';
+  assert.equal(await service.verifyRole({ uid: 'owner', email: 'owner@test.local' }), true);
+});
+
+test('face registration service preserves authenticated upload/reset payloads and polls acknowledgement', async () => {
+  const { FaceRegistrationService } = await isolatedModule('assets/js/controllers/FaceRegistrationService.js');
+  const requests = []; let now = 0, reads = 0;
+  const service = new FaceRegistrationService({ endpoint: 'https://example.test/upload', getUser: () => ({ getIdToken: async () => 'test-token' }), fetch: async (url, request) => requests.push({ url, ...request, body: JSON.parse(request.body) }), now: () => now, delay: async ms => { now += ms; }, loadRegistration: async () => ({ exists: () => ++reads > 1 }) });
+  await service.upload('test-photo', { firstName: 'Test', lastName: 'Student', accountId: 'ID-1', section: '2A' }); await service.reset('student');
+  assert.equal(requests[0].mode, 'no-cors'); assert.equal(requests[0].body.idToken, 'test-token'); assert.equal(requests[0].body.studentName, 'Test Student');
+  assert.equal(requests[1].body.action, 'reset'); assert.equal(requests[1].body.studentUid, 'student');
+  assert.ok(await service.waitForRegistration('student', true)); assert.equal(now, 800);
+  service.loadRegistration = async () => ({ exists: () => false }); assert.equal(await service.waitForRegistration('student', true, 1600), null);
+  service.endpoint = ''; await assert.rejects(service.reset('student'), /not configured/);
+});
+
+test('notification creation service keeps role/category policy and server timestamps', async () => {
+  const { NotificationService } = await isolatedModule('assets/js/controllers/NotificationService.js');
+  const saved = [];
+  const service = new NotificationService({ getSession: () => ({ user: { uid: 'student' }, role: 'student' }), canReceive: (_, category) => category === 'attendance', save: async record => saved.push(record), serverTimestamp: () => 'server' });
+  assert.equal(await service.create({ recipientUid: 'student', category: 'system' }), null); assert.equal(saved.length, 0);
+  await service.create({ recipientUid: 'student', category: 'attendance', title: 'Test' });
+  assert.equal(saved[0].read, false); assert.equal(saved[0].createdAt, 'server'); assert.equal(saved[0].targetView, 'dashboard');
+});
+
+test('notification center initializes once, unsubscribes on dispose and ignores late callbacks', async () => {
+  const browser = fakeBrowser(); let subscribed = 0, stopped = 0, callback, failure;
+  const shared = { db: {}, currentUser: { uid: 'student' }, currentUserRole: 'student', dashboardRole: 'student', escapeHtml: String, formatNotificationTime: () => '', query: x => x, collection: () => 'notifications', where() {}, onSnapshot: (_, next, error) => { subscribed++; callback = next; failure = error; return () => stopped++; }, setDoc() {}, doc() {}, serverTimestamp() {}, writeBatch() {}, showDashboardToast() {}, openView() {}, canReceiveNotification: () => true };
+  const { NotificationCenterController } = await isolatedModule('assets/js/controllers/NotificationCenterController.js', shared, browser);
+  const controller = new NotificationCenterController(browser); controller.initialize(); controller.initialize(); assert.equal(subscribed, 1);
+  callback({ docs: [{ id: 'one', data: () => ({ title: 'Saved', category: 'attendance' }) }] }); assert.equal(controller.notificationRecords.length, 1);
+  controller.dispose(); assert.equal(stopped, 1);
+  callback({ docs: [] }); failure({ code: 'offline' }); controller.subscribeToNotifications();
+  assert.equal(subscribed, 1); assert.equal(controller.notificationRecords.length, 1);
+  assert.equal(browser.document.querySelector('#notificationBell').handlers.get('click').size, 0);
+});
+
+test('shared navigation history is idempotent and cleans up modal and popstate listeners', async () => {
+  const browser = fakeBrowser(); let pushes = 0, replaces = 0, rendered = 0;
+  browser.window.location = { href: 'https://presence.test/pages/student-dashboard.html' };
+  const shared = { dashboardRole: 'student', pageCopy: { student: { dashboard: ['Dashboard','Test'] } }, currentUser: {}, currentUserRole: 'student', currentUserProfile: {}, activeView: 'dashboard', previousView: 'dashboard', sessionState: {}, ROLE_VIEWS: { student: ['dashboard'] }, ROLE_ACCESS_LABELS: {}, roleLabel: () => 'Student', renderView: () => rendered++, openView() {}, setDashboardViewState() {}, auth: {}, db: {}, signOut() {}, setDoc() {}, doc() {}, serverTimestamp() {}, showDashboardToast() {} };
+  const history = { state: null, replaceState() { replaces++; }, pushState() { pushes++; }, go() {} };
+  const { DashboardNavigationController } = await isolatedModule('assets/js/controllers/DashboardNavigationController.js', shared, browser);
+  const controller = new DashboardNavigationController({ ...browser, history });
+  controller.initialize(); controller.initialize(); controller.initializeDashboardHistory(); controller.initializeDashboardHistory();
+  assert.equal(pushes, 1); assert.equal(replaces, 1); assert.equal(rendered, 1);
+  controller.dispose(); assert.equal(browser.document.querySelector('#confirmLogout').handlers.get('click').size, 0);
+});
+
+test('application boot is idempotent and disposes its role controller without late initialization', async () => {
+  const browser = fakeBrowser(); browser.window.location = { replace() {} };
+  let created = 0, initialized = 0, disposed = 0, sharedCleanups = 0;
+  const shared = { waitForUser: async () => ({ uid: 'manager' }), verifyRole: async () => true, auth: {}, signOut() {}, wireCommonNavigation() {}, wireNotificationCenter() {}, applyRoleNavigation() {}, dashboardRole: 'admin', currentUserProfile: {}, currentUserRole: 'student_manager', updateDashboardGreeting() {}, sessionState: {}, db: {}, escapeHtml: String, openView() {}, showDashboardToast() {}, initializeDashboardHistory() {} };
+  const { DashboardApplication } = await isolatedModule('assets/js/controllers/DashboardApplication.js', shared, browser);
+  const AdminDashboard = class { constructor() { created++; } initialize() { initialized++; } dispose() { disposed++; } };
+  const application = new DashboardApplication({ ...browser, loadDashboard: async () => ({ AdminDashboard }), cleanupShared: () => sharedCleanups++ });
+  const pending = application.initialize(); assert.equal(application.initialize(), pending); await pending;
+  assert.equal(created, 1); assert.equal(initialized, 1); assert.equal(shared.sessionState.dashboard, application);
+  application.dispose(); application.dispose(); assert.equal(disposed, 1); assert.equal(sharedCleanups, 1);
+  let resolveModule;
+  const next = new DashboardApplication({ ...browser, loadDashboard: () => new Promise(resolve => { resolveModule = resolve; }) });
+  const nextBoot = next.initialize(); await new Promise(resolve => setImmediate(resolve));
+  next.dispose(); resolveModule({ AdminDashboard }); await nextBoot;
+  assert.equal(created, 1); assert.equal(initialized, 1);
+});
+
+test('dashboard module loads during authentication but does not initialize before authorization', async () => {
+  const browser = fakeBrowser(); browser.window.location = { replace() {} };
+  let resolveUser, loaded = 0, initialized = 0, verified = 0;
+  const shared = { waitForUser: () => new Promise(resolve => { resolveUser = resolve; }), verifyRole: async () => { verified++; return true; }, wireCommonNavigation() {}, wireNotificationCenter() {}, applyRoleNavigation() {}, dashboardRole: 'admin', currentUserProfile: {}, currentUserRole: 'student_manager', updateDashboardGreeting() {}, sessionState: {}, initializeDashboardHistory() {} };
+  Object.assign(shared, { auth: {}, signOut() {}, db: {}, escapeHtml: String, openView() {}, showDashboardToast() {} });
+  const { DashboardApplication } = await isolatedModule('assets/js/controllers/DashboardApplication.js', shared, browser);
+  const application = new DashboardApplication({ ...browser, loadDashboard: async () => { loaded++; return { AdminDashboard: class { initialize() { initialized++; } dispose() {} } }; } });
+  const pending = application.initialize(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(loaded, 1); assert.equal(verified, 0); assert.equal(initialized, 0);
+  resolveUser({ uid: 'manager' }); await pending;
+  assert.equal(verified, 1); assert.equal(initialized, 1); application.dispose();
+});
+
+for (const role of ['admin', 'student']) test(`the real ${role} bootstrap evaluates its cyclic module graph exactly once with mocked Firebase`, async () => {
+  const browser = fakeBrowser(); browser.document.body.dataset.dashboard = role;
+  let surveySections = 0, notificationPanels = 0, logoutPanels = 0;
+  browser.document.querySelector('.content').insertAdjacentHTML = (_, html) => { if (html.includes('data-section="surveys"')) surveySections++; };
+  browser.document.body.insertAdjacentHTML = (_, html) => { if (html.includes('id="notificationPanel"')) notificationPanels++; if (html.includes('id="logoutModal"')) logoutPanels++; };
+  browser.window.location = { href: 'https://presence.test/pages/admin-dashboard.html', replace() {} };
+  browser.window.scrollTo = () => {};
+  browser.window.dispatchEvent = event => browser.window.emit(event.detail.viewName);
+  const history = { state: null, replaceState() {}, pushState() {}, go() {} };
+  const context = vm.createContext({ ...browser, history, console, URL, setTimeout, clearTimeout, CustomEvent: class { constructor(type, options) { this.type = type; Object.assign(this, options); } }, fetch: async () => ({}) });
+  const sdk = { Timestamp: { now: () => new Date(), fromMillis: n => new Date(n), fromDate: n => n }, onAuthStateChanged: (_, next) => { queueMicrotask(() => next({ uid: role, email: role === 'admin' ? 'owner@test.local' : 'student@test.local' })); return () => {}; }, signOut: async () => {}, collection: (_, name) => name, doc: (_, name, uid) => `${name}/${uid}`, query: x => x, where() {}, orderBy() {}, serverTimestamp: () => 'server', onSnapshot: () => () => {}, getDoc: async () => ({ exists: () => true, data: () => ({ role: 'student', active: true }) }), getDocFromServer: async () => ({ exists: () => false, data: () => ({}) }), getDocs: async () => ({ docs: [] }), getDocsFromServer: async () => ({ docs: [] }), setDoc: async () => {}, writeBatch: () => ({ set() {}, delete() {}, commit: async () => {} }), limit() {}, startAfter() {}, runTransaction() {}, addDoc: async () => ({ id: 'test' }), deleteDoc: async () => {}, deleteField() {}, createUserWithEmailAndPassword() {}, deleteUser() {}, signInWithEmailAndPassword() {}, updatePassword() {}, updateProfile() {} };
+  const modules = new Map(); const synthetic = (key, values) => {
+    if (!modules.has(key)) modules.set(key, new vm.SyntheticModule(Object.keys(values), function() { for(const [name,value] of Object.entries(values)) this.setExport(name,value); }, { context, identifier: key }));
+    return modules.get(key);
+  };
+  const load = filename => {
+    if (!modules.has(filename)) modules.set(filename, new vm.SourceTextModule(fs.readFileSync(filename, 'utf8'), { context, identifier: filename, importModuleDynamically: async (specifier, parent) => { const target = resolve(specifier, parent); if(target.status === 'unlinked') await target.link(resolve); if(target.status === 'linked') await target.evaluate(); return target; } }));
+    return modules.get(filename);
+  };
+  const resolve = (specifier, parent) => {
+    if(specifier.startsWith('https:')) return synthetic('sdk',sdk);
+    if(specifier.includes('firebase-config.js')) return synthetic('config',{ SUPER_ADMIN_EMAIL: 'owner@test.local', auth: {}, db: {}, studentIdToEmail: x => x, studentProvisioningAuth: {} });
+    return load(path.resolve(path.dirname(parent.identifier),specifier.split('?')[0]));
+  };
+  const entry = load(path.join(root,'assets/js/dashboard.js')); await entry.link(resolve); await entry.evaluate();
+  await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(surveySections,1, browser.document.querySelector('#dashboardToastMessage').textContent); assert.equal(notificationPanels,1); assert.equal(logoutPanels,1);
+  assert.equal(entry.namespace.currentUserRole, role === 'admin' ? 'super_admin' : 'student'); assert.equal(entry.namespace.sessionState.dashboard.dashboard.constructor.name, role === 'admin' ? 'AdminDashboard' : 'StudentDashboard');
+  if (role === 'student') {
+    const controller = entry.namespace.sessionState.dashboard.dashboard;
+    // onSnapshot deliberately never delivers: the verified profile must render anyway.
+    assert.equal(controller.studentProfile.active, true);
+    assert.equal(browser.document.querySelector('#profileStatusBadge').textContent, 'Profile active');
+    assert.match(browser.document.querySelector('#studentProfileContent').innerHTML, /student-profile-card/);
+    controller.applyProfile({ ...controller.studentProfile, firstName: 'Updated', mustChangePassword: true });
+    assert.match(browser.document.querySelector('#studentProfileContent').innerHTML, /Updated/);
+    assert.equal(browser.document.querySelector('#requiredPasswordChangeModal').hidden, false);
+    controller.applyProfile({ ...controller.studentProfile, mustChangePassword: false });
+    assert.equal(browser.document.querySelector('#requiredPasswordChangeModal').hidden, true);
+    controller.dispose();
+    controller.applyProfile({ firstName: 'Late callback' });
+    assert.equal(controller.studentProfile.firstName, 'Updated');
+  }
+  entry.namespace.sessionState.dashboard.dispose();
+});
+
 test('dashboard entry points use the same shared-module version', () => {
+  let entry;
   for (const role of ['student', 'admin']) {
     const html = fs.readFileSync(path.join(root, `pages/${role}-dashboard.html`), 'utf8');
-    assert.ok(html.includes('dashboard.js?v=20261010-surveys'));
+    const source = html.match(/src="([^"]*dashboard\.js\?v=[^"]+)"/)[1];
+    const url = new URL(source, `https://presence.test/pages/${role}-dashboard.html`).href;
+    if (entry) assert.equal(url, entry); else entry = url;
   }
+  const inspect = directory => {
+    for (const item of fs.readdirSync(directory, { withFileTypes: true })) {
+      const file = path.join(directory, item.name);
+      if (item.isDirectory()) { inspect(file); continue; }
+      if (!file.endsWith('.js')) continue;
+      const source = fs.readFileSync(file, 'utf8');
+      const base = `https://presence.test/${path.relative(root, file).replaceAll('\\', '/')}`;
+      for (const match of source.matchAll(/from\s*['"]([^'"]*dashboard\.js(?:\?[^'"]*)?)['"]/g)) {
+        assert.equal(new URL(match[1], base).href, entry, `${path.relative(root, file)} loads a second dashboard module`);
+      }
+    }
+  };
+  inspect(path.join(root, 'assets/js'));
 });
 
 test('roster readiness follows cache-to-server metadata even when documents do not change', async () => {

@@ -1,11 +1,14 @@
+import { FineModalController } from './controllers/FineModalController.js';
+import { NotificationService } from './controllers/NotificationService.js';
+import { DashboardGreetingController } from './controllers/DashboardGreetingController.js';
+import { DashboardApplication } from './controllers/DashboardApplication.js?v=20261011-student-startup';
+import { DashboardNavigationController } from './controllers/DashboardNavigationController.js';
+import { NotificationCenterController } from './controllers/NotificationCenterController.js';
+import { DashboardSessionService } from './controllers/DashboardSessionService.js';
+import { DashboardToastController } from './controllers/DashboardToastController.js';
+import { FaceRegistrationService } from './controllers/FaceRegistrationService.js';
 import { SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js?v=20261005-operational-reset";
-import { ROLE_VIEWS } from './core/permissions.js?v=20261010-surveys';
-import { AuthActionController } from './controllers/AuthActionController.js';
-import { SurveyController } from './controllers/SurveyController.js?v=20261011-survey-archive';
-import { SurveyRepository } from './controllers/SurveyRepository.js?v=20261011-survey-archive';
-import { SurveyDeletionService } from './controllers/SurveyDeletionService.js';
-import { SurveyLocationService } from './controllers/SurveyLocationService.js?v=20261010-location-retry';
-import { hasPermission } from './core/permissions.js?v=20261010-surveys';
+import { ROLE_VIEWS } from './core/permissions.js?v=20261011-student-startup';
 import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
   Timestamp,
@@ -103,62 +106,13 @@ function formatBirthday(value) {
   return birthday.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 }
 
-class FineModalController {
-  constructor({ modal, content, title, description, closeSelector }) {
-    this.modal = modal;
-    this.content = content;
-    this.title = title;
-    this.description = description;
-    this.closeSelector = closeSelector;
-    this.trigger = null;
-    document.querySelectorAll(closeSelector).forEach((button) => button.addEventListener("click", () => this.close()));
-    modal.addEventListener("click", (event) => { if (event.target === modal) this.close(); });
-  }
 
-  open({ title, description, markup, trigger }) {
-    this.trigger = trigger;
-    this.title.textContent = title;
-    this.description.textContent = description;
-    this.content.innerHTML = markup;
-    this.modal.hidden = false;
-    this.modal.querySelector(this.closeSelector)?.focus();
-  }
-
-  close() {
-    this.modal.hidden = true;
-    this.trigger?.focus();
-  }
-}
 
 // Spark-plan client-side policy. Firestore Rules repeat the same time-window
 // checks so the recorded arrival label cannot be changed after check-in.
-function showDashboardToast(titleText, messageText) {
-  const toast = document.querySelector("#dashboardToast");
-  clearTimeout(toastTimer);
-  document.querySelector("#dashboardToastTitle").textContent = titleText;
-  document.querySelector("#dashboardToastMessage").textContent = messageText;
-  toast.classList.add("show");
-  toastTimer = setTimeout(() => toast.classList.remove("show"), 4200);
-}
+function showDashboardToast(titleText, messageText) { toastController.show(titleText, messageText); toastTimer = toastController.timer; }
 
-async function createNotification(notification) {
-  const effectiveRecipientRole = notification.recipientRole || (notification.recipientUid === currentUser?.uid ? currentUserRole : "");
-  if (effectiveRecipientRole && !canReceiveNotification(effectiveRecipientRole, notification.category)) return null;
-  return addDoc(collection(db, "notifications"), {
-    recipientUid: notification.recipientUid || "",
-    recipientRole: notification.recipientRole || "",
-    category: notification.category || "system",
-    title: notification.title,
-    message: notification.message,
-    targetView: notification.targetView || "dashboard",
-    studentName: notification.studentName || "",
-    studentId: notification.studentId || "",
-    section: notification.section || "",
-    ...(notification.eventId ? { eventId: notification.eventId } : {}),
-    read: false,
-    createdAt: serverTimestamp()
-  });
-}
+function createNotification(notification) { return notificationService.create(notification); }
 
 function formatNotificationTime(value) {
   const date = value?.toDate?.() || (value ? new Date(value) : null);
@@ -170,240 +124,21 @@ function formatNotificationTime(value) {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-async function uploadFacePhotoToDrive(imageDataUrl, student = {}) {
-  if (!FACE_UPLOAD_WEB_APP_URL) throw new Error("Face-photo storage is not configured.");
-  const idToken = await currentUser.getIdToken();
-  const payload = {
-    idToken,
-    imageDataUrl,
-    studentName: [student.firstName, student.lastName].filter(Boolean).join(" "),
-    studentId: student.accountId || "",
-    section: student.section || ""
-  };
-  // Apps Script web apps do not expose cross-origin response headers. This simple,
-  // opaque POST still delivers the authenticated photo to the private Drive script.
-  await fetch(FACE_UPLOAD_WEB_APP_URL, {
-    method: "POST",
-    mode: "no-cors",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify(payload)
-  });
-}
+function uploadFacePhotoToDrive(imageDataUrl, student = {}) { return faceRegistrationService.upload(imageDataUrl, student); }
 
-async function resetFacePhotoInDrive(studentUid) {
-  if (!FACE_UPLOAD_WEB_APP_URL) throw new Error("Face-photo storage is not configured.");
-  const idToken = await currentUser.getIdToken();
-  await fetch(FACE_UPLOAD_WEB_APP_URL, {
-    method: "POST",
-    mode: "no-cors",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action: "reset", idToken, studentUid })
-  });
-}
+function resetFacePhotoInDrive(studentUid) { return faceRegistrationService.reset(studentUid); }
 
-async function waitForFaceRegistration(studentUid, shouldExist, timeoutMs = 20000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const snapshot = await getDocFromServer(doc(db, "faceRegistrations", studentUid));
-    if (snapshot.exists() === shouldExist) return snapshot;
-    await new Promise((resolve) => window.setTimeout(resolve, 800));
-  }
-  return null;
-}
+function waitForFaceRegistration(studentUid, shouldExist, timeoutMs = 20000) { return faceRegistrationService.waitForRegistration(studentUid, shouldExist, timeoutMs); }
 
-function wireNotificationCenter() {
-  const bell = document.querySelector("#notificationBell");
-  const count = document.querySelector("#notificationCount");
-  const isAdminDashboard = dashboardRole === "admin";
-  document.body.insertAdjacentHTML("beforeend", `<section class="notification-panel" id="notificationPanel" hidden aria-label="Notifications"><div class="notification-panel-head"><div><h2>Notifications</h2><p>Stay up to date with Presence.</p></div><button class="modal-close" id="closeNotifications" type="button" aria-label="Close notifications">×</button></div><div class="notification-tools"><div class="notification-filters"><button class="notification-filter active" type="button" data-notification-filter="all">All</button><button class="notification-filter" type="button" data-notification-filter="unread">Unread</button><button class="notification-filter" type="button" data-notification-filter="attendance">Attendance</button><button class="notification-filter" type="button" data-notification-filter="service">Service</button><button class="notification-filter" type="button" data-notification-filter="face">Face</button><button class="notification-filter" type="button" data-notification-filter="system">System</button></div>${isAdminDashboard ? '<input class="notification-search" id="notificationSearch" type="search" placeholder="Search student, ID, or section">' : ""}</div><div class="notification-actions"><button class="link-button" type="button" id="markNotificationsRead">Mark all as read</button><button class="link-button" type="button" id="clearReadNotifications">Clear read</button></div><div class="notification-list" id="notificationList"><div class="empty-state">No notifications yet.</div></div></section>`);
-  const panel = document.querySelector("#notificationPanel");
-  const list = document.querySelector("#notificationList");
-  const search = document.querySelector("#notificationSearch");
-  let notificationRecords = [];
-  let activeFilter = "all";
-  let unsubscribeNotifications;
-  let retryNotificationsTimer;
+function wireNotificationCenter() { return notificationCenter.initialize(); }
 
-  const close = () => { panel.hidden = true; bell.setAttribute("aria-expanded", "false"); };
-  const render = () => {
-    const queryText = search?.value.trim().toLowerCase() || "";
-    const visible = notificationRecords.filter((item) => {
-      const matchesFilter = activeFilter === "all" || (activeFilter === "unread" ? !item.read : item.category === activeFilter);
-      const searchable = `${item.studentName} ${item.studentId} ${item.section} ${item.title} ${item.message}`.toLowerCase();
-      return matchesFilter && (!queryText || searchable.includes(queryText));
-    });
-    list.innerHTML = visible.length ? visible.map((item) => `<button class="notification-item${item.read ? "" : " unread"}" type="button" data-open-notification="${escapeHtml(item.id)}"><span class="notification-icon ${escapeHtml(item.category || "system")}" aria-hidden="true">${item.category === "service" ? "!" : item.category === "attendance" ? "✓" : item.category === "face" ? "◎" : "◇"}</span><span class="notification-copy"><strong>${escapeHtml(item.title || "Presence update")}</strong><small>${escapeHtml(item.message || "")}</small>${item.studentName ? `<em>${escapeHtml(item.studentName)}${item.section ? ` · ${escapeHtml(item.section)}` : ""}</em>` : ""}<time>${escapeHtml(formatNotificationTime(item.createdAt))}</time></span>${item.read ? "" : '<i class="notification-unread-dot" aria-label="Unread"></i>'}</button>`).join("") : '<div class="empty-state">No notifications match this filter.</div>';
-    const unread = notificationRecords.filter((item) => !item.read).length;
-    count.hidden = !unread;
-    count.textContent = unread > 99 ? "99+" : unread;
-  };
-  bell.addEventListener("click", () => {
-    panel.hidden = !panel.hidden;
-    bell.setAttribute("aria-expanded", String(!panel.hidden));
-    if (!panel.hidden) list.querySelector("button")?.focus();
-  });
-  document.querySelector("#closeNotifications").addEventListener("click", close);
-  document.querySelectorAll("[data-notification-filter]").forEach((button) => button.addEventListener("click", () => {
-    activeFilter = button.dataset.notificationFilter;
-    document.querySelectorAll("[data-notification-filter]").forEach((filter) => filter.classList.toggle("active", filter === button));
-    render();
-  }));
-  search?.addEventListener("input", render);
-  list.addEventListener("click", async (event) => {
-    const item = event.target.closest("[data-open-notification]");
-    if (!item) return;
-    const record = notificationRecords.find((notification) => notification.id === item.dataset.openNotification);
-    if (!record) return;
-    if (!record.read) {
-      const previous = { ...record };
-      record.read = true;
-      record.readAt = new Date();
-      render();
-      try {
-        await setDoc(doc(db, "notifications", record.id), { read: true, readAt: serverTimestamp() }, { merge: true });
-      } catch (error) {
-        Object.assign(record, previous);
-        render();
-        showDashboardToast("Unable to mark notification read", error.code === "permission-denied" ? "Your account is not allowed to update this notification." : (error.message || "Please try again."));
-        return;
-      }
-    }
-    close();
-    openView(record.targetView || "dashboard");
-  });
-  document.querySelector("#markNotificationsRead").addEventListener("click", async () => {
-    const unread = notificationRecords.filter((item) => !item.read);
-    if (!unread.length) return;
-    const button = document.querySelector("#markNotificationsRead");
-    const previous = unread.map((item) => ({ item, read: item.read, readAt: item.readAt }));
-    unread.forEach((item) => { item.read = true; item.readAt = new Date(); });
-    button.disabled = true;
-    render();
-    try {
-      for (let index = 0; index < unread.length; index += 400) {
-        const batch = writeBatch(db);
-        unread.slice(index, index + 400).forEach((item) => batch.set(doc(db, "notifications", item.id), { read: true, readAt: serverTimestamp() }, { merge: true }));
-        await batch.commit();
-      }
-    } catch (error) {
-      previous.forEach(({ item, read, readAt }) => { item.read = read; item.readAt = readAt; });
-      render();
-      showDashboardToast("Unable to mark notifications read", error.code === "permission-denied" ? "Your account is not allowed to update these notifications." : (error.message || "Please try again."));
-    } finally {
-      button.disabled = false;
-    }
-  });
-  document.querySelector("#clearReadNotifications").addEventListener("click", async () => {
-    const read = notificationRecords.filter((item) => item.read);
-    if (!read.length) return;
-    const button = document.querySelector("#clearReadNotifications");
-    const previous = notificationRecords;
-    notificationRecords = notificationRecords.filter((item) => !item.read);
-    button.disabled = true;
-    render();
-    try {
-      for (let index = 0; index < read.length; index += 400) {
-        const batch = writeBatch(db);
-        read.slice(index, index + 400).forEach((item) => batch.delete(doc(db, "notifications", item.id)));
-        await batch.commit();
-      }
-    } catch (error) {
-      notificationRecords = previous;
-      render();
-      showDashboardToast("Unable to clear notifications", error.code === "permission-denied" ? "Your account is not allowed to delete these notifications." : (error.message || "Please try again."));
-    } finally {
-      button.disabled = false;
-    }
-  });
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !panel.hidden) close(); });
-  const subscribeToNotifications = () => {
-    window.clearTimeout(retryNotificationsTimer);
-    unsubscribeNotifications?.();
-    const notificationQuery = query(collection(db, "notifications"), where("recipientUid", "==", currentUser.uid));
-    unsubscribeNotifications = onSnapshot(notificationQuery, (snapshot) => {
-      notificationRecords = snapshot.docs
-        .map((item) => ({ id: item.id, ...item.data() }))
-        .filter((item) => canReceiveNotification(currentUserRole, item.category))
-        .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-      render();
-    }, (error) => {
-      // A listener error is terminal. Keep cached records and retry transient failures.
-      console.error("Notification listener failed", { code: error.code, message: error.message });
-      // A rules or auth-token change can resolve a permission error without a
-      // page reload, so every terminal listener error is retried silently.
-      retryNotificationsTimer = window.setTimeout(subscribeToNotifications, 5000);
-    });
-  };
-  window.addEventListener("online", subscribeToNotifications);
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") subscribeToNotifications();
-  });
-  window.addEventListener("beforeunload", () => {
-    window.clearTimeout(retryNotificationsTimer);
-    unsubscribeNotifications?.();
-  }, { once: true });
-  subscribeToNotifications();
-}
+function renderView(viewName) { return dashboardNavigation.renderView(viewName); }
 
-function renderView(viewName) {
-  if (!pageCopy[dashboardRole][viewName] || !ROLE_VIEWS[currentUserRole]?.includes(viewName)) return;
-  activeView = viewName;
-  document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === viewName));
-  document.querySelectorAll("[data-section]").forEach((section) => { section.hidden = section.dataset.section !== viewName; });
-  const copy = pageCopy[dashboardRole][viewName];
-  if (copy) [document.querySelector("#pageTitle").textContent, document.querySelector("#pageSubtitle").textContent] = copy;
-  if (viewName === 'modify-students' && currentUserRole === 'student_manager') {
-    document.querySelector('#pageSubtitle').textContent = 'Manage student details and face registration';
-  }
-  window.dispatchEvent(new CustomEvent("presence:viewchange", { detail: { viewName } }));
-  window.scrollTo({ top: 0, behavior: "smooth" });
-}
+function openView(viewName) { return dashboardNavigation.openView(viewName); }
 
-function openView(viewName) {
-  if (!pageCopy[dashboardRole][viewName] || !ROLE_VIEWS[currentUserRole]?.includes(viewName) || viewName === activeView) return;
-  previousView = activeView || "dashboard";
-  renderView(viewName);
-  history.pushState({ presenceDashboard: true, view: viewName }, "", window.location.href);
-}
+function applyRoleNavigation() { return dashboardNavigation.applyRoleNavigation(); }
 
-function applyRoleNavigation() {
-  if (dashboardRole !== "admin") return;
-  const allowedViews = new Set(ROLE_VIEWS[currentUserRole] || []);
-  document.querySelectorAll("[data-view]").forEach((button) => {
-    button.hidden = !allowedViews.has(button.dataset.view);
-  });
-  document.querySelectorAll("[data-go-view]").forEach((button) => {
-    button.hidden = !allowedViews.has(button.dataset.goView);
-  });
-  document.querySelectorAll("[data-go-back]").forEach((button) => {
-    button.hidden = !allowedViews.has(previousView);
-  });
-  document.querySelector("[data-go-view=profile]")?.toggleAttribute("hidden", currentUserRole !== "super_admin");
-  document.querySelectorAll("[data-role-console]").forEach((element) => { element.textContent = `${roleLabel(currentUserRole)} console`; });
-  document.querySelectorAll("[data-admin-role]").forEach((element) => { element.textContent = ROLE_ACCESS_LABELS[currentUserRole] || "Student"; });
-  const displayName = [currentUserProfile.firstName, currentUserProfile.lastName].filter(Boolean).join(" ");
-  if (displayName) document.querySelectorAll("[data-admin-name]").forEach((element) => { element.textContent = displayName; });
-  document.querySelectorAll("[data-super-admin-only]").forEach((element) => { element.hidden = currentUserRole !== "super_admin"; });
-}
-
-function initializeDashboardHistory() {
-  const requestedView = history.state?.presenceDashboard && pageCopy[dashboardRole][history.state.view]
-    ? history.state.view
-    : "dashboard";
-  const initialView = ROLE_VIEWS[currentUserRole]?.includes(requestedView) ? requestedView : "dashboard";
-  history.replaceState({ presenceDashboard: true, view: initialView, root: true }, "", window.location.href);
-  history.pushState({ presenceDashboard: true, view: initialView }, "", window.location.href);
-  renderView(initialView);
-
-  window.addEventListener("popstate", (event) => {
-    const state = event.state;
-    if (!state?.presenceDashboard || state.root) {
-      history.go(1);
-      return;
-    }
-    renderView(ROLE_VIEWS[currentUserRole]?.includes(state.view) ? state.view : "dashboard");
-  });
-}
+function initializeDashboardHistory() { return dashboardNavigation.initializeDashboardHistory(); }
 
 function formatEventDate(value) {
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", weekday: "long" }).format(new Date(`${value}T00:00:00`));
@@ -534,12 +269,7 @@ function getDashboardGreeting() {
   return { label: "Good evening", message: "Review today’s attendance and prepare for what comes next." };
 }
 
-function updateDashboardGreeting(name = "Student") {
-  const greeting = getDashboardGreeting();
-  document.querySelectorAll("[data-dashboard-greeting]").forEach((element) => { element.textContent = greeting.label; });
-  document.querySelectorAll("[data-dashboard-greeting-title]").forEach((element) => { element.textContent = `${greeting.label}, ${name}.`; });
-  document.querySelectorAll("[data-dashboard-greeting-message]").forEach((element) => { element.textContent = greeting.message; });
-}
+function updateDashboardGreeting(name = 'Student') { return greetingController.render(name); }
 
 function createDeviceSessionToken() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -551,138 +281,28 @@ function createDeviceSessionToken() {
   return `${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
-async function waitForUser() {
-  return new Promise((resolve) => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      unsubscribe();
-      resolve(user);
-    });
-  });
-}
+async function waitForUser() { currentUser = await dashboardSession.waitForUser(); return currentUser; }
 
-async function verifyRole(user) {
-  if (!user) return false;
-  const isSuperAdmin = user.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
-  const profile = isSuperAdmin ? null : await getDoc(doc(db, "students", user.uid));
-  currentUserProfile = profile?.data() || {};
-  const storedRole = profile?.data()?.role || "student";
-  const role = isSuperAdmin ? "super_admin" : (storedRole === "viewer" ? "student" : storedRole);
-  currentUserRole = role;
-  if (dashboardRole === "admin") {
-    return ["super_admin", "head_admin", "attendance_admin", "student_manager"].includes(role);
-  }
-  if (role !== "student") return false;
-  return profile.exists() && currentUserProfile.active === true;
-}
+function verifyRole(user) { return dashboardSession.verifyRole(user); }
 
-function wireCommonNavigation() {
-  document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => openView(button.dataset.view)));
-  document.querySelectorAll("[data-go-view]").forEach((button) => button.addEventListener("click", () => openView(button.dataset.goView)));
-  document.querySelectorAll("[data-go-back]").forEach((button) => button.addEventListener("click", () => openView(previousView)));
-  document.querySelectorAll("[data-dashboard-home]").forEach((brand) => brand.addEventListener("click", (event) => {
-    event.preventDefault();
-    document.querySelectorAll(".dashboard-modal-backdrop:not([hidden])").forEach((modal) => { modal.hidden = true; });
-    document.querySelector("#notificationPanel")?.setAttribute("hidden", "");
-    document.querySelector("#notificationBell")?.setAttribute("aria-expanded", "false");
-    openView("dashboard");
-  }));
-  document.body.insertAdjacentHTML("beforeend", `
-    <div class="dashboard-modal-backdrop" id="logoutModal" hidden>
-      <section class="dashboard-modal logout-modal" role="dialog" aria-modal="true" aria-labelledby="logoutModalTitle">
-        <button class="modal-close" type="button" data-close-logout aria-label="Close">×</button>
-        <span class="modal-icon">↙</span>
-        <h2 id="logoutModalTitle">Log out of Presence?</h2>
-        <p>You will return to the sign-in page and need your credentials to access your account again.</p>
-        <div class="modal-actions">
-          <button class="outline-button" type="button" data-close-logout>Cancel</button>
-          <button class="primary-button" id="confirmLogout" type="button">Log out</button>
-        </div>
-      </section>
-    </div>`);
-  const logoutModal = document.querySelector("#logoutModal");
-  const logoutAction = new AuthActionController();
-  window.addEventListener('pagehide', () => logoutAction.dispose(), { once: true });
-  const closeLogoutModal = () => { if (!logoutAction.busy) logoutModal.hidden = true; };
-  document.querySelectorAll("[data-logout]").forEach((button) => button.addEventListener("click", () => {
-    logoutModal.hidden = false;
-    document.querySelector("#confirmLogout").focus();
-  }));
-  document.querySelectorAll("[data-close-logout]").forEach((button) => button.addEventListener("click", closeLogoutModal));
-  logoutModal.addEventListener("click", (event) => { if (event.target === logoutModal) closeLogoutModal(); });
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !logoutModal.hidden) closeLogoutModal(); });
-  document.querySelector("#confirmLogout").addEventListener("click", async () => {
-    await logoutAction.run({
-      buttons: [document.querySelector('#confirmLogout'), ...document.querySelectorAll('[data-logout]')],
-      label: 'Logging out…', successLabel: 'Logged out', action: async () => {
-      try {
-        if (sessionState.mediaStream) sessionState.mediaStream.getTracks().forEach((track) => track.stop());
-        window.clearInterval(sessionState.presenceHeartbeatTimer);
-        if (dashboardRole === "student" && currentUser && sessionState.presenceSessionId) {
-          sessionState.studentLoggedOut = true;
-          await Promise.allSettled([
-            setDoc(doc(db, "presenceSessions", sessionState.presenceSessionId), { studentUid: currentUser.uid, sessionId: sessionState.presenceSessionId, online: false, status: "logged-out", lastSeen: serverTimestamp(), offlineAt: serverTimestamp() }, { merge: true }),
-            setDoc(doc(db, "presence", currentUser.uid), { online: false, status: "logged-out", lastSeen: serverTimestamp(), offlineAt: serverTimestamp() }, { merge: true })
-          ]);
-        }
-        await signOut(auth);
-        try {
-          sessionStorage.removeItem("presenceSession");
-          sessionStorage.removeItem("presenceDeviceSession");
-        } catch {}
-        sessionState.dashboard?.dispose();
-        window.location.replace("../index.html");
-      } catch (error) {
-        console.error("LOGOUT FAILED:", error);
-        showDashboardToast("Unable to log out", "Firebase could not end this session. Please try again.");
-        return false;
-      }
-    } });
-  });
-  const dateText = new Intl.DateTimeFormat("en", { weekday: "short", month: "short", day: "numeric", year: "numeric" }).format(new Date());
-  document.querySelectorAll("[data-current-date]").forEach((element) => { element.textContent = dateText; });
-}
+function wireCommonNavigation() { return dashboardNavigation.initialize(); }
 
-async function initialize() {
-  currentUser = await waitForUser();
-  if (!currentUser || !(await verifyRole(currentUser))) {
-    if (currentUser) await signOut(auth);
-    window.location.replace("../index.html");
-    return;
-  }
-  wireCommonNavigation();
-  wireNotificationCenter();
-  applyRoleNavigation();
-  const displayName = dashboardRole === "admin"
-    ? [currentUserProfile.firstName, currentUserProfile.lastName].filter(Boolean).join(" ") || "Admin"
-    : "Student";
-  updateDashboardGreeting(displayName);
-  const module = dashboardRole === "student"
-    ? await import("./student/StudentDashboard.js?v=20261010-surveys")
-    : await import("./admin/AdminDashboard.js?v=20261010-surveys");
-  const Dashboard = dashboardRole === "student" ? module.StudentDashboard : module.AdminDashboard;
-  const dashboard = new Dashboard();
-  sessionState.dashboard = dashboard;
-  dashboard.initialize();
-  if (currentUserRole === 'student' || hasPermission(currentUserRole, 'manageSurveys')) {
-    const repository = new SurveyRepository({ db, uid: currentUser.uid, profile: () => currentUserProfile });
-    const surveys = new SurveyController({ repository, locationService: new SurveyLocationService({ loadBoundary: eventId => repository.boundary(eventId) }),
-      profile: () => ({ ...currentUserProfile, uid: currentUser.uid }), canManage: hasPermission(currentUserRole, 'manageSurveys'), escapeHtml, openView, showToast: showDashboardToast, deletionService: new SurveyDeletionService({ repository }) });
-    surveys.initialize();
-    const disposeDashboard = dashboard.dispose.bind(dashboard);
-    dashboard.dispose = () => { surveys.dispose(); disposeDashboard(); };
-    if (surveys.pendingEventId) {
-      initializeDashboardHistory();
-      openView('surveys');
-      window.addEventListener('beforeunload', () => dashboard.dispose(), { once: true });
-      return;
-    }
-  }
-  window.addEventListener('beforeunload', () => dashboard.dispose(), { once: true });
-  initializeDashboardHistory();
-}
+function initialize() { return dashboardApplication.initialize(); }
+
+
+// Compatibility exports below forward to these owning instances.
+const notificationService = new NotificationService({ getSession: () => ({ user: currentUser, role: currentUserRole }), canReceive: canReceiveNotification, save: record => addDoc(collection(db, 'notifications'), record), serverTimestamp });
+const greetingController = new DashboardGreetingController({ getGreeting: getDashboardGreeting });
+const toastController = new DashboardToastController();
+const faceRegistrationService = new FaceRegistrationService({ endpoint: FACE_UPLOAD_WEB_APP_URL, getUser: () => currentUser, loadRegistration: uid => getDocFromServer(doc(db, 'faceRegistrations', uid)) });
+const dashboardSession = new DashboardSessionService({ auth, subscribe: onAuthStateChanged, loadStudent: uid => getDoc(doc(db, 'students', uid)), superAdminEmail: SUPER_ADMIN_EMAIL, dashboardRole, onState: state => { currentUser = state.user; currentUserRole = state.role; currentUserProfile = state.profile; } });
+const notificationCenter = new NotificationCenterController();
+const dashboardNavigation = new DashboardNavigationController();
+const dashboardApplication = new DashboardApplication({ cleanupShared: () => { notificationCenter.dispose(); dashboardNavigation.dispose(); dashboardSession.dispose(); toastController.dispose(); } });
+function setDashboardViewState(state) { if ('activeView' in state) activeView = state.activeView; if ('previousView' in state) previousView = state.previousView; }
 
 initialize().catch((error) => {
   showDashboardToast("Unable to load Presence", error.message);
 });
 
-export { dashboardRole, FACE_UPLOAD_WEB_APP_URL, pageCopy, currentUser, toastTimer, activeView, previousView, currentUserRole, currentUserProfile, ROLE_VIEWS, ROLE_ACCESS_LABELS, NOTIFICATION_CATEGORIES_BY_ROLE, canReceiveNotification, escapeHtml, ROLE_LABELS, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, formatNotificationTime, uploadFacePhotoToDrive, resetFacePhotoInDrive, waitForFaceRegistration, wireNotificationCenter, renderView, openView, applyRoleNavigation, initializeDashboardHistory, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineEventDate, formatFineTimestamp, getFineHistory, fineDetailsMarkup, studentFineInfoMarkup, studentFineDetailsMarkup, getDashboardGreeting, updateDashboardGreeting, createDeviceSessionToken, waitForUser, verifyRole, wireCommonNavigation, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch };
+export { setDashboardViewState, dashboardRole, FACE_UPLOAD_WEB_APP_URL, pageCopy, currentUser, toastTimer, activeView, previousView, currentUserRole, currentUserProfile, ROLE_VIEWS, ROLE_ACCESS_LABELS, NOTIFICATION_CATEGORIES_BY_ROLE, canReceiveNotification, escapeHtml, ROLE_LABELS, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, formatNotificationTime, uploadFacePhotoToDrive, resetFacePhotoInDrive, waitForFaceRegistration, wireNotificationCenter, renderView, openView, applyRoleNavigation, initializeDashboardHistory, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineEventDate, formatFineTimestamp, getFineHistory, fineDetailsMarkup, studentFineInfoMarkup, studentFineDetailsMarkup, getDashboardGreeting, updateDashboardGreeting, createDeviceSessionToken, waitForUser, verifyRole, wireCommonNavigation, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch };

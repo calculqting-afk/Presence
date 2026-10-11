@@ -2,7 +2,7 @@ import { SurveyPolicy } from './SurveyPolicy.js';
 import { SurveyLinkService } from './SurveyLinkService.js';
 import { ButtonLoadingController } from './ButtonLoadingController.js';
 import { SurveyResponseList } from './SurveyResponseList.js';
-import { SurveyConfirmationController } from './SurveyConfirmationController.js?v=20261011-survey-archive';
+import { SurveyConfirmationController } from './SurveyConfirmationController.js?v=20261011-student-startup';
 
 export class SurveyController {
   constructor({ repository, locationService, profile, canManage, escapeHtml, openView, showToast, qr = () => globalThis.qrcode, document: ownerDocument = globalThis.document, window: ownerWindow = globalThis.window, policy = new SurveyPolicy(), deletionService }) {
