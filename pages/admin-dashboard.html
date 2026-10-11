@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261010-survey-ui">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261011-face-recovery-ui">
   <link rel="stylesheet" href="../assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/button-loading.css?v=20261010-auth-progress">
@@ -247,6 +247,18 @@
       <span class="modal-icon danger">!</span>
       <h2 id="resetFaceTitle">Reset face registration?</h2>
       <p id="resetFaceMessage">This removes the student's current face photo from Drive and allows them to register one new photo.</p>
+      <div id="faceMissingRecovery" class="face-recovery-box" hidden>
+        <label class="face-recovery-option" for="recoverMissingFace">
+          <input type="checkbox" id="recoverMissingFace" aria-describedby="faceRecoveryHelp">
+          <span>Recover a missing photo registration</span>
+        </label>
+        <p id="faceRecoveryHelp">Select only after verifying the original photo was removed from Drive.</p>
+        <div class="field face-recovery-reason">
+          <label for="faceRecoveryReason">Explain what happened</label>
+          <textarea id="faceRecoveryReason" rows="3" maxlength="500" aria-describedby="faceRecoveryReasonHelp"></textarea>
+          <small id="faceRecoveryReasonHelp">Required when recovery is selected · 10–500 characters</small>
+        </div>
+      </div>
       <div class="modal-actions"><button class="outline-button" type="button" data-close-reset-face>Cancel</button><button class="small-button danger modal-danger-button" id="confirmResetFace" type="button">Reset face registration</button></div>
     </section>
   </div>

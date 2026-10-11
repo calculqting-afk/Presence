@@ -1183,15 +1183,16 @@ export class AdminDashboard {
       trigger
     });
   }
-  async resetStudentFaceRegistration(student) {
+  async resetStudentFaceRegistration(student, options = {}) {
     const dashboard = this;
     if (!dashboard.can('resetFace')) return;
     if (!student || !dashboard.faceRegistrationsByUid.get(student.uid)?.registered) return false;
     try {
-      await resetFacePhotoInDrive(student.uid);
+      await resetFacePhotoInDrive(student.uid, options);
       const registration = await waitForFaceRegistration(student.uid, false);
-      if (!registration) throw new Error("Drive did not confirm removal. The student remains registered.");
-      await createNotification({
+      if (!registration) throw new Error("Reset was not confirmed. Refresh student status before retrying. If still registered, check the Apps Script execution logs and deployed version.");
+      // Notification delivery must not hold an already-confirmed reset open.
+      Promise.resolve().then(() => createNotification({
         recipientUid: student.uid,
         recipientRole: "student",
         category: "face",
@@ -1201,8 +1202,8 @@ export class AdminDashboard {
         studentName: [student.firstName, student.lastName].filter(Boolean).join(" "),
         studentId: student.accountId,
         section: student.section
-      });
-      await dashboard.notifyRoles(["super_admin", "head_admin", "student_manager"], {
+      })).catch(error => console.warn("Face reset notification could not be delivered", error));
+      Promise.resolve().then(() => dashboard.notifyRoles(["super_admin", "head_admin", "student_manager"], {
         category: "face",
         title: "Face registration reset",
         message: `${student.accountId}'s face registration was reset.`,
@@ -1210,7 +1211,7 @@ export class AdminDashboard {
         studentName: [student.firstName, student.lastName].filter(Boolean).join(" "),
         studentId: student.accountId,
         section: student.section
-      });
+      })).catch(error => console.warn("Face reset role notifications could not be delivered", error));
       showDashboardToast("Face registration reset", `${student.accountId} can now register one new photo.`);
       return true;
     } catch (error) {
@@ -1447,6 +1448,9 @@ export class AdminDashboard {
     if (!dashboard.can('resetFace')) return;
     if (!student || !dashboard.faceRegistrationsByUid.get(student.uid)?.registered) return;
     dashboard.selectedFaceResetStudent = student;
+    dashboard.document.querySelector('#faceMissingRecovery').hidden = !['super_admin', 'head_admin'].includes(currentUserRole);
+    dashboard.document.querySelector('#recoverMissingFace').checked = false;
+    dashboard.document.querySelector('#faceRecoveryReason').value = '';
     const studentName = [student.firstName, student.lastName].filter(Boolean).join(" ") || "this student";
     dashboard.document.querySelector("#resetFaceMessage").textContent = `Reset ${studentName}'s face registration? Their current face photo will be moved to Drive Trash, and they will be allowed to register one new photo.`;
     dashboard.resetFaceModal.hidden = false;
@@ -2251,15 +2255,25 @@ export class AdminDashboard {
   async handleConfirmResetFaceClick() {
     const dashboard = this;
     if (!dashboard.can('resetFace')) return;
-    if (!dashboard.selectedFaceResetStudent) return;
+    if (!dashboard.selectedFaceResetStudent || dashboard.faceResetPending) return;
     const studentToReset = dashboard.selectedFaceResetStudent;
     const confirmButton = dashboard.document.querySelector("#confirmResetFace");
+    const options = { recoverMissing: dashboard.document.querySelector('#recoverMissingFace').checked,
+      recoveryReason: dashboard.document.querySelector('#faceRecoveryReason').value.trim() };
+    if (options.recoverMissing && options.recoveryReason.length < 10) {
+      showDashboardToast('Recovery reason required', 'Explain how you verified removal (at least 10 characters).');
+      return;
+    }
     confirmButton.disabled = true;
     confirmButton.textContent = "Resetting…";
-    const resetComplete = await dashboard.resetStudentFaceRegistration(studentToReset);
-    if (resetComplete) {
-      dashboard.closeResetFaceModal();
-    } else {
+    dashboard.faceResetPending = true;
+    try {
+      const resetComplete = await dashboard.resetStudentFaceRegistration(studentToReset, options);
+      if (resetComplete && dashboard.selectedFaceResetStudent === studentToReset) dashboard.closeResetFaceModal();
+    } catch (error) {
+      showDashboardToast("Unable to reset face", error.message || "Refresh student status before retrying.");
+    } finally {
+      dashboard.faceResetPending = false;
       confirmButton.disabled = false;
       confirmButton.textContent = "Reset face registration";
     }

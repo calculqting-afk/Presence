@@ -669,6 +669,13 @@ body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
 .modal-icon.danger { color: var(--red); background: var(--red-soft); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
 .dashboard-modal form .modal-actions { margin-top: 4px; }
+.face-recovery-box { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--sky); }
+.face-recovery-box[hidden] { display: none; }
+.face-recovery-option { display: flex; align-items: flex-start; gap: 10px; color: var(--ink); font-size: .74rem; font-weight: 700; line-height: 1.5; cursor: pointer; }
+.face-recovery-option input { flex: 0 0 auto; width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--blue); }
+.face-recovery-box > p { margin: 8px 0 16px 26px; color: var(--muted); font-size: .68rem; line-height: 1.6; }
+.face-recovery-reason textarea { width: 100%; min-height: 100px; }
+.face-recovery-reason small { color: var(--muted); font-size: .64rem; line-height: 1.5; }
 .modal-danger-button { min-height: 42px; padding: 0 18px; }
 .notification-panel { position: fixed; z-index: 70; top: 76px; right: 24px; width: min(440px, calc(100vw - 32px)); max-height: min(680px, calc(100dvh - 100px)); overflow: auto; padding: 18px; background: white; border: 1px solid #dce7f5; border-radius: 16px; box-shadow: 0 20px 52px rgba(13, 40, 83, .2); }
 .notification-panel[hidden] { display: none; }

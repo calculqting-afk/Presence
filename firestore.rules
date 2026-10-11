@@ -671,6 +671,29 @@ service cloud.firestore {
       allow update: if false;
     }
 
+    match /faceResetRequests/{requestId} {
+      allow get: if canManageStudents()
+        && (!exists(/databases/$(database)/documents/faceResetRequests/$(requestId))
+          || resource.data.requesterUid == request.auth.uid);
+      allow list: if isSuperAdmin();
+      allow create: if canManageStudents()
+        && requestId.matches('[A-Za-z0-9_-]{16,128}')
+        && request.resource.data.keys().hasOnly(['studentUid', 'requesterUid', 'status', 'outcome', 'error', 'recoveryReason', 'completedAt'])
+        && request.resource.data.requesterUid == request.auth.uid
+        && request.resource.data.studentUid is string
+        && request.resource.data.studentUid.matches('[A-Za-z0-9_-]{1,128}')
+        && request.resource.data.status in ['completed', 'failed']
+        && request.resource.data.outcome in ['', 'trashed', 'already_trashed', 'missing_recovered', 'already_reset']
+        && request.resource.data.error is string && request.resource.data.error.size() <= 1000
+        && request.resource.data.recoveryReason is string && request.resource.data.recoveryReason.size() <= 500
+        && request.resource.data.completedAt is timestamp
+        && (request.resource.data.outcome != 'missing_recovered'
+          || ((isSuperAdmin() || isHeadAdmin()) && request.resource.data.recoveryReason.size() >= 10))
+        && (request.resource.data.status != 'completed'
+          || !existsAfter(/databases/$(database)/documents/faceRegistrations/$(request.resource.data.studentUid)));
+      allow update, delete: if false;
+    }
+
     match /faceRegistrations/{studentUid} {
       allow read: if isAdmin() || (isStudent() && request.auth.uid == studentUid);
       allow create, update: if isStudent()

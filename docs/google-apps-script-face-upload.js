@@ -71,8 +71,103 @@ function createFaceRegistration_(studentUid, idToken, file) {
   }, "?currentDocument.exists=false");
 }
 
-function deleteFaceRegistration_(studentUid, idToken) {
-  firestoreRequest_("delete", `faceRegistrations/${studentUid}`, idToken);
+// Focused reset service. Upload behavior remains independent.
+class FaceResetService {
+  constructor({ requestDrive = (id) => UrlFetchApp.fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=id,trashed,ownedByMe,description,parents,capabilities(canTrash,canListChildren)`,
+    { headers: { Authorization: `Bearer ${ScriptApp.getOAuthToken()}` }, muteHttpExceptions: true }
+  ), trash = id => DriveApp.getFileById(id).setTrashed(true),
+    findFiles = uid => getStudentFaceFiles_(uid), folderId = () => getConfig_("FACE_FOLDER_ID") } = {}) {
+    Object.assign(this, { requestDrive, trash, findFiles, folderId });
+  }
+  metadata(id) {
+    const response = this.requestDrive(id);
+    const status = response.getResponseCode();
+    if (status === 404) return null; // Missing OR inaccessible; never silently authorize recovery.
+    if (status !== 200) throw new Error(`Drive access failed (${status}). Check script authorization and Drive API access.`);
+    return JSON.parse(response.getContentText());
+  }
+  recoverMissing(payload, requester, idToken) {
+    if (payload.recoverMissing !== true) throw new Error("Photo missing or inaccessible. Super Admin or Head Admin must verify its removal and confirm recovery with a reason.");
+    if (!canRecoverMissingFace_(requester, idToken)) throw new Error("Only Super Admin or Head Admin can recover a missing photo registration.");
+    if (typeof payload.recoveryReason !== "string" || payload.recoveryReason.trim().length < 10 || payload.recoveryReason.length > 500) {
+      throw new Error("Provide a recovery reason of 10–500 characters.");
+    }
+    const folder = this.metadata(this.folderId());
+    if (!folder || folder.trashed || !folder.ownedByMe || !folder.capabilities?.canListChildren) {
+      throw new Error("Recovery blocked: the script account must own and be able to list the active face-photo folder.");
+    }
+    if (this.findFiles(payload.studentUid).length) throw new Error("Recovery blocked: another matching photo exists in the face-photo folder.");
+    return "missing_recovered";
+  }
+  removePhoto(registration, payload, requester, idToken) {
+    const fileId = registration.fields?.driveFileId?.stringValue;
+    if (!fileId) {
+      const files = this.findFiles(payload.studentUid);
+      if (!files.length) return this.recoverMissing(payload, requester, idToken);
+      files.forEach(file => {
+        const metadata = this.metadata(file.getId());
+        if (!metadata || !metadata.ownedByMe || !metadata.capabilities?.canTrash) throw new Error("Drive photo permission check failed.");
+        this.trash(file.getId());
+      });
+      return "trashed";
+    }
+    const file = this.metadata(fileId);
+    if (!file) return this.recoverMissing(payload, requester, idToken);
+    if (!file.ownedByMe || !String(file.description || "").split("\n").includes(`Student UID: ${payload.studentUid}`)
+      || !file.parents?.includes(this.folderId())) throw new Error("The registered photo does not match this student or the configured folder.");
+    if (file.trashed) return "already_trashed";
+    if (!file.capabilities?.canTrash) throw new Error("The script account cannot move this photo to Trash.");
+    this.trash(fileId);
+    return "trashed";
+  }
+  resultFields(payload, requester, status, outcome, error) {
+    return {
+      studentUid: { stringValue: payload.studentUid }, requesterUid: { stringValue: requester.localId },
+      status: { stringValue: status }, outcome: { stringValue: outcome || "" },
+      error: { stringValue: String(error || "").slice(0, 1000) },
+      recoveryReason: { stringValue: payload.recoverMissing === true ? String(payload.recoveryReason || "").trim().slice(0, 500) : "" }
+    };
+  }
+  commitResult(payload, requester, idToken, registration, outcome) {
+    const base = `projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents`;
+    const writes = [{ update: { name: `${base}/faceResetRequests/${payload.requestId}`,
+      fields: this.resultFields(payload, requester, "completed", outcome) }, currentDocument: { exists: false },
+      updateTransforms: [{ fieldPath: "completedAt", setToServerValue: "REQUEST_TIME" }] }];
+    if (registration) writes.push({ delete: `${base}/faceRegistrations/${payload.studentUid}`,
+      currentDocument: { updateTime: registration.updateTime } });
+    // Atomic audit + deletion; a newer registration cannot be deleted by a stale reset.
+    const response = UrlFetchApp.fetch(`https://firestore.googleapis.com/v1/${base}:commit`, {
+      method: "post", headers: { Authorization: `Bearer ${idToken}` }, contentType: "application/json",
+      payload: JSON.stringify({ writes }), muteHttpExceptions: true
+    });
+    if (response.getResponseCode() !== 200) throw new Error(`Firebase reset confirmation failed (${response.getResponseCode()}). Check deployed Rules and refresh student status.`);
+  }
+  reset(payload, requester, idToken) {
+    if (!canResetFace_(requester, idToken)) throw new Error("Your role cannot reset face registration.");
+    if (typeof payload.studentUid !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(payload.studentUid)) throw new Error("Invalid student UID.");
+    payload.requestId = payload.requestId || Utilities.getUuid();
+    if (typeof payload.requestId !== "string" || !/^[A-Za-z0-9_-]{16,128}$/.test(payload.requestId)) throw new Error("Invalid reset request ID.");
+    try {
+      const registration = getFaceRegistration_(payload.studentUid, idToken);
+      const outcome = registration ? this.removePhoto(registration, payload, requester, idToken) : "already_reset";
+      this.commitResult(payload, requester, idToken, registration, outcome);
+      return { ok: true, outcome };
+    } catch (error) {
+      try {
+        firestoreRequest_("patch", `faceResetRequests/${payload.requestId}`, idToken, {
+          fields: { ...this.resultFields(payload, requester, "failed", "", error.message), completedAt: { timestampValue: new Date().toISOString() } }
+        }, "?currentDocument.exists=false");
+      } catch (statusError) { console.error("Unable to record reset error", statusError); }
+      throw error;
+    }
+  }
+}
+
+function canRecoverMissingFace_(requester, idToken) {
+  if (requester.localId === "8uEjAk72BLWKjvnQJEatBdeVAi02" || requester.email?.toLowerCase() === SUPER_ADMIN_EMAIL) return true;
+  const profile = firestoreRequest_("get", `students/${encodeURIComponent(requester.localId)}`, idToken);
+  return profile?.fields?.active?.booleanValue === true && profile?.fields?.role?.stringValue === "head_admin";
 }
 
 function getStudentFaceFiles_(studentUid) {
@@ -81,7 +176,7 @@ function getStudentFaceFiles_(studentUid) {
   const matchingFiles = [];
   while (files.hasNext()) {
     const file = files.next();
-    if (file.getDescription().includes(`Student UID: ${studentUid}`)) matchingFiles.push(file);
+    if (file.getDescription().split("\n").includes(`Student UID: ${studentUid}`)) matchingFiles.push(file);
   }
   return matchingFiles;
 }
@@ -101,24 +196,7 @@ function doPost(e) {
     const requester = verifyFirebaseUser_(payload.idToken);
 
     if (payload.action === "reset") {
-      if (!canResetFace_(requester, payload.idToken)) throw new Error("Your role cannot reset face registration.");
-      if (typeof payload.studentUid !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(payload.studentUid)) throw new Error("Invalid student UID.");
-      const registration = getFaceRegistration_(payload.studentUid, payload.idToken);
-      if (!registration) throw new Error("This student has no active face registration.");
-
-      // New records use the exact Drive file ID. The search is for older records only.
-      const driveFileId = registration.fields?.driveFileId?.stringValue;
-      if (driveFileId) {
-        DriveApp.getFileById(driveFileId).setTrashed(true);
-      } else {
-        const legacyFiles = getStudentFaceFiles_(payload.studentUid);
-        if (!legacyFiles.length) throw new Error("The registered Drive photo could not be found.");
-        legacyFiles.forEach((file) => file.setTrashed(true));
-      }
-
-      // Firebase changes only after Drive successfully moves the photo to Trash.
-      deleteFaceRegistration_(payload.studentUid, payload.idToken);
-      return json_({ ok: true });
+      return json_(new FaceResetService().reset(payload, requester, payload.idToken));
     }
 
     if (!payload.imageDataUrl) throw new Error("Missing registration photo.");

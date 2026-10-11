@@ -6,7 +6,7 @@ import { DashboardNavigationController } from './controllers/DashboardNavigation
 import { NotificationCenterController } from './controllers/NotificationCenterController.js';
 import { DashboardSessionService } from './controllers/DashboardSessionService.js';
 import { DashboardToastController } from './controllers/DashboardToastController.js';
-import { FaceRegistrationService } from './controllers/FaceRegistrationService.js';
+import { FaceRegistrationService } from './controllers/FaceRegistrationService.js?v=20261011-reset-recovery';
 import { SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth } from "../../config/firebase-config.js?v=20261005-operational-reset";
 import { ROLE_VIEWS } from './core/permissions.js?v=20261011-optimized';
 import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
@@ -125,7 +125,7 @@ function formatNotificationTime(value) {
 
 function uploadFacePhotoToDrive(imageDataUrl, student = {}) { return faceRegistrationService.upload(imageDataUrl, student); }
 
-function resetFacePhotoInDrive(studentUid) { return faceRegistrationService.reset(studentUid); }
+function resetFacePhotoInDrive(studentUid, options) { return faceRegistrationService.reset(studentUid, options); }
 
 function waitForFaceRegistration(studentUid, shouldExist, timeoutMs = 20000) { return faceRegistrationService.waitForRegistration(studentUid, shouldExist, timeoutMs); }
 
@@ -293,7 +293,9 @@ function initialize() { return dashboardApplication.initialize(); }
 const notificationService = new NotificationService({ getSession: () => ({ user: currentUser, role: currentUserRole }), canReceive: canReceiveNotification, save: record => addDoc(collection(db, 'notifications'), record), serverTimestamp });
 const greetingController = new DashboardGreetingController({ getGreeting: getDashboardGreeting });
 const toastController = new DashboardToastController();
-const faceRegistrationService = new FaceRegistrationService({ endpoint: FACE_UPLOAD_WEB_APP_URL, getUser: () => currentUser, loadRegistration: uid => getDocFromServer(doc(db, 'faceRegistrations', uid)) });
+const faceRegistrationService = new FaceRegistrationService({ endpoint: FACE_UPLOAD_WEB_APP_URL, getUser: () => currentUser,
+  loadRegistration: uid => getDocFromServer(doc(db, 'faceRegistrations', uid)),
+  loadResetResult: requestId => getDocFromServer(doc(db, 'faceResetRequests', requestId)) });
 const dashboardSession = new DashboardSessionService({ auth, subscribe: onAuthStateChanged, loadStudent: uid => getDoc(doc(db, 'students', uid)), superAdminEmail: SUPER_ADMIN_EMAIL, dashboardRole, onState: state => { currentUser = state.user; currentUserRole = state.role; currentUserProfile = state.profile; } });
 const notificationCenter = new NotificationCenterController();
 const dashboardNavigation = new DashboardNavigationController();

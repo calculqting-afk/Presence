@@ -598,6 +598,89 @@ test('face registration service preserves authenticated upload/reset payloads an
   service.endpoint = ''; await assert.rejects(service.reset('student'), /not configured/);
 });
 
+test('face upload and reset retain the browser fetch receiver', async () => {
+  const requests = [];
+  const { FaceRegistrationService } = await isolatedModule('assets/js/controllers/FaceRegistrationService.js', {}, {
+    browserReceiver: true,
+    fetch: function(url, request) {
+      if (this?.browserReceiver !== true) throw new TypeError('Illegal invocation');
+      requests.push({ url, ...request, body: JSON.parse(request.body) });
+      return Promise.resolve({});
+    }
+  });
+  const service = new FaceRegistrationService({ endpoint: 'https://example.test/upload', getUser: () => ({ getIdToken: async () => 'test-token' }), loadRegistration: async () => ({ exists: () => false }) });
+  await service.reset('student'); await service.upload('test-photo', { accountId: 'ID-1' });
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].body.action, 'reset'); assert.equal(requests[0].body.studentUid, 'student');
+  assert.equal(requests[1].body.imageDataUrl, 'test-photo');
+  assert.equal(requests[0].body.idToken, 'test-token'); assert.equal(requests[0].mode, 'no-cors');
+});
+
+test('face service bounds stalled sign-in, Drive requests and Firebase acknowledgement reads', async () => {
+  const { FaceRegistrationService } = await isolatedModule('assets/js/controllers/FaceRegistrationService.js');
+  const pending = () => new Promise(() => {});
+  const service = new FaceRegistrationService({ endpoint: 'https://example.test/upload',
+    getUser: () => ({ getIdToken: pending }), fetch: pending,
+    loadRegistration: pending, requestTimeoutMs: 10 });
+  await assert.rejects(service.reset('student'), /Sign-in verification timed out/);
+  service.getUser = () => ({ getIdToken: async () => 'token' });
+  await assert.rejects(service.reset('student'), /request was not confirmed/);
+  await assert.rejects(service.waitForRegistration('student', false, 10), /status could not be confirmed/);
+});
+
+test('face reset passes explicit recovery and reads only its matching request error', async () => {
+  const { FaceRegistrationService } = await isolatedModule('assets/js/controllers/FaceRegistrationService.js');
+  const requests = [], resultIds = [];
+  const service = new FaceRegistrationService({ endpoint: 'https://example.test/upload',
+    getUser: () => ({ getIdToken: async () => 'token' }), createRequestId: () => 'request-1234567890',
+    fetch: async (_, options) => requests.push(JSON.parse(options.body)),
+    loadRegistration: async () => ({ exists: () => true }),
+    loadResetResult: async id => { resultIds.push(id); return { exists: () => true, data: () => ({ status: 'failed', error: 'Drive access failed (403)' }) }; }
+  });
+  await service.reset('student', { recoverMissing: true, recoveryReason: 'Verified the original photo was removed' });
+  assert.equal(requests[0].recoverMissing, true);
+  assert.equal(requests[0].requestId, 'request-1234567890');
+  await assert.rejects(service.waitForRegistration('student', false), /Drive access failed \(403\)/);
+  assert.deepEqual(resultIds, ['request-1234567890']);
+});
+
+test('admin reset restores the button after failures and ignores duplicate clicks', async () => {
+  const sharedSource = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8');
+  const names = sharedSource.match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared = Object.fromEntries(names.map(name => [name, () => '']));
+  const browser = fakeBrowser();
+  const { AdminDashboard } = await isolatedModule('assets/js/admin/AdminDashboard.js', shared, browser);
+  const dashboard = new AdminDashboard(browser);
+  dashboard.can = () => true;
+  dashboard.selectedFaceResetStudent = { uid: 'student' };
+  let finish, calls = 0;
+  dashboard.resetStudentFaceRegistration = () => { calls++; return new Promise(resolve => { finish = resolve; }); };
+  const button = browser.document.querySelector('#confirmResetFace');
+  const first = dashboard.handleConfirmResetFaceClick();
+  await dashboard.handleConfirmResetFaceClick();
+  assert.equal(calls, 1); assert.equal(button.disabled, true);
+  finish(false); await first;
+  assert.equal(button.disabled, false); assert.equal(dashboard.faceResetPending, false);
+  dashboard.resetStudentFaceRegistration = async () => { throw new Error('offline'); };
+  await dashboard.handleConfirmResetFaceClick();
+  assert.equal(button.disabled, false); assert.equal(button.textContent, 'Reset face registration');
+});
+
+test('confirmed face reset does not await notification delivery', async () => {
+  const sharedSource = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8');
+  const names = sharedSource.match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared = Object.fromEntries(names.map(name => [name, () => '']));
+  Object.assign(shared, { resetFacePhotoInDrive: async () => {}, waitForFaceRegistration: async () => ({}),
+    createNotification: () => new Promise(() => {}) });
+  const browser = fakeBrowser();
+  const { AdminDashboard } = await isolatedModule('assets/js/admin/AdminDashboard.js', shared, browser);
+  const dashboard = new AdminDashboard(browser);
+  dashboard.can = () => true;
+  dashboard.faceRegistrationsByUid = new Map([['student', { registered: true }]]);
+  dashboard.notifyRoles = () => new Promise(() => {});
+  assert.equal(await dashboard.resetStudentFaceRegistration({ uid: 'student' }), true);
+});
+
 test('notification creation service keeps role/category policy and server timestamps', async () => {
   const { NotificationService } = await isolatedModule('assets/js/controllers/NotificationService.js');
   const saved = [];
