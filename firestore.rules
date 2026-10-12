@@ -653,11 +653,24 @@ service cloud.firestore {
       }
     }
 
+    function confirmedFineAbsence(data) {
+      let event = get(/databases/$(database)/documents/events/$(data.eventId)).data;
+      return data.eventId is string && data.eventId.size() > 0
+        && event.checkOutClosesAt is timestamp && request.time > event.checkOutClosesAt
+        && 'attendanceRoster' in event && event.attendanceRoster is map
+        && data.studentUid in event.attendanceRoster
+        && !exists(/databases/$(database)/documents/attendance/$(data.studentUid + '_' + data.eventId));
+    }
+
     match /fines/{fineId} {
       allow read: if canViewFines()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
-      allow create: if canManageFines() && validFine(request.resource.data);
-      allow update: if canManageFines() && validFine(request.resource.data);
+      allow create: if canManageFines() && validFine(request.resource.data)
+        && confirmedFineAbsence(request.resource.data);
+      allow update: if canManageFines() && validFine(request.resource.data)
+        && ((request.resource.data.studentUid == resource.data.studentUid
+            && request.resource.data.eventId == resource.data.eventId)
+          || confirmedFineAbsence(request.resource.data));
       allow delete: if isSuperAdmin();
     }
 

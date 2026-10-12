@@ -6,6 +6,8 @@ import { GeofenceController } from '../controllers/GeofenceController.js?v=20261
 import { hasPermission } from '../core/permissions.js?v=20261011-optimized';
 import { AttendanceCorrectionController } from '../controllers/AttendanceCorrectionController.js?v=20261011-optimized';
 import { AttendanceSummaryService } from '../controllers/AttendanceSummaryService.js';
+import { FineEligibilityService } from '../controllers/FineEligibilityService.js';
+import { getDocFromServer } from '../dashboard.js?v=20261011-optimized';
 import { AttendanceHistoryController, AttendanceRepository } from '../controllers/AttendanceHistoryController.js?v=20261011-optimized';
 import { AttendanceToolbarController } from '../controllers/AttendanceToolbarController.js';
 import { EventSchedulePresenter } from '../controllers/EventSchedulePresenter.js';
@@ -192,6 +194,13 @@ export class AdminDashboard {
     dashboard.summaryService = new AttendanceSummaryService({
       closeDate: eventCloseDate,
       checkoutCloseDate: eventCheckoutCloseDate
+    });
+    dashboard.fineEligibility = new FineEligibilityService({ summary: dashboard.summaryService,
+      loadEvent: async id => {
+        const snapshot = await getDocFromServer(doc(db, 'events', id));
+        return snapshot.exists() ? { ...snapshot.data(), id: snapshot.id } : null;
+      },
+      loadAttendance: async uid => (await getDocsFromServer(query(collection(db, 'attendance'), where('studentUid', '==', uid)))).docs.map(item => item.data())
     });
     dashboard.schedulePresenter = new EventSchedulePresenter({
       formatTime: formatEventTime,
@@ -412,6 +421,7 @@ export class AdminDashboard {
     dashboard.scope.listen(dashboard.adminFineList, "click", dashboard.handleAdminFineListClick);
     dashboard.scope.listen(dashboard.document.querySelector("#cancelFineEdit"), "click", dashboard.handleCancelFineEditClick);
     dashboard.scope.listen(dashboard.fineStudentSearch, "input", dashboard.renderFineOptions);
+    dashboard.scope.listen(dashboard.fineStudent, "change", dashboard.renderFineOptions);
     dashboard.scope.listen(dashboard.fineStudentSearchResults, "click", dashboard.handleFineStudentSearchResultsClick);
     dashboard.scope.listen(dashboard.fineSearch, "input", dashboard.renderAdminFines);
     dashboard.scope.listen(dashboard.fineStatusFilter, "change", dashboard.renderAdminFines);
@@ -526,11 +536,12 @@ export class AdminDashboard {
           dashboard.renderAttendanceLine();
         }
         if (activeView === "attendance-line") dashboard.renderAttendanceLine();
+        if (activeView === 'assign-fine') dashboard.renderFineOptions();
       },
       reference: collection(db, 'attendance'),
       onStatus: dashboard.updateAttendanceSyncStatus
     });
-    dashboard.subscriptions.register('attendance', ['dashboard', 'modify-students', 'modify-events', 'past-events', 'profile'], () => {
+    dashboard.subscriptions.register('attendance', ['dashboard', 'modify-students', 'modify-events', 'past-events', 'profile', 'assign-fine'], () => {
       dashboard.attendanceSyncService.start();
       return () => dashboard.attendanceSyncService.stop();
     });
@@ -621,6 +632,7 @@ export class AdminDashboard {
   }) {
     const dashboard = this;
     dashboard.attendanceConfirmed = state === 'live';
+    if (activeView === 'assign-fine') dashboard.renderFineOptions();
     dashboard.scheduleStudentsRender();
     const labels = {
       connecting: ["Connecting…", "gray"],
@@ -684,6 +696,7 @@ export class AdminDashboard {
       if (activeView === "past-events") dashboard.renderPastEvents();
       if (['dashboard', 'attendance-line'].includes(activeView)) dashboard.renderAttendanceLine();
       dashboard.scheduleStudentsRender();
+      if (activeView === 'assign-fine') dashboard.renderFineOptions();
       dashboard.scheduleAdminEventStatusRefresh();
     }, Math.max(0, nextStatusChange - now) + 50);
   }
@@ -876,10 +889,20 @@ export class AdminDashboard {
     }
     const emptyOption = matchingStudents.length ? "" : '<option value="" disabled selected>No students found</option>';
     dashboard.fineStudent.innerHTML = `<option value="" disabled ${selectedStudent ? "" : "selected"}>Select a student</option>${emptyOption}${matchingStudents.map(student => `<option value="${escapeHtml(student.uid)}">${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))} · ${escapeHtml(student.accountId)}</option>`).join("")}`;
-    const eventPrompt = dashboard.events.length ? "Select a missed event" : "No events available";
-    dashboard.fineEvent.innerHTML = `<option value="" disabled ${selectedEvent ? "" : "selected"}>${eventPrompt}</option>${dashboard.events.map(event => `<option value="${escapeHtml(event.id)}">${escapeHtml(event.name)}${event.date ? ` · ${escapeHtml(event.date)}` : ""}</option>`).join("")}`;
+    const student = dashboard.students.find(item => item.uid === selectedStudent);
+    const candidates = dashboard.fineEligibility.candidates(student, dashboard.events, dashboard.attendance, {
+      coverageFrom: dashboard.attendanceCoverageFrom, coverageConfirmed: dashboard.attendanceConfirmed
+    });
+    const editingFine = dashboard.fines.find(fine => fine.id === dashboard.document.querySelector('#editingFineId').value);
+    // Retain a historical assignment while editing its reason/status, not for new fines.
+    const retained = editingFine?.studentUid === selectedStudent && editingFine.eventId === selectedEvent
+      && !candidates.some(item => item.id === selectedEvent) ? [{ id: selectedEvent, name: editingFine.eventName || 'Previously assigned event', date: editingFine.eventDate }] : [];
+    const options = student ? [...candidates, ...retained] : [];
+    const eventPrompt = !student ? 'Select a student first' : options.length ? 'Select a missed event'
+      : !dashboard.attendanceConfirmed ? 'Waiting for attendance verification' : 'No confirmed missed events';
+    dashboard.fineEvent.innerHTML = `<option value="" disabled selected>${eventPrompt}</option>${options.map(event => `<option value="${escapeHtml(event.id)}">${escapeHtml(event.name)}${event.date ? ` · ${escapeHtml(event.date)}` : ""}</option>`).join("")}`;
     dashboard.fineStudent.value = selectedStudent;
-    dashboard.fineEvent.value = selectedEvent;
+    dashboard.fineEvent.value = options.some(item => item.id === selectedEvent) ? selectedEvent : '';
   }
   renderAdminFines() {
     const dashboard = this;
@@ -1618,6 +1641,16 @@ export class AdminDashboard {
     }
   }
   async handleFineFormSubmit(event) {
+    event.preventDefault();
+    if (this.fineAssignmentPending) return;
+    this.fineAssignmentPending = true;
+    try {
+      return await this.submitFine(event);
+    } finally {
+      this.fineAssignmentPending = false;
+    }
+  }
+  async submitFine(event) {
     const dashboard = this;
     if (!dashboard.can('manageFines')) {
       event.preventDefault();
@@ -1629,12 +1662,21 @@ export class AdminDashboard {
       showDashboardToast("Select a student", "Choose the student who missed attendance.");
       return;
     }
-    const attendanceEvent = dashboard.events.find(item => item.id === dashboard.fineEvent.value);
+    let attendanceEvent = dashboard.events.find(item => item.id === dashboard.fineEvent.value);
     const editingFineId = dashboard.document.querySelector("#editingFineId").value;
     const editingFine = dashboard.fines.find(fine => fine.id === editingFineId);
     if (!attendanceEvent && !editingFineId) {
       showDashboardToast("Select a missed event", "Create or select an event before assigning this fine.");
       return;
+    }
+    const preservesAssignment = editingFine && editingFine.studentUid === student.uid && editingFine.eventId === dashboard.fineEvent.value;
+    if (!preservesAssignment) {
+      try {
+        attendanceEvent = await dashboard.fineEligibility.verify(student, dashboard.fineEvent.value);
+      } catch (error) {
+        showDashboardToast('Fine assignment blocked', error.message || 'Unable to verify attendance online. Retry when connected.');
+        return;
+      }
     }
     const enteredServiceMinutes = dashboard.addingCommunityService ? Math.min(600, Math.max(1, Number(dashboard.fineExtensionHours.value) * 60 + Number(dashboard.fineExtensionMinutes.value))) : Math.min(600, Math.max(1, Number(dashboard.document.querySelector("#fineServiceHours").value) * 60 + Number(dashboard.document.querySelector("#fineServiceMinutes").value)));
     const serviceMinutes = editingFineId && dashboard.addingCommunityService ? Math.min(600, (Number(editingFine?.serviceMinutes) || 0) + enteredServiceMinutes) : enteredServiceMinutes;

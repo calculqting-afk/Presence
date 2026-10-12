@@ -508,6 +508,43 @@ function fakeBrowser() {
   return { document, window, sessionStorage: { getItem: () => null, setItem() {} } };
 }
 
+test('fine dropdown is student-specific, clears stale future selection, and preserves only an existing assignment', async () => {
+  const names = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared = Object.fromEntries(names.map(name => [name, () => ''])); shared.escapeHtml = String;
+  const browser = fakeBrowser();
+  const { AdminDashboard } = await isolatedModule('assets/js/admin/AdminDashboard.js', shared, browser);
+  const dashboard = new AdminDashboard(browser);
+  for (const name of ['fineStudent', 'fineEvent', 'fineStudentSearch', 'fineStudentSearchResults']) dashboard[name] = browser.document.querySelector('#' + name);
+  dashboard.students = [{ uid: 'one', accountId: '1' }, { uid: 'two', accountId: '2' }];
+  dashboard.events = [{ id: 'future', name: 'Future' }]; dashboard.attendance = []; dashboard.fines = [];
+  dashboard.fineEligibility = { candidates: student => student?.uid === 'one' ? [{ id: 'absent', name: 'Missed' }] : [] };
+  dashboard.fineStudent.value = 'one'; dashboard.fineEvent.value = 'future';
+  dashboard.renderFineOptions();
+  assert.ok(!dashboard.fineEvent.innerHTML.includes('Future')); assert.equal(dashboard.fineEvent.value, '');
+  assert.ok(dashboard.fineEvent.innerHTML.includes('Missed'));
+  dashboard.fineStudent.value = 'two'; dashboard.attendanceConfirmed = true; dashboard.renderFineOptions();
+  assert.ok(dashboard.fineEvent.innerHTML.includes('No confirmed missed events'));
+  dashboard.fines = [{ id: 'fine', studentUid: 'two', eventId: 'historical', eventName: 'Historical' }];
+  browser.document.querySelector('#editingFineId').value = 'fine'; dashboard.fineEvent.value = 'historical';
+  dashboard.renderFineOptions(); assert.equal(dashboard.fineEvent.value, 'historical');
+  dashboard.fineStudent.value = 'one'; dashboard.renderFineOptions();
+  assert.ok(!dashboard.fineEvent.innerHTML.includes('Historical'));
+});
+
+test('fine submission blocks duplicate clicks during server verification and unlocks after failure', async () => {
+  const names = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared = Object.fromEntries(names.map(name => [name, () => '']));
+  const { AdminDashboard } = await isolatedModule('assets/js/admin/AdminDashboard.js', shared, fakeBrowser());
+  const dashboard = new AdminDashboard(fakeBrowser()); let finish, calls = 0;
+  dashboard.submitFine = () => { calls++; return new Promise(resolve => { finish = resolve; }); };
+  const event = { preventDefault() {} }; const first = dashboard.handleFineFormSubmit(event);
+  await dashboard.handleFineFormSubmit(event); assert.equal(calls, 1);
+  finish(); await first; assert.equal(dashboard.fineAssignmentPending, false);
+  dashboard.submitFine = async () => { throw Error('offline'); };
+  await assert.rejects(dashboard.handleFineFormSubmit(event), /offline/);
+  assert.equal(dashboard.fineAssignmentPending, false);
+});
+
 for (const role of ['Student', 'Admin']) {
   test(`${role} dashboard initializes and disposes its view subscriptions`, async () => {
     const sharedSource = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8');
