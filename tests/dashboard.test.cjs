@@ -218,6 +218,16 @@ test('attendance policy covers opening, cutoff, late window, and event-close bou
   assert.equal(policy.evaluateCheckIn(event, new Date(3000)).available, false);
 });
 
+test('attendance projection marks only no-record roster members absent after check-in closes', async () => {
+  const { AttendanceRecordProjectionService } = await isolatedModule('assets/js/controllers/AttendanceRecordProjectionService.js');
+  const event = { id: 'event', name: 'Assembly', date: '2026-10-13', attendanceRoster: { absent: '2A', checkoutOnly: '2A' } };
+  const service = new AttendanceRecordProjectionService({ getEvents: () => [event], checkInCloseDate: () => new Date(1000), now: () => new Date(2000) });
+  const records = service.project([{ id: 'checkoutOnly_event', studentUid: 'checkoutOnly', eventId: 'event', status: 'checkout-only', checkedOutAt: 'time' }]);
+  assert.equal(records.length, 2);
+  assert.equal(records.find(record => record.studentUid === 'absent').status, 'absent');
+  assert.equal(records.find(record => record.studentUid === 'checkoutOnly').status, 'checkout-only');
+});
+
 test('late check-in cancellation prevents saving and confirmation rechecks the window', async () => {
   const { AttendanceCheckInController } = await isolatedModule('assets/js/controllers/AttendanceController.js', { currentUser: {}, currentUserRole: 'student', formatEventTime: value => value });
   const cancelled = new AttendanceCheckInController({ policy: { evaluateCheckIn: () => ({ available: true, arrivalStatus: 'late' }) }, lateModal: { open: async () => false } });

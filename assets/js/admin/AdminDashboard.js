@@ -10,6 +10,7 @@ import { FineEligibilityService } from '../controllers/FineEligibilityService.js
 import { getDocFromServer } from '../dashboard.js?v=20261011-optimized';
 import { AttendanceHistoryController, AttendanceRepository } from '../controllers/AttendanceHistoryController.js?v=20261011-optimized';
 import { AttendanceToolbarController } from '../controllers/AttendanceToolbarController.js';
+import { AttendanceRecordProjectionService } from '../controllers/AttendanceRecordProjectionService.js';
 import { EventSchedulePresenter } from '../controllers/EventSchedulePresenter.js';
 import { StudentActionsPresenter } from '../controllers/StudentActionsPresenter.js';
 export class AdminDashboard {
@@ -195,6 +196,10 @@ export class AdminDashboard {
       closeDate: eventCloseDate,
       checkoutCloseDate: eventCheckoutCloseDate
     });
+    dashboard.attendanceProjection = new AttendanceRecordProjectionService({
+      getEvents: () => dashboard.events,
+      checkInCloseDate: eventCheckInCloseDate
+    });
     dashboard.fineEligibility = new FineEligibilityService({ summary: dashboard.summaryService,
       loadEvent: async id => {
         const snapshot = await getDocFromServer(doc(db, 'events', id));
@@ -221,7 +226,8 @@ export class AdminDashboard {
       notify: showDashboardToast,
       onStatus: dashboard.updateAttendanceSyncStatus,
       render: (records, state) => {
-        dashboard.document.querySelector('#adminAttendanceLine').innerHTML = records.length ? dashboard.attendanceLineMarkup(records) : AttendanceToolbarController.emptyState(state);
+        const projected = dashboard.attendanceProjection.project(records, dashboard.historyController?.applied || {});
+        dashboard.document.querySelector('#adminAttendanceLine').innerHTML = projected.length ? dashboard.attendanceLineMarkup(projected) : AttendanceToolbarController.emptyState(state);
       }
     });
     dashboard.historyController.initialize();
@@ -832,7 +838,11 @@ export class AdminDashboard {
       const avatar = student?.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student?.firstName || studentName, student?.lastName || ""));
       const checkedInAt = record.checkedInAt || record.attendedAt;
       const completed = Boolean(record.checkedOutAt);
-      return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || record.studentId || "Student ID unavailable")}${student?.section ? ` · ${escapeHtml(student.section)}` : ""}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><small>${escapeHtml(record.eventDate || "Date unavailable")}</small></div><div class="attendance-line-times"><div><span>IN</span><strong>${escapeHtml(formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>OUT</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Duration</span><strong>${escapeHtml(attendanceDuration(checkedInAt, record.checkedOutAt))}</strong></div></div><div class="attendance-line-status">${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}${dashboard.can("correctAttendance") ? `<button class="small-button" type="button" data-correct-attendance="${escapeHtml(record.id)}">Correct</button>` : ""}${arrivalStatusBadge(record.arrivalStatus)}<span class="badge ${completed ? "green" : dashboard.summaryService.needsReview(record, dashboard.events.find(event => event.id === record.eventId)) ? "orange" : "blue"}">${completed ? "Completed" : dashboard.summaryService.needsReview(record, dashboard.events.find(event => event.id === record.eventId)) ? "Needs review — missed checkout" : "Checked in"}</span></div></article>`;
+      const absent = record.status === 'absent';
+      const partial = record.status === 'checkout-only' || (!checkedInAt && completed);
+      const inLabel = absent || partial ? 'ABSENT IN' : record.arrivalStatus === 'late' ? 'LATE IN' : 'IN';
+      const completionLabel = absent ? 'Absent — no attendance' : partial ? 'Partial attendance' : completed ? 'Completed' : dashboard.summaryService.needsReview(record, dashboard.events.find(event => event.id === record.eventId)) ? 'Needs review — missed checkout' : 'Checked in';
+      return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || record.studentId || "Student ID unavailable")}${student?.section ? ` · ${escapeHtml(student.section)}` : ""}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><small>${escapeHtml(record.eventDate || "Date unavailable")}</small></div><div class="attendance-line-times"><div class="${record.arrivalStatus === 'late' ? 'attendance-time-late' : ''}"><span>${inLabel}</span><strong>${escapeHtml(absent || partial ? 'Not recorded' : formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>OUT</span><strong>${escapeHtml(absent ? 'Not recorded' : formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Duration</span><strong>${escapeHtml(checkedInAt ? attendanceDuration(checkedInAt, record.checkedOutAt) : 'Not available')}</strong></div></div><div class="attendance-line-status">${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}${!record.displayOnly && dashboard.can("correctAttendance") ? `<button class="small-button" type="button" data-correct-attendance="${escapeHtml(record.id)}">Correct</button>` : ""}${absent || partial ? '<span class="badge orange">Absent in</span>' : arrivalStatusBadge(record.arrivalStatus)}<span class="badge ${absent || partial || dashboard.summaryService.needsReview(record, dashboard.events.find(event => event.id === record.eventId)) ? "orange" : completed ? "green" : "blue"}">${completionLabel}</span></div></article>`;
     }).join("");
   }
   renderAttendanceLine() {
@@ -1254,7 +1264,7 @@ export class AdminDashboard {
   duplicateEventSignature(event) {
     const dashboard = this;
     const normalized = value => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
-    return [event.name, event.date, event.location, event.audience, event.timeIn, event.checkInCutoff, event.timeOut, event.checkOutCutoff].map(normalized).join("\u001f");
+    return [event.name, event.date, event.location, event.audience, event.timeIn, event.checkInCutoff, event.checkInClose, event.timeOut, event.checkOutCutoff].map(normalized).join("\u001f");
   }
   async editEvent(id) {
     const dashboard = this;
@@ -1278,6 +1288,7 @@ export class AdminDashboard {
     dashboard.document.querySelector("#eventTimeIn").value = event.timeIn;
     dashboard.document.querySelector("#eventTimeOut").value = event.timeOut;
     dashboard.document.querySelector("#eventCheckInCutoff").value = event.checkInCutoff || timePlusMinutes(event.timeIn) || event.timeOut;
+    dashboard.document.querySelector("#eventCheckInClose").value = event.checkInClose || event.timeOut;
     dashboard.document.querySelector("#eventCheckOutCutoff").value = event.checkOutCutoff || timePlusMinutes(event.timeOut);
     dashboard.document.querySelector("#eventAudience").value = event.audience;
     dashboard.document.querySelector("#eventNotes").value = event.description || event.notes || "";
@@ -1490,6 +1501,8 @@ export class AdminDashboard {
   }
   handleEventTimeOutChange() {
     const dashboard = this;
+    const checkInClose = dashboard.document.querySelector('#eventCheckInClose');
+    if (!checkInClose.value) checkInClose.value = dashboard.document.querySelector('#eventTimeOut').value;
     return dashboard.setDefaultCutoff("#eventTimeOut", "#eventCheckOutCutoff");
   }
   handleRoleChangeModalClick(event) {
@@ -1806,10 +1819,12 @@ export class AdminDashboard {
     const timeIn = dashboard.document.querySelector("#eventTimeIn").value;
     const timeOut = dashboard.document.querySelector("#eventTimeOut").value;
     const checkInCutoff = dashboard.document.querySelector("#eventCheckInCutoff").value;
+    const checkInClose = dashboard.document.querySelector("#eventCheckInClose").value;
     const checkOutCutoff = dashboard.document.querySelector("#eventCheckOutCutoff").value;
     const date = dashboard.document.querySelector("#eventDate").value;
     if (timeOut <= timeIn) return showDashboardToast("Invalid attendance window", "Time Out must be later than Time In.");
-    if (checkInCutoff <= timeIn || checkInCutoff > timeOut) return showDashboardToast("Invalid check-in cutoff", "The check-in cutoff must be after Time In and no later than Time Out.");
+    if (checkInCutoff <= timeIn || checkInCutoff > timeOut) return showDashboardToast("Invalid late threshold", "Late after must be after Time In and no later than Time Out.");
+    if (checkInClose <= checkInCutoff || checkInClose > timeOut) return showDashboardToast("Invalid check-in closing time", "Check-in closes must be after Late after and no later than Time Out.");
     if (checkOutCutoff <= timeOut) return showDashboardToast("Invalid checkout cutoff", "The checkout cutoff must be after Time Out.");
     const id = dashboard.document.querySelector("#editingEventId").value;
     let requestedGeofence;
@@ -1828,13 +1843,15 @@ export class AdminDashboard {
       location: dashboard.document.querySelector("#eventLocation").value.trim(),
       timeIn,
       checkInCutoff,
+      checkInClose,
       timeOut,
       checkOutCutoff,
       audience: dashboard.document.querySelector("#eventAudience").value,
       description: dashboard.document.querySelector("#eventNotes").value.trim(),
       requiresGeofence: geofence.enabled,
       openAt: Timestamp.fromDate(new Date(`${date}T${timeIn}`)),
-      checkInClosesAt: Timestamp.fromDate(new Date(`${date}T${checkInCutoff}`)),
+      lateAfterAt: Timestamp.fromDate(new Date(`${date}T${checkInCutoff}`)),
+      checkInClosesAt: Timestamp.fromDate(new Date(`${date}T${checkInClose}`)),
       closeAt: Timestamp.fromDate(new Date(`${date}T${timeOut}`)),
       checkOutClosesAt: Timestamp.fromDate(new Date(`${date}T${checkOutCutoff}`)),
       updatedAt: serverTimestamp()

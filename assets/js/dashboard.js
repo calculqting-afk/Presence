@@ -162,7 +162,15 @@ function eventCloseDate(event) {
   return event.closeAt?.toDate?.() || new Date(`${event.date}T${event.timeOut}`);
 }
 function eventCheckInCloseDate(event) {
-  return event.checkInClosesAt?.toDate?.() || (event.checkInCutoff ? new Date(`${event.date}T${event.checkInCutoff}`) : eventCloseDate(event));
+  // Events created before the separate close-time field used checkInCutoff as
+  // the "late after" threshold. Keep those events usable until they are edited.
+  if (event.lateAfterAt) return event.checkInClosesAt?.toDate?.() || eventCloseDate(event);
+  return eventCloseDate(event);
+}
+function eventLateAfterDate(event) {
+  return event.lateAfterAt?.toDate?.()
+    || event.checkInClosesAt?.toDate?.()
+    || (event.checkInCutoff ? new Date(`${event.date}T${event.checkInCutoff}`) : eventCloseDate(event));
 }
 function eventCheckoutCloseDate(event) {
   return event.checkOutClosesAt?.toDate?.() || (event.checkOutCutoff ? new Date(`${event.date}T${event.checkOutCutoff}`) : new Date(eventCloseDate(event).getTime() + 15 * 60 * 1000));
@@ -306,4 +314,4 @@ initialize().catch((error) => {
   showDashboardToast("Unable to load Presence", error.message);
 });
 
-export { setDashboardViewState, dashboardRole, FACE_UPLOAD_WEB_APP_URL, pageCopy, currentUser, activeView, previousView, currentUserRole, currentUserProfile, ROLE_VIEWS, ROLE_ACCESS_LABELS, NOTIFICATION_CATEGORIES_BY_ROLE, canReceiveNotification, escapeHtml, ROLE_LABELS, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, formatNotificationTime, uploadFacePhotoToDrive, resetFacePhotoInDrive, waitForFaceRegistration, wireNotificationCenter, renderView, openView, applyRoleNavigation, initializeDashboardHistory, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineEventDate, formatFineTimestamp, getFineHistory, fineDetailsMarkup, studentFineInfoMarkup, studentFineDetailsMarkup, getDashboardGreeting, updateDashboardGreeting, createDeviceSessionToken, waitForUser, verifyRole, wireCommonNavigation, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch };
+export { setDashboardViewState, dashboardRole, FACE_UPLOAD_WEB_APP_URL, pageCopy, currentUser, activeView, previousView, currentUserRole, currentUserProfile, ROLE_VIEWS, ROLE_ACCESS_LABELS, NOTIFICATION_CATEGORIES_BY_ROLE, canReceiveNotification, escapeHtml, ROLE_LABELS, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, formatNotificationTime, uploadFacePhotoToDrive, resetFacePhotoInDrive, waitForFaceRegistration, wireNotificationCenter, renderView, openView, applyRoleNavigation, initializeDashboardHistory, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventLateAfterDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineEventDate, formatFineTimestamp, getFineHistory, fineDetailsMarkup, studentFineInfoMarkup, studentFineDetailsMarkup, getDashboardGreeting, updateDashboardGreeting, createDeviceSessionToken, waitForUser, verifyRole, wireCommonNavigation, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch };

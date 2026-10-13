@@ -114,13 +114,13 @@ service cloud.firestore {
 
     function validEvent(data) {
       return data.keys().hasOnly([
-          "name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff",
+          "name", "type", "date", "location", "timeIn", "checkInCutoff", "checkInClose", "timeOut", "checkOutCutoff",
           "audience", "description", "notes", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt",
-          "checkOutClosesAt", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt", "hasSurvey", "surveyArchived"
+          "lateAfterAt", "checkOutClosesAt", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt", "hasSurvey", "surveyArchived"
         ])
-        && data.keys().hasAll(["name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "audience", "description", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt"])
+        && data.keys().hasAll(["name", "type", "date", "location", "timeIn", "checkInCutoff", "checkInClose", "timeOut", "checkOutCutoff", "audience", "description", "requiresGeofence", "openAt", "lateAfterAt", "checkInClosesAt", "closeAt", "checkOutClosesAt"])
         && shortText(data.name, 160) && shortText(data.type, 60) && shortText(data.date, 10)
-        && shortText(data.location, 240) && shortText(data.timeIn, 5) && shortText(data.checkInCutoff, 5)
+        && shortText(data.location, 240) && shortText(data.timeIn, 5) && shortText(data.checkInCutoff, 5) && shortText(data.checkInClose, 5)
         && shortText(data.timeOut, 5) && shortText(data.checkOutCutoff, 5)
         && data.audience in ["All students", "Section 1A", "Section 1B", "Section 2A", "Section 2B", "Section 3A", "Section 3B", "Section 4A", "Section 4B"]
         && shortText(data.description, 4000) && optionalShortText(data, "notes", 4000)
@@ -130,7 +130,7 @@ service cloud.firestore {
         && (("attendanceRoster" in data) == ("rosterCapturedAt" in data))
         && (!("attendanceRoster" in data) || (data.attendanceRoster is map
           && data.attendanceRoster.keys().size() <= 5000 && data.rosterCapturedAt is timestamp))
-        && data.openAt is timestamp && data.checkInClosesAt is timestamp && data.closeAt is timestamp && data.checkOutClosesAt is timestamp
+        && data.openAt is timestamp && data.lateAfterAt is timestamp && data.checkInClosesAt is timestamp && data.closeAt is timestamp && data.checkOutClosesAt is timestamp
         && (!('createdAt' in data) || data.createdAt is timestamp)
         && optionalShortText(data, "createdBy", 128)
         && (!('updatedAt' in data) || data.updatedAt is timestamp);
@@ -218,17 +218,21 @@ service cloud.firestore {
           "timeIn", "timeOut", "location", "audience", "checkInLocation", "checkOutLocation", "attendedAt", "arrivalStatus",
           "checkedInAt", "checkedOutAt", "status", "recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason"
         ])
-        && data.keys().hasAll(["studentUid", "studentId", "eventId", "eventName", "eventType", "eventDescription", "eventDate", "timeIn", "timeOut", "location", "audience", "attendedAt", "checkedInAt", "status"])
+        && data.keys().hasAll(["studentUid", "studentId", "eventId", "eventName", "eventType", "eventDescription", "eventDate", "timeIn", "timeOut", "location", "audience", "status"])
         && shortText(data.studentUid, 128) && shortText(data.studentId, 64) && shortText(data.eventId, 128)
         && shortText(data.eventName, 160) && shortText(data.eventType, 60) && shortText(data.eventDescription, 4000)
         && shortText(data.eventDate, 10) && shortText(data.timeIn, 5) && shortText(data.timeOut, 5)
         && shortText(data.location, 240) && shortText(data.audience, 30)
         && (!("checkInLocation" in data) || validLocation(data.checkInLocation))
         && (!("checkOutLocation" in data) || validLocation(data.checkOutLocation))
-        && data.attendedAt is timestamp && data.checkedInAt is timestamp
         && (!("checkedOutAt" in data) || data.checkedOutAt is timestamp)
-        && (!("arrivalStatus" in data) || data.arrivalStatus in ["present", "late"])
-        && data.status in ["checked-in", "completed"];
+        && ((data.keys().hasAll(["attendedAt", "checkedInAt", "arrivalStatus"])
+          && data.attendedAt is timestamp && data.checkedInAt is timestamp
+          && data.arrivalStatus in ["present", "late"]
+          && data.status in ["checked-in", "completed"])
+          || (data.status == "checkout-only" && data.arrivalStatus == "absent"
+            && data.keys().hasAll(["checkedOutAt"])
+            && !data.keys().hasAny(["attendedAt", "checkedInAt", "checkInLocation"])));
     }
 
     // Spark-plan attendance verification. Rules enforce authorization and data
@@ -279,11 +283,14 @@ service cloud.firestore {
         && data.studentId == student.accountId
         && attendanceMatchesEvent(data, event)
         && eligibleForAttendance(event, student, request.auth.uid)
-        && request.time >= event.openAt && request.time < event.closeAt
+        // Legacy events used checkInClosesAt as their late threshold. New
+        // events carry lateAfterAt and a separate final check-in close time.
+        && request.time >= event.openAt
+        && request.time < (("lateAfterAt" in event) ? event.checkInClosesAt : event.closeAt)
         && data.attendedAt == request.time && data.checkedInAt == request.time
         && data.keys().hasAll(["arrivalStatus"])
-        && ((request.time <= event.checkInClosesAt && data.arrivalStatus == "present")
-          || (request.time > event.checkInClosesAt && data.arrivalStatus == "late"))
+        && ((request.time <= (("lateAfterAt" in event) ? event.lateAfterAt : event.checkInClosesAt) && data.arrivalStatus == "present")
+          || (request.time > (("lateAfterAt" in event) ? event.lateAfterAt : event.checkInClosesAt) && data.arrivalStatus == "late"))
         && data.status == "checked-in"
         && !data.keys().hasAny(["recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason"])
         && !data.keys().hasAny(["checkedOutAt", "checkOutLocation"])
@@ -303,6 +310,24 @@ service cloud.firestore {
         && data.checkedOutAt == request.time
         && request.time >= event.closeAt && request.time <= event.checkOutClosesAt
         && data.diff(previous).affectedKeys().hasOnly(["checkOutLocation", "checkedOutAt", "status"])
+        && (!data.keys().hasAny(["checkOutLocation"]) || validLocation(data.checkOutLocation))
+        && (event.requiresGeofence != true || data.keys().hasAll(["checkOutLocation"]))
+        && (!event.requiresGeofence || withinSparkGeofence({ "checkInLocation": data.checkOutLocation }, data.eventId, event));
+    }
+
+    function studentCanRecordCheckoutOnly(attendanceId, data) {
+      let event = get(/databases/$(database)/documents/events/$(data.eventId)).data;
+      let student = get(/databases/$(database)/documents/students/$(request.auth.uid)).data;
+      return isStudent()
+        && attendanceId == request.auth.uid + "_" + data.eventId
+        && exists(/databases/$(database)/documents/events/$(data.eventId))
+        && exists(/databases/$(database)/documents/faceRegistrations/$(request.auth.uid))
+        && get(/databases/$(database)/documents/faceRegistrations/$(request.auth.uid)).data.registered == true
+        && data.studentUid == request.auth.uid && data.studentId == student.accountId
+        && attendanceMatchesEvent(data, event) && eligibleForAttendance(event, student, request.auth.uid)
+        && data.status == "checkout-only" && data.arrivalStatus == "absent" && data.checkedOutAt == request.time
+        && request.time >= event.closeAt && request.time <= event.checkOutClosesAt
+        && !data.keys().hasAny(["attendedAt", "checkedInAt", "checkInLocation", "recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason"])
         && (!data.keys().hasAny(["checkOutLocation"]) || validLocation(data.checkOutLocation))
         && (event.requiresGeofence != true || data.keys().hasAll(["checkOutLocation"]))
         && (!event.requiresGeofence || withinSparkGeofence({ "checkInLocation": data.checkOutLocation }, data.eventId, event));
@@ -393,10 +418,12 @@ service cloud.firestore {
       allow create, update: if canManageAttendance()
         && validEvent(request.resource.data)
         && request.resource.data.openAt is timestamp
+        && request.resource.data.lateAfterAt is timestamp
         && request.resource.data.checkInClosesAt is timestamp
         && request.resource.data.closeAt is timestamp
         && request.resource.data.checkOutClosesAt is timestamp
-        && request.resource.data.openAt < request.resource.data.checkInClosesAt
+        && request.resource.data.openAt < request.resource.data.lateAfterAt
+        && request.resource.data.lateAfterAt < request.resource.data.checkInClosesAt
         && request.resource.data.checkInClosesAt <= request.resource.data.closeAt
         && request.resource.data.closeAt < request.resource.data.checkOutClosesAt
         && (!exists(/databases/$(database)/documents/events/$(eventId))
@@ -627,7 +654,8 @@ service cloud.firestore {
       allow create: if (canManageAttendance()
           && request.resource.data.keys().hasAll(["correctionId", "recordSource", "correctedBy", "correctedAt", "correctionReason"])
           && validAdminCorrection(attendanceId, request.resource.data, null))
-        || (validAttendance(request.resource.data) && studentCanCheckIn(attendanceId, request.resource.data));
+        || (validAttendance(request.resource.data) && studentCanCheckIn(attendanceId, request.resource.data))
+        || (validAttendance(request.resource.data) && studentCanRecordCheckoutOnly(attendanceId, request.resource.data));
       allow update: if (canManageAttendance()
           && request.resource.data.keys().hasAll(["correctionId", "recordSource", "correctedBy", "correctedAt", "correctionReason"])
           && request.resource.data.studentUid == resource.data.studentUid

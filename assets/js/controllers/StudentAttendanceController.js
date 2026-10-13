@@ -118,38 +118,67 @@ export class StudentAttendanceController {
     }
   }
 
+  async requireFaceRegistration() {
+    const faceRegistration = await getDocFromServer(doc(db, "faceRegistrations", currentUser.uid));
+    const registered = faceRegistration.data()?.registered === true;
+    this.setFaceRegistration(registered);
+    if (!registered) throw new Error('Facial recognition is required before attendance can be recorded.');
+  }
+
   outsideGeofenceMessage(error, action) {
     if (error.boundaryType === 'polygon') return `You are ${error.distanceMeters} m outside the attendance boundary; your GPS accuracy is ±${error.accuracyMeters} m. Move inside the venue and try to ${action} again.`;
     return `You are ${error.distanceMeters} m from the attendance area. The allowed radius is ${error.radiusMeters} m; your GPS accuracy is ±${error.accuracyMeters} m. Move closer to the venue and try to ${action} again.`;
   }
 
   async checkOutAttendance(record, event, button) {
-    if (this.checkoutBusy.has(record?.eventId)) return;
-    if (!record || !event || !isCheckoutAvailable(event)) {
+    const eventId = event?.id || record?.eventId;
+    if (this.checkoutBusy.has(eventId)) return;
+    if (!event || !isCheckoutAvailable(event)) {
       showDashboardToast("Checkout unavailable", "Checkout is available from Time Out until the event's checkout cutoff.");
       return;
     }
-    const loadingKey = `out:${record.eventId}`;
+    const loadingKey = `out:${eventId}`;
     this.loading.start(loadingKey, button, 'Checking out…');
     this.syncLoadingButtons();
-    this.checkoutBusy.add(record.eventId);
+    this.checkoutBusy.add(eventId);
     try {
+      const checkoutOnly = !record;
+      if (checkoutOnly) await this.requireFaceRegistration();
       let checkOutLocation;
       if (event.requiresGeofence) {
         this.loading.update(loadingKey, 'Verifying location…');
         checkOutLocation = await this.verifiedGeofenceLocation(event);
       }
       if (!isCheckoutAvailable(event)) throw new Error('The checkout window closed while checking your location. Ask an Attendance Manager to review your record.');
-      const attendanceReference = doc(db, "attendance", `${currentUser.uid}_${record.eventId}`);
+      const attendanceReference = doc(db, "attendance", `${currentUser.uid}_${eventId}`);
       this.loading.update(loadingKey, 'Saving attendance…');
       const result = await this.submission.submit({ reference: attendanceReference,
-        matches: data => data.studentUid === currentUser.uid && data.eventId === record.eventId && Boolean(data.checkedOutAt),
-        validatePrevious: snapshot => this.validateCheckoutRecord(snapshot, record.eventId),
-        payload: {
+        matches: data => data.studentUid === currentUser.uid && data.eventId === eventId && Boolean(data.checkedOutAt),
+        validatePrevious: snapshot => {
+          if (checkoutOnly && snapshot.exists()) throw new Error('An attendance record already exists. Refresh before trying again.');
+          if (!checkoutOnly) this.validateCheckoutRecord(snapshot, eventId);
+        },
+        payload: checkoutOnly ? {
+          studentUid: currentUser.uid,
+          studentId: currentUserProfile.accountId || '',
+          eventId,
+          eventName: event.name || 'Attendance event',
+          eventType: event.type || 'School Event',
+          eventDescription: event.description || '',
+          eventDate: event.date || '',
+          timeIn: event.timeIn || '',
+          timeOut: event.timeOut || '',
+          location: event.location || '',
+          audience: event.audience || 'All students',
+          ...(checkOutLocation ? { checkOutLocation } : {}),
+          checkedOutAt: serverTimestamp(),
+          status: 'checkout-only',
+          arrivalStatus: 'absent'
+        } : {
         ...(checkOutLocation ? { checkOutLocation } : {}),
         checkedOutAt: serverTimestamp(),
         status: "completed"
-      }, options: { merge: true } });
+      }, options: checkoutOnly ? {} : { merge: true } });
       if (result.state === 'busy') { button.disabled = false; return; }
       if (result.state === 'unknown') {
         showDashboardToast('Checkout status unknown', 'The connection failed before checkout could be confirmed. Refresh to check the saved record before retrying.'); button.disabled = false; return;
@@ -161,7 +190,7 @@ export class StudentAttendanceController {
       const savedRecord = result.snapshot;
       this.loading.finish(loadingKey, 'Checked out');
       this.bridge.publish(savedRecord.id, savedRecord.data());
-      showDashboardToast("Checkout recorded", "Your attendance record now includes your checkout time.");
+      showDashboardToast("Checkout recorded", checkoutOnly ? "Your checkout was recorded. It will be shown as partial attendance because there was no check-in." : "Your attendance record now includes your checkout time.");
     } catch (error) {
       if (error.geofenceIssue === "location") {
         this.showLocationError(error);
@@ -176,7 +205,7 @@ export class StudentAttendanceController {
       button.disabled = false;
     } finally {
       this.loading.reset(loadingKey);
-      this.checkoutBusy.delete(record.eventId);
+      this.checkoutBusy.delete(eventId);
     }
   }
   async handleEventClick(clickEvent) {

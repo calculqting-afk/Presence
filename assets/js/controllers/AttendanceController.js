@@ -6,13 +6,17 @@ export class AttendancePolicy {
   constructor(windows) { this.windows = windows; }
 
   evaluateCheckIn(event, now = new Date()) {
-    const { eventOpenDate, eventCloseDate, eventCheckInCloseDate } = this.windows;
+    const { eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventLateAfterDate } = this.windows;
     if (!event) return { available: false, reason: 'not-open' };
-    const open = eventOpenDate(event), close = eventCloseDate(event), cutoff = eventCheckInCloseDate(event);
-    if (![open, close, cutoff, now].every(value => Number.isFinite(value?.getTime?.())) || open >= close || cutoff < open || cutoff > close) return { available: false, reason: 'invalid-window' };
+    const open = eventOpenDate(event), close = eventCloseDate(event);
+    // Older consumers provide one cutoff only. Treat it as the late threshold
+    // and keep their historical check-in window open until Time Out.
+    const checkInClose = eventLateAfterDate ? eventCheckInCloseDate(event) : close;
+    const lateAfter = eventLateAfterDate ? eventLateAfterDate(event) : eventCheckInCloseDate(event);
+    if (![open, close, checkInClose, lateAfter, now].every(value => Number.isFinite(value?.getTime?.())) || open >= close || checkInClose < open || checkInClose > close || lateAfter < open || lateAfter > checkInClose) return { available: false, reason: 'invalid-window' };
     if (now < open) return { available: false, reason: "not-open" };
-    if (now >= close) return { available: false, reason: "event-started" };
-    return { available: true, arrivalStatus: now <= cutoff ? "present" : "late" };
+    if (now >= checkInClose) return { available: false, reason: "check-in-closed" };
+    return { available: true, arrivalStatus: now <= lateAfter ? "present" : "late" };
   }
 }
 
