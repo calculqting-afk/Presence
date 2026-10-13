@@ -17,7 +17,7 @@
 
 :root[data-theme="dark"] :is(.panel, .stat-card, .event-card, .history-event-card,
   .admin-event-card, .fine-record-card, .attended-event-box, .dashboard-modal,
-  .notification-panel, .toast, .student-mobile-card) {
+  .notification-panel, .toast, .student-mobile-card, .approval-card) {
   background: var(--surface); border-color: var(--line); box-shadow: var(--shadow);
 }
 :root[data-theme="dark"] :is(.event-description, .notice, .profile-fact, .profile-photo-control,
@@ -28,6 +28,7 @@
   .notification-filter, .fine-student-search-results, .fine-student-search-result) {
   background: var(--surface-soft); border-color: var(--line);
 }
+:root[data-theme="dark"] .approval-card p { color: var(--muted); }
 :root[data-theme="dark"] :is(.outline-button, .notification-bell, .modal-close) {
   color: var(--ink); background: var(--surface-soft); border-color: var(--line);
 }

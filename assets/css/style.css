@@ -371,6 +371,22 @@ label, .label-row { color: #374763; font-size: .75rem; font-weight: 700; }
 .field-error { display: block; min-height: 12px; margin: 5px 0 -10px; color: var(--danger); font-size: .67rem; }
 .remember { display: flex; align-items: center; gap: 9px; width: fit-content; margin: 6px 0 23px; color: #6e7a8c; font-size: .71rem; font-weight: 500; }
 .remember input { width: 15px; height: 15px; margin: 0; accent-color: var(--blue-600); }
+.registration-links { display: flex; justify-content: space-between; gap: 12px; margin: -10px 0 18px; }
+.registration-links .text-button { font-size: .68rem; }
+.registration-dialog { box-sizing: border-box; width: min(720px, calc(100vw - 48px)); max-height: none; overflow: visible; text-align: left; padding: 34px 38px; }
+.registration-dialog .dialog-icon { margin: 0 0 14px; }
+.registration-dialog h2 { margin: 0; font-size: 1.55rem; }
+.registration-dialog > p { max-width: 48ch; margin: 9px 0 24px; text-align: left; font-size: .9rem; }
+.registration-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; width: 100%; min-width: 0; }
+.registration-form label { display: grid; min-width: 0; gap: 7px; color: #40506a; font-size: .82rem; font-weight: 700; }
+.registration-form input, .registration-form select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 48px; padding: 0 14px; border: 1px solid #cbd8eb; border-radius: 10px; color: #182e53; background: #f8faff; font: inherit; font-size: .9rem; }
+.registration-form input:focus, .registration-form select:focus { outline: 3px solid rgba(42, 111, 220, .18); border-color: var(--blue-600); }
+.registration-grid { display: grid; grid-column: span 2; grid-template-columns: 1fr 1fr; gap: 16px; }
+.registration-error { grid-column: span 2; min-height: 0; margin: -4px 0 0; font-size: .78rem; }
+.registration-status-result { grid-column: span 2; margin: 0 !important; padding: 13px 14px; color: #2458a8; background: #edf4ff; border-radius: 10px; font-size: .85rem; }
+.dialog-actions { grid-column: span 2; display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-top: 4px; }
+.registration-dialog .dialog-action { min-height: 46px; padding-inline: 20px; }
+.registration-status-dialog .registration-form > label { grid-column: span 2; }
 
 .submit-button {
   width: 100%;
@@ -444,12 +460,20 @@ footer {
   backdrop-filter: blur(7px);
 }
 .dialog-backdrop[hidden] { display: none; }
+.registration-dialog-backdrop { opacity: 0; transition: opacity .18s ease; }
+.registration-dialog-backdrop.is-open { opacity: 1; }
+.registration-dialog-backdrop.is-closing { opacity: 0; }
+.registration-dialog-backdrop .registration-dialog { opacity: 0; transform: translateY(12px) scale(.985); transition: opacity .18s ease, transform .18s ease; }
+.registration-dialog-backdrop.is-open .registration-dialog { opacity: 1; transform: translateY(0) scale(1); }
 .dialog { position: relative; width: min(400px, 100%); padding: 40px; text-align: center; background: white; border-radius: 22px; box-shadow: var(--shadow); }
 .dialog-icon { width: 48px; height: 48px; display: grid; place-items: center; margin: 0 auto 18px; color: var(--blue-700); background: var(--blue-100); border-radius: 14px; font-weight: 800; }
 .dialog h2 { font-size: 1.35rem; }
 .dialog p { margin: 12px 0 24px; color: var(--muted); font-size: .86rem; line-height: 1.6; }
 .dialog-close { position: absolute; top: 12px; right: 12px; width: 34px; height: 34px; background: none; border: 0; color: #7d8a9d; font-size: 1.25rem; }
 .dialog-action { padding: 11px 24px; color: white; background: var(--blue-700); border: 0; border-radius: 10px; font-size: .78rem; font-weight: 700; }
+.registration-dialog .text-button, .registration-dialog .dialog-action { transition: transform .16s ease, box-shadow .16s ease, background-color .16s ease; }
+.registration-dialog .dialog-action:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(21, 85, 193, .24); }
+.registration-dialog .text-button:active, .registration-dialog .dialog-action:active { transform: translateY(1px) scale(.98); }
 
 @media (max-width: 880px) {
   .hero { grid-template-columns: 1fr; gap: 50px; padding-top: 38px; }
@@ -471,6 +495,12 @@ footer {
   .decor-one { right: -90px; }
   footer { min-height: 90px; flex-direction: column; justify-content: center; gap: 7px; }
   footer p { margin: 0; }
+  .registration-links, .dialog-actions { align-items: stretch; flex-direction: column; }
+  .registration-dialog { width: min(100% - 28px, 520px); padding: 26px 22px; }
+  .registration-form, .registration-grid { grid-template-columns: 1fr; }
+  .registration-grid, .registration-error, .registration-status-result, .dialog-actions { grid-column: span 1; }
+  .registration-status-dialog .registration-form > label { grid-column: span 1; }
+  .dialog-actions .dialog-action { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

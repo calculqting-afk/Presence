@@ -1,4 +1,4 @@
-import { SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail } from "../../config/firebase-config.js";
+import { SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, studentProvisioningDb } from "../../config/firebase-config.js";
 import {
   browserLocalPersistence,
   browserSessionPersistence,
@@ -12,6 +12,7 @@ import { AuthActionController } from './controllers/AuthActionController.js';
 import { StudentIdentityController } from './controllers/StudentIdentityController.js';
 import { SurveyLinkService } from './controllers/SurveyLinkService.js';
 import { SurveyEntryController } from './controllers/SurveyEntryController.js';
+import { RegistrationController } from './controllers/RegistrationController.js';
 
 const form = document.querySelector("#loginForm");
 const accountInput = document.querySelector("#accountId");
@@ -26,6 +27,9 @@ const toastMessage = document.querySelector("#toastMessage");
 const helpDialog = document.querySelector("#helpDialog");
 let toastTimer;
 const loginAction = new AuthActionController();
+const registration = new RegistrationController({ db, provisioningAuth: studentProvisioningAuth, provisioningDb: studentProvisioningDb, studentIdToEmail, onSuccess: showToast });
+registration.initialize();
+window.addEventListener('pagehide', () => registration.dispose(), { once: true });
 const studentIdentity = new StudentIdentityController();
 window.addEventListener('pagehide', () => loginAction.dispose(), { once: true });
 const surveyEntry = new SurveyEntryController({ auth, subscribe: onAuthStateChanged, isLoginBusy: () => loginAction.busy,
@@ -84,6 +88,10 @@ form.addEventListener("submit", async (event) => {
         let studentRecord;
         if (!isSuperAdmin) {
           studentRecord = await getDoc(doc(db, "students", credential.user.uid));
+          if (!studentRecord.exists()) {
+            const completed = await registration.completeApprovedRegistration({ user: credential.user, accountId });
+            if (completed) studentRecord = await getDoc(doc(db, "students", credential.user.uid));
+          }
           const storedRole = studentRecord.data()?.role || "student";
           const assignedRole = storedRole === "viewer" ? "student" : storedRole;
           if (["head_admin", "attendance_admin", "student_manager"].includes(assignedRole)) {

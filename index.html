@@ -97,6 +97,11 @@
               <span>Keep me signed in on this device</span>
             </label>
 
+            <div class="registration-links">
+              <button class="text-button" type="button" id="openRegistration">New student? Register your account</button>
+              <button class="text-button" type="button" id="openRegistrationStatus">Check registration status</button>
+            </div>
+
             <button class="submit-button" type="submit">
               <span>Continue</span><span aria-hidden="true">→</span>
             </button>
@@ -125,6 +130,40 @@
       <h2 id="dialogTitle">Having trouble?</h2>
       <p>Ask your class adviser or school administrator to reset your Presence credentials.</p>
       <button class="dialog-action" type="button" id="dialogOkay">Got it</button>
+    </section>
+  </div>
+
+  <div class="dialog-backdrop registration-dialog-backdrop" id="registrationDialog" hidden>
+    <section class="dialog registration-dialog" role="dialog" aria-modal="true" aria-labelledby="registrationDialogTitle">
+      <button class="dialog-close" type="button" data-close-registration aria-label="Close">×</button>
+      <span class="dialog-icon">＋</span>
+      <h2 id="registrationDialogTitle">Create student account</h2>
+      <p>Your request will be reviewed by an administrator. You cannot sign in until it is approved.</p>
+      <form id="registrationForm" class="registration-form" novalidate>
+        <label>Student ID<input name="accountId" autocomplete="username" required></label>
+        <label>Birthday<input name="birthday" type="date" autocomplete="bday" required></label>
+        <div class="registration-grid"><label>First name<input name="firstName" autocomplete="given-name" required></label><label>Last name<input name="lastName" autocomplete="family-name" required></label></div>
+        <div class="registration-grid"><label>Course<input name="course" required></label><label>Section<select name="section" required><option value="">Choose</option><option>1A</option><option>1B</option><option>2A</option><option>2B</option><option>3A</option><option>3B</option><option>4A</option><option>4B</option></select></label></div>
+        <label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+        <label>Confirm password<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label>
+        <p class="field-error registration-error" id="registrationError" role="alert"></p>
+        <div class="dialog-actions"><button class="text-button" type="button" data-close-registration>Cancel</button><button class="dialog-action" type="submit">Send registration request</button></div>
+      </form>
+    </section>
+  </div>
+
+  <div class="dialog-backdrop registration-dialog-backdrop" id="registrationStatusDialog" hidden>
+    <section class="dialog registration-dialog registration-status-dialog" role="dialog" aria-modal="true" aria-labelledby="registrationStatusTitle">
+      <button class="dialog-close" type="button" data-close-registration-status aria-label="Close">×</button>
+      <span class="dialog-icon">i</span>
+      <h2 id="registrationStatusTitle">Registration status</h2>
+      <p>Enter the same Student ID, birthday, and password used when you registered.</p>
+      <form id="registrationStatusForm" class="registration-form" novalidate>
+        <label>Student ID<input name="accountId" required></label><label>Birthday<input name="birthday" type="date" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+        <p class="field-error registration-error" id="registrationStatusError" role="alert"></p>
+        <p class="registration-status-result" id="registrationStatusResult" hidden></p>
+        <div class="dialog-actions"><button class="text-button" type="button" data-close-registration-status>Close</button><button class="dialog-action" type="submit">Check status</button></div>
+      </form>
     </section>
   </div>
 

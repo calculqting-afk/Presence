@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 
 export const firebaseConfig = {
   apiKey: "AIzaSyCiHNnPQzPvGZLupVtYZ5uNNDPgdSK3m5I",
@@ -19,6 +19,9 @@ export const db = initializeFirestore(app, {
 });
 const studentProvisioningApp = initializeApp(firebaseConfig, "student-provisioning");
 export const studentProvisioningAuth = getAuth(studentProvisioningApp);
+// A separate Firebase app lets a new applicant authenticate and create only their
+// own pending request without replacing the person currently using the login app.
+export const studentProvisioningDb = getFirestore(studentProvisioningApp);
 export const SUPER_ADMIN_EMAIL = "mikhailovna2007@gmail.com";
 
 window.addEventListener("load", () => {

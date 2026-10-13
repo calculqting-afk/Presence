@@ -168,6 +168,36 @@ service cloud.firestore {
         && (!("updatedAt" in data) || data.updatedAt is timestamp);
     }
 
+    function approvedRegistration(accountIdKey, uid) {
+      return signedIn() && request.auth.uid == uid
+        && exists(/databases/$(database)/documents/registrationRequests/$(accountIdKey))
+        && get(/databases/$(database)/documents/registrationRequests/$(accountIdKey)).data.uid == uid
+        && get(/databases/$(database)/documents/registrationRequests/$(accountIdKey)).data.status == "approved";
+    }
+
+    function validRegistrationRequest(data, requestId) {
+      return data.keys().hasOnly(["uid", "accountId", "accountIdKey", "birthday", "firstName", "lastName", "course", "section", "status", "requestedAt", "updatedAt", "reviewedAt", "reviewedBy"])
+        && data.keys().hasAll(["uid", "accountId", "accountIdKey", "birthday", "firstName", "lastName", "course", "section", "status", "requestedAt", "updatedAt"])
+        && request.auth.uid == data.uid && requestId == data.accountIdKey
+        && shortText(data.accountId, 64) && shortText(data.accountIdKey, 64) && shortText(data.birthday, 10)
+        && shortText(data.firstName, 80) && shortText(data.lastName, 80) && shortText(data.course, 120)
+        && data.section in ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"]
+        && data.status == "pending" && data.requestedAt == request.time && data.updatedAt == request.time;
+    }
+
+    function validRegistrationReapplication(data) {
+      return signedIn() && resource.data.uid == request.auth.uid && resource.data.status == "declined"
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["birthday", "firstName", "lastName", "course", "section", "status", "updatedAt"])
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.accountId == resource.data.accountId
+        && request.resource.data.accountIdKey == resource.data.accountIdKey
+        && shortText(request.resource.data.birthday, 10)
+        && shortText(request.resource.data.firstName, 80) && shortText(request.resource.data.lastName, 80)
+        && shortText(request.resource.data.course, 120)
+        && request.resource.data.section in ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"]
+        && request.resource.data.status == "pending" && request.resource.data.updatedAt == request.time;
+    }
+
     function validFine(data) {
       return data.keys().hasOnly([
           "studentUid", "studentId", "studentName", "eventId", "eventName", "eventDate", "eventTimeIn",
@@ -354,12 +384,15 @@ service cloud.firestore {
     }
 
     match /students/{studentUid} {
-      allow get: if isAdmin()
-        || (signedIn() && request.auth.uid == studentUid && resource.data.active == true);
+      allow get: if isAdmin() || (signedIn() && request.auth.uid == studentUid);
       allow list: if isAdmin();
-      allow create: if canManageStudents()
-        && validStudent(request.resource.data)
-        && !request.resource.data.keys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy"]);
+      allow create: if (canManageStudents()
+          && validStudent(request.resource.data)
+          && !request.resource.data.keys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy"]))
+        || (validStudent(request.resource.data)
+          && approvedRegistration(request.resource.data.accountIdKey, request.resource.data.uid)
+          && request.resource.data.uid == studentUid
+          && request.resource.data.role == "student" && request.resource.data.active == true);
       allow delete: if isSuperAdmin();
       allow update: if (isSuperAdmin()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["role", "roleUpdatedAt", "roleUpdatedBy"])
@@ -401,11 +434,26 @@ service cloud.firestore {
     // an update, and updates are denied, so the same ID cannot be registered twice.
     match /studentIds/{studentIdKey} {
       allow read: if signedIn();
-      allow create: if (canManageStudents() || signedIn())
+      allow create: if (canManageStudents() || approvedRegistration(studentIdKey, request.resource.data.uid))
         && !exists(/databases/$(database)/documents/studentIds/$(studentIdKey))
         && (canManageStudents() || request.resource.data.uid == request.auth.uid);
       allow update: if false;
       allow delete: if canManageStudents() || (signedIn() && resource.data.uid == request.auth.uid);
+    }
+
+    match /registrationRequests/{requestId} {
+      allow get: if isSuperAdmin() || isHeadAdmin() || isStudentManager() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow list: if isSuperAdmin() || isHeadAdmin() || isStudentManager();
+      allow create: if signedIn() && validRegistrationRequest(request.resource.data, requestId);
+      allow update: if validRegistrationReapplication(request.resource.data)
+        || ((isSuperAdmin() || isHeadAdmin())
+        && resource.data.status == "pending"
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "reviewedAt", "reviewedBy", "updatedAt"])
+        && request.resource.data.status in ["approved", "declined"]
+        && request.resource.data.reviewedAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.reviewedBy == request.auth.uid);
+      allow delete: if false;
     }
 
     match /events/{eventId} {

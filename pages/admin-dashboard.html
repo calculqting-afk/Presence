@@ -24,7 +24,7 @@
 </head>
 <body data-dashboard="admin">
   <div class="app-shell">
-    <aside class="sidebar" style="--nav-count: 12">
+    <aside class="sidebar" style="--nav-count: 13">
       <a class="brand" href="../index.html" data-dashboard-home><span class="brand-mark"><span></span></span><span>Presence</span></a>
       <p class="nav-label" data-role-console>Admin console</p>
       <nav class="nav-list" aria-label="Admin navigation">
@@ -37,8 +37,9 @@
         <button class="nav-button" data-view="assign-fine" type="button"><span class="nav-icon">＋</span><span>Assign Fine</span></button>
         <button class="nav-button" data-view="assigned-fines" type="button"><span class="nav-icon">!</span><span>Assigned Fines</span></button>
         <button class="nav-button" data-view="geofence" type="button"><span class="nav-icon">⌖</span><span>Geofence Locations</span></button>
-        <button class="nav-button" data-view="profile" type="button"><span class="nav-icon">○</span><span>Profile</span></button>
         <button class="nav-button" data-view="surveys" type="button"><span class="nav-icon">▤</span><span>Event Surveys</span></button>
+        <button class="nav-button" data-view="account-approvals" type="button"><span class="nav-icon">✓</span><span>Account Approvals</span></button>
+        <button class="nav-button" data-view="profile" type="button"><span class="nav-icon">○</span><span>Profile</span></button>
         <button class="nav-button logout-button" data-logout type="button"><span class="nav-icon">↙</span><span>Logout</span></button>
       </nav>
       <div class="sidebar-spacer"></div>
@@ -194,6 +195,11 @@
           <article class="panel"><div class="table-toolbar fine-toolbar"><div class="search-wrap"><span class="search-icon">⌕</span><input class="search-input" id="fineSearch" type="search" placeholder="Search student, ID, event, reason, or history" aria-label="Search fines"></div><div class="fine-filter-row"><input id="fineDateFilter" type="date" aria-label="Filter fines by date"><select id="fineStatusFilter" aria-label="Filter fines by status"><option value="all">All statuses</option><option value="Pending">Pending</option><option value="Completed">Completed</option></select><select id="fineSort" aria-label="Sort fines"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="student">Student name</option><option value="duration">Longest duration</option></select><span class="count-label" id="fineResultCount">0 fines shown</span></div></div><div class="fine-list-scroll"><div class="fine-record-grid" id="adminFineList"><div class="empty-state">No fines have been assigned.</div></div></div></article>
         </section>
 
+        <section class="view-section" data-section="account-approvals" hidden>
+          <div class="section-head"><div><p class="eyebrow">Student access</p><h2>Account Approvals</h2><p>Review new student accounts before they can sign in.</p></div><span class="badge orange" id="accountApprovalCount">0 pending</span></div>
+          <article class="panel"><div class="panel-head"><div><h3>Pending registrations</h3><p>Approval activates the account. Declined students can correct their details and resubmit.</p></div></div><div class="approval-list" id="accountApprovalList"><div class="empty-state">Loading registration requests…</div></div></article>
+        </section>
+
         <section class="view-section" data-section="profile" hidden>
           <div class="section-head"><div><p class="eyebrow">Administrator account</p><h2>Profile</h2><p>Update your information and see changes immediately.</p></div><span class="badge green">Active</span></div>
           <article class="panel">
@@ -310,6 +316,13 @@
       <h2 id="roleChangeTitle">Confirm role change</h2>
       <p id="roleChangeMessage"></p>
       <div class="modal-actions"><button class="outline-button" type="button" data-close-role-change>Cancel</button><button class="primary-button" id="confirmRoleChange" type="button">Update role</button></div>
+    </section>
+  </div>
+  <div class="dashboard-modal-backdrop" id="accountApprovalModal" hidden>
+    <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="accountApprovalModalTitle" aria-describedby="accountApprovalModalMessage">
+      <button class="modal-close" type="button" data-close-account-approval aria-label="Close">×</button>
+      <span class="modal-icon">✓</span><h2 id="accountApprovalModalTitle">Approve student account?</h2><p id="accountApprovalModalMessage"></p>
+      <div class="modal-actions"><button class="outline-button" type="button" data-close-account-approval>Cancel</button><button class="primary-button" id="confirmAccountApproval" type="button">Approve account</button></div>
     </section>
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>

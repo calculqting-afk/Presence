@@ -389,6 +389,117 @@ async function findUserByEmail(firebaseAuth, email) {
   }
 }
 
+function normalizedStudentId(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function validateRegistrationRequest(data) {
+  const accountId = String(data.accountId || "").trim();
+  const birthday = String(data.birthday || "").trim();
+  const password = String(data.password || "");
+  const firstName = String(data.firstName || "").trim();
+  const lastName = String(data.lastName || "").trim();
+  const course = String(data.course || "").trim();
+  const section = String(data.section || "").trim();
+  if (!/^[A-Za-z0-9._-]{3,64}$/.test(accountId)) throw new HttpsError("invalid-argument", "Enter a valid Student ID.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(birthday) || Number.isNaN(Date.parse(`${birthday}T00:00:00Z`))) throw new HttpsError("invalid-argument", "Enter a valid birthday.");
+  if (password.length < 8 || password.length > 128) throw new HttpsError("invalid-argument", "Use a password with 8 to 128 characters.");
+  if (!firstName || !lastName || !course || !new Set(["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"]).has(section)) {
+    throw new HttpsError("invalid-argument", "Complete your name, course, and section.");
+  }
+  return { accountId, accountIdKey: normalizedStudentId(accountId), birthday, password, firstName, lastName, course, section };
+}
+
+// Student passwords are sent only to Firebase Authentication. The request document
+// deliberately contains identity and review data only, never a password or hash.
+exports.requestStudentRegistration = onCall(async (request) => {
+  const registration = validateRegistrationRequest(request.data || {});
+  const firestore = getFirestore();
+  const firebaseAuth = getAuth();
+  const authEmail = studentIdToEmail(registration.accountId);
+  const existingId = await firestore.doc(`studentIds/${registration.accountIdKey}`).get();
+  if (existingId.exists) throw new HttpsError("already-exists", "This Student ID already has an active Presence account.");
+  const existingUser = await findUserByEmail(firebaseAuth, authEmail);
+  if (existingUser) throw new HttpsError("already-exists", "A registration request already exists for this Student ID.");
+
+  const displayName = `${registration.firstName} ${registration.lastName}`;
+  const user = await firebaseAuth.createUser({ email: authEmail, password: registration.password, displayName, disabled: true });
+  try {
+    await firestore.doc(`registrationRequests/${registration.accountIdKey}`).set({
+      uid: user.uid,
+      accountId: registration.accountId,
+      accountIdKey: registration.accountIdKey,
+      birthday: registration.birthday,
+      firstName: registration.firstName,
+      lastName: registration.lastName,
+      course: registration.course,
+      section: registration.section,
+      status: "pending",
+      requestedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp()
+    });
+  } catch (error) {
+    await firebaseAuth.deleteUser(user.uid).catch(() => {});
+    throw error;
+  }
+  return { ok: true, status: "pending" };
+});
+
+exports.getStudentRegistrationStatus = onCall(async (request) => {
+  const accountId = String(request.data?.accountId || "").trim();
+  const birthday = String(request.data?.birthday || "").trim();
+  if (!accountId || !/^\d{4}-\d{2}-\d{2}$/.test(birthday)) throw new HttpsError("invalid-argument", "Enter your Student ID and birthday.");
+  const firestore = getFirestore();
+  const accountIdKey = normalizedStudentId(accountId);
+  const activeId = await firestore.doc(`studentIds/${accountIdKey}`).get();
+  if (activeId.exists) {
+    const student = await firestore.doc(`students/${activeId.data().uid}`).get();
+    if (student.exists && student.data().active === true && student.data().birthday === birthday) return { status: "existing-account" };
+  }
+  const registration = await firestore.doc(`registrationRequests/${accountIdKey}`).get();
+  if (!registration.exists || registration.data().birthday !== birthday) return { status: "not-found" };
+  return { status: registration.data().status || "pending" };
+});
+
+exports.resolveStudentRegistration = onCall(async (request) => {
+  await requireAdmin(request);
+  const requestId = String(request.data?.requestId || "").trim();
+  const decision = String(request.data?.decision || "").trim();
+  if (!requestId || !["approve", "decline"].includes(decision)) throw new HttpsError("invalid-argument", "Choose a valid registration request action.");
+  const firestore = getFirestore();
+  const firebaseAuth = getAuth();
+  const requestRef = firestore.doc(`registrationRequests/${requestId}`);
+  const registrationSnapshot = await requestRef.get();
+  if (!registrationSnapshot.exists) throw new HttpsError("not-found", "This registration request no longer exists.");
+  const registration = registrationSnapshot.data();
+  if (registration.status !== "pending") throw new HttpsError("failed-precondition", "This registration request was already reviewed.");
+  if (decision === "decline") {
+    await firebaseAuth.deleteUser(registration.uid).catch(error => { if (error.code !== "auth/user-not-found") throw error; });
+    await requestRef.update({ status: "declined", reviewedAt: FieldValue.serverTimestamp(), reviewedBy: request.auth.uid, updatedAt: FieldValue.serverTimestamp() });
+    return { ok: true, status: "declined" };
+  }
+  const existingId = await firestore.doc(`studentIds/${registration.accountIdKey}`).get();
+  if (existingId.exists) throw new HttpsError("already-exists", "This Student ID is already active.");
+  await firebaseAuth.updateUser(registration.uid, { disabled: false, displayName: `${registration.firstName} ${registration.lastName}` });
+  try {
+    const batch = firestore.batch();
+    batch.set(firestore.doc(`students/${registration.uid}`), {
+      uid: registration.uid, accountId: registration.accountId, accountIdKey: registration.accountIdKey,
+      authEmail: studentIdToEmail(registration.accountId), birthday: registration.birthday,
+      firstName: registration.firstName, lastName: registration.lastName, middleName: "",
+      course: registration.course, section: registration.section, role: ROLE.STUDENT, active: true,
+      createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()
+    });
+    batch.set(firestore.doc(`studentIds/${registration.accountIdKey}`), { studentId: registration.accountId, uid: registration.uid, createdAt: FieldValue.serverTimestamp() });
+    batch.update(requestRef, { status: "approved", reviewedAt: FieldValue.serverTimestamp(), reviewedBy: request.auth.uid, updatedAt: FieldValue.serverTimestamp() });
+    await batch.commit();
+  } catch (error) {
+    await firebaseAuth.updateUser(registration.uid, { disabled: true }).catch(() => {});
+    throw error;
+  }
+  return { ok: true, status: "approved" };
+});
+
 async function deleteQueryResults(firestore, querySnapshot) {
   const references = querySnapshot.docs.map((snapshot) => snapshot.ref);
   while (references.length) {

@@ -600,7 +600,20 @@ export class AdminDashboard {
   }
   changeSubscriptions(event) {
     const dashboard = this;
-    return dashboard.subscriptions.setView(event.detail.viewName);
+    dashboard.subscriptions.setView(event.detail.viewName);
+    if (event.detail.viewName === 'account-approvals') void dashboard.loadAccountApprovals();
+  }
+  async loadAccountApprovals() {
+    const dashboard = this;
+    if (!dashboard.can('viewAccountApprovals') || dashboard.accountApprovalController) return;
+    const { AccountApprovalController } = await import('../controllers/AccountApprovalController.js');
+    if (!dashboard.scope.initialized || dashboard.accountApprovalController) return;
+    dashboard.accountApprovalController = new AccountApprovalController({
+      document: dashboard.document, db, user: currentUser,
+      canApprove: () => dashboard.can('approveAccounts'), notify: showDashboardToast
+    });
+    dashboard.accountApprovalController.initialize();
+    dashboard.scope.addCleanup(() => dashboard.accountApprovalController?.dispose());
   }
   onHistoryView(event) {
     const dashboard = this;
