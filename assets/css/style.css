@@ -48,6 +48,11 @@
 :root[data-theme="dark"] .input-wrap input { background: #0e1c31; border-color: #3e526e; }
 :root[data-theme="dark"] .input-wrap input::placeholder { color: #a5b6ce; }
 :root[data-theme="dark"] .input-wrap input:focus { background: #172b46; border-color: #75abff; }
+:root[data-theme="dark"] .registration-form input,
+:root[data-theme="dark"] .registration-form select { color: #eef4ff; background: #0e1c31; border-color: #3e526e; }
+:root[data-theme="dark"] .registration-form input:focus,
+:root[data-theme="dark"] .registration-form select:focus { background: #172b46; border-color: #75abff; }
+:root[data-theme="dark"] .dialog .registration-status-result { color: #dbeaff; background: #203859; border: 1px solid #46698f; }
 :root[data-theme="dark"] .input-wrap.invalid input { border-color: var(--danger); }
 :root[data-theme="dark"] .input-wrap input:autofill { box-shadow: inset 0 0 0 100px #172b46; }
 :root[data-theme="dark"] .input-wrap input:-webkit-autofill { -webkit-text-fill-color: #eef4ff; box-shadow: inset 0 0 0 100px #172b46; }
@@ -383,7 +388,7 @@ label, .label-row { color: #374763; font-size: .75rem; font-weight: 700; }
 .registration-form input:focus, .registration-form select:focus { outline: 3px solid rgba(42, 111, 220, .18); border-color: var(--blue-600); }
 .registration-grid { display: grid; grid-column: span 2; grid-template-columns: 1fr 1fr; gap: 16px; }
 .registration-error { grid-column: span 2; min-height: 0; margin: -4px 0 0; font-size: .78rem; }
-.registration-status-result { grid-column: span 2; margin: 0 !important; padding: 13px 14px; color: #2458a8; background: #edf4ff; border-radius: 10px; font-size: .85rem; }
+.dialog .registration-status-result { grid-column: span 2; margin: 0 !important; padding: 13px 14px; color: #2458a8; background: #edf4ff; border: 1px solid #c6dbf7; border-radius: 10px; font-size: .85rem; }
 .dialog-actions { grid-column: span 2; display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-top: 4px; }
 .registration-dialog .dialog-action { min-height: 46px; padding-inline: 20px; }
 .registration-status-dialog .registration-form > label { grid-column: span 2; }
