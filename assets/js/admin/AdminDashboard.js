@@ -610,7 +610,13 @@ export class AdminDashboard {
     if (!dashboard.scope.initialized || dashboard.accountApprovalController) return;
     dashboard.accountApprovalController = new AccountApprovalController({
       document: dashboard.document, db, user: currentUser,
-      canApprove: () => dashboard.can('approveAccounts'), notify: showDashboardToast
+      canApprove: () => dashboard.can('approveAccounts'), studentIdToEmail,
+      onApprovedStudent(student) {
+        if (!dashboard.students.some(existing => existing.uid === student.uid)) dashboard.students.push(student);
+        dashboard.document.querySelector("#registeredCount").textContent = dashboard.students.length;
+        if (activeView === "modify-students") dashboard.scheduleStudentsRender();
+      },
+      notify: showDashboardToast
     });
     dashboard.accountApprovalController.initialize();
     dashboard.scope.addCleanup(() => dashboard.accountApprovalController?.dispose());

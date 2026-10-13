@@ -1,8 +1,9 @@
-import { collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+import { collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 
 export class AccountApprovalController {
-  constructor({ document = globalThis.document, db, user, canApprove, notify = () => {} } = {}) {
-    this.document = document; this.db = db; this.user = user; this.canApprove = canApprove; this.notify = notify;
+  constructor({ document = globalThis.document, db, user, canApprove, studentIdToEmail, onApprovedStudent = () => {}, notify = () => {} } = {}) {
+    this.document = document; this.db = db; this.user = user; this.canApprove = canApprove;
+    this.studentIdToEmail = studentIdToEmail; this.onApprovedStudent = onApprovedStudent; this.notify = notify;
     this.unsubscribe = null; this.initialized = false; this.requests = [];
   }
   initialize() {
@@ -28,17 +29,42 @@ export class AccountApprovalController {
     this.list.innerHTML = this.requests.map(item => `<article class="approval-card"><div><h3>${this.escape(item.firstName)} ${this.escape(item.lastName)}</h3><p><strong>${this.escape(item.accountId)}</strong> · ${this.escape(item.course)} · Section ${this.escape(item.section)}</p><p>Birthday: ${this.escape(item.birthday)} · Awaiting approval</p></div>${this.canApprove() ? `<div class="button-row"><button class="outline-button" data-registration-decision="decline" data-request-id="${item.id}" type="button">Decline</button><button class="primary-button" data-registration-decision="approve" data-request-id="${item.id}" type="button">Approve</button></div>` : '<span class="badge gray">View only</span>'}</article>`).join('');
   }
   escape(value = '') { const node = this.document.createElement('span'); node.textContent = String(value); return node.innerHTML; }
-  handleListClick(event) { const button = event.target.closest('[data-registration-decision]'); if (!button || !this.canApprove()) return; this.pending = { requestId: button.dataset.requestId, decision: button.dataset.registrationDecision }; const approved = this.pending.decision === 'approve'; this.modalTitle.textContent = approved ? 'Approve student account?' : 'Decline student account?'; this.modalMessage.textContent = approved ? 'The student can sign in immediately with the Student ID and password they registered.' : 'The disabled account will be removed. The student may submit a new registration request.'; this.confirm.textContent = approved ? 'Approve account' : 'Decline account'; this.confirm.className = approved ? 'primary-button' : 'danger-button'; this.modal.hidden = false; }
+  handleListClick(event) { const button = event.target.closest('[data-registration-decision]'); if (!button || !this.canApprove()) return; this.pending = { requestId: button.dataset.requestId, decision: button.dataset.registrationDecision }; const approved = this.pending.decision === 'approve'; this.modalTitle.textContent = approved ? 'Approve student account?' : 'Decline student account?'; this.modalMessage.textContent = approved ? 'This will activate the student profile and add it to Registered students immediately.' : 'The request will be declined. The student can correct their details and resubmit.'; this.confirm.textContent = approved ? 'Approve account' : 'Decline account'; this.confirm.className = approved ? 'primary-button' : 'danger-button'; this.modal.hidden = false; }
   closeModal() { this.modal.hidden = true; this.pending = null; }
+  approvedStudent(request) {
+    const accountIdKey = request.accountIdKey || String(request.accountId || '').trim().toLowerCase();
+    return {
+      uid: request.uid, accountId: request.accountId, accountIdKey,
+      authEmail: this.studentIdToEmail(request.accountId), birthday: request.birthday,
+      firstName: request.firstName, middleName: '', lastName: request.lastName,
+      course: request.course, section: request.section, active: true,
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+    };
+  }
   async confirmDecision() {
     if (!this.pending) return;
     const action = this.pending; this.confirm.disabled = true; const label = this.confirm.textContent; this.confirm.textContent = 'Saving…';
     try {
-      await updateDoc(doc(this.db, 'registrationRequests', action.requestId), {
-        status: action.decision === 'approve' ? 'approved' : 'declined',
-        reviewedAt: serverTimestamp(), reviewedBy: this.user.uid, updatedAt: serverTimestamp()
-      });
-      this.closeModal(); this.notify(action.decision === 'approve' ? 'Account approved' : 'Request declined', action.decision === 'approve' ? 'The student can now sign in.' : 'Their request was declined and dashboard access remains blocked.');
+      const request = this.requests.find(item => item.id === action.requestId);
+      if (!request) throw new Error('This registration request is no longer pending. Refresh and try again.');
+      if (action.decision === 'approve') {
+        const student = this.approvedStudent(request);
+        const batch = writeBatch(this.db);
+        batch.set(doc(this.db, 'students', student.uid), student);
+        batch.set(doc(this.db, 'studentIds', student.accountIdKey), {
+          studentId: student.accountId, uid: student.uid, createdAt: serverTimestamp()
+        });
+        batch.update(doc(this.db, 'registrationRequests', action.requestId), {
+          status: 'approved', reviewedAt: serverTimestamp(), reviewedBy: this.user.uid, updatedAt: serverTimestamp()
+        });
+        await batch.commit();
+        this.onApprovedStudent(student);
+      } else {
+        await updateDoc(doc(this.db, 'registrationRequests', action.requestId), {
+          status: 'declined', reviewedAt: serverTimestamp(), reviewedBy: this.user.uid, updatedAt: serverTimestamp()
+        });
+      }
+      this.closeModal(); this.notify(action.decision === 'approve' ? 'Account approved' : 'Request declined', action.decision === 'approve' ? 'The student is now counted in Registered students and can sign in.' : 'Their request was declined and dashboard access remains blocked.');
     }
     catch (error) { this.notify('Unable to update request', String(error.message || 'Please try again.').replace(/^.*?:\s*/, '')); }
     finally { this.confirm.disabled = false; this.confirm.textContent = label; }
