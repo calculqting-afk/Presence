@@ -3,8 +3,12 @@ export class SurveyPolicy {
   time(value) { return value?.toMillis?.() ?? value?.toDate?.().getTime() ?? new Date(value).getTime(); }
   eligible(profile, event) {
     if (!profile || profile.active !== true) return false;
-    return event.attendanceRoster ? Object.hasOwn(event.attendanceRoster, profile.uid)
-      : event.audience === 'All students' || event.audience === `Section ${profile.section}`;
+    if (!event.attendanceRoster) return event.audience === 'All students' || event.audience === `Section ${profile.section}`;
+    if (Object.hasOwn(event.attendanceRoster, profile.uid)) return true;
+    const joined = profile.createdAt?.toDate?.();
+    const captured = event.rosterCapturedAt?.toDate?.();
+    return Boolean(joined && captured && joined >= captured
+      && (event.audience === 'All students' || event.audience === `Section ${profile.section}`));
   }
   validate(config) {
     if (!['start-only', 'start-finish'].includes(config.locationMode)) throw new Error('Choose a location verification mode.');

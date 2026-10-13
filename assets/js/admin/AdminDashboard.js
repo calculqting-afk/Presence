@@ -243,6 +243,7 @@ export class AdminDashboard {
       role: currentUserRole,
       getStudents: () => dashboard.students,
       getEvents: () => dashboard.events,
+      eligibility: (student, event) => dashboard.summaryService.eligibility(student, event),
       escapeHtml,
       notify: showDashboardToast
     });

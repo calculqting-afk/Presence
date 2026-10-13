@@ -15,7 +15,15 @@ export class AttendanceSummaryService {
   }
 
   eligibility(student, event) {
-    if (event.attendanceRoster) return Object.hasOwn(event.attendanceRoster, student.uid) ? 'eligible' : 'excluded';
+    if (event.attendanceRoster) {
+      if (Object.hasOwn(event.attendanceRoster, student.uid)) return 'eligible';
+      // A profile approved after a roster was captured could not have been in
+      // that snapshot. Let the student see and use an event for their current
+      // audience, but keep a missed event unverified (not an automatic absence).
+      const joined = student.createdAt?.toDate?.();
+      const captured = event.rosterCapturedAt?.toDate?.();
+      return joined && captured && joined >= captured && this.matchesAudience(student, event) ? 'provisional' : 'excluded';
+    }
     const joined = student.createdAt?.toDate?.();
     if (joined && joined > this.closeDate(event)) return 'excluded';
     return this.matchesAudience(student, event) ? 'unknown' : 'excluded';
@@ -35,7 +43,7 @@ export class AttendanceSummaryService {
       if (this.now() <= this.checkoutCloseDate(event) || attended.has(event.id)) continue;
       const eligibility = this.eligibility(student, event);
       if (eligibility === 'excluded') continue;
-      if (!coverageConfirmed || eligibility === 'unknown' || (coverageFrom && event.date < coverageFrom)) unverified.push(event);
+      if (!coverageConfirmed || eligibility === 'unknown' || eligibility === 'provisional' || (coverageFrom && event.date < coverageFrom)) unverified.push(event);
       else absences.push(event);
     }
     return { absences, unverified, attendedIds: attended, attendedCount: own.length,

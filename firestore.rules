@@ -297,7 +297,14 @@ service cloud.firestore {
     }
 
     function eligibleForAttendance(event, student, uid) {
-      return ("attendanceRoster" in event) ? uid in event.attendanceRoster
+      return ("attendanceRoster" in event)
+        ? (uid in event.attendanceRoster || (
+          student.active == true
+          && student.createdAt is timestamp
+          && event.rosterCapturedAt is timestamp
+          && student.createdAt >= event.rosterCapturedAt
+          && (event.audience == "All students" || event.audience == "Section " + student.section)
+        ))
         : (event.audience == "All students" || event.audience == "Section " + student.section);
     }
 

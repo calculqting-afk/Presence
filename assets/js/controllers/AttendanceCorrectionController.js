@@ -13,8 +13,8 @@ export function correctionValues({ checkIn, checkOut, arrival, reason }) {
 }
 
 export class AttendanceCorrectionController {
-  constructor({ db, user, role, getStudents, getEvents, escapeHtml, notify, transaction = runTransaction }) {
-    Object.assign(this, { db, user, role, getStudents, getEvents, escapeHtml, notify, transaction });
+  constructor({ db, user, role, getStudents, getEvents, eligibility, escapeHtml, notify, transaction = runTransaction }) {
+    Object.assign(this, { db, user, role, getStudents, getEvents, eligibility, escapeHtml, notify, transaction });
   }
 
   initialize() {
@@ -60,8 +60,9 @@ export class AttendanceCorrectionController {
     const student = this.getStudents().find(item => item.uid === studentUid);
     const event = this.getEvents().find(item => item.id === eventId);
     if (!student || !event || student.active === false) throw new Error('Select an active student and an existing event.');
-    const eligible = event.attendanceRoster ? Object.hasOwn(event.attendanceRoster, studentUid)
-      : event.audience === 'All students' || event.audience === `Section ${student.section}`;
+    const eligible = this.eligibility ? this.eligibility(student, event) !== 'excluded'
+      : event.attendanceRoster ? Object.hasOwn(event.attendanceRoster, studentUid)
+        : event.audience === 'All students' || event.audience === `Section ${student.section}`;
     if (!eligible) throw new Error('This event is not assigned to that student in its participant roster.');
     const reference = doc(this.db, 'attendance', `${studentUid}_${eventId}`);
     const audit = doc(collection(reference, 'corrections'));

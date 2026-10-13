@@ -989,6 +989,10 @@ test('shared summaries preserve roster eligibility after a section change and ex
   assert.equal(result.unverified.length, 2);
   result = summary.summarize({ ...student, createdAt: { toDate: () => new Date(5000) } }, events, []);
   assert.equal(result.unverified.length, 0); assert.equal(result.absences.length, 1);
+  const newlyApproved = { uid: 'new', section: '2A', createdAt: { toDate: () => new Date(500) } };
+  const rosteredBeforeApproval = { id: 'newly-approved', close: 1000, end: 2000, audience: 'Section 2A', attendanceRoster: { a: '2A' }, rosterCapturedAt: { toDate: () => new Date(400) } };
+  assert.equal(summary.eligibility(newlyApproved, rosteredBeforeApproval), 'provisional');
+  assert.equal(summary.summarize(newlyApproved, [rosteredBeforeApproval], []).unverified.length, 1);
   result = summary.summarize(student, events, [], { coverageConfirmed: false });
   assert.equal(result.absences.length, 0);
   result = summary.summarize(student, events, [], { coverageFrom: '2026-10-02' });
