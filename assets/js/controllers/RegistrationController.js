@@ -59,6 +59,13 @@ export class RegistrationController {
     button.textContent = busy ? label : button.dataset.defaultLabel;
   }
   message(error) { return String(error?.message || 'Unable to complete this request.').replace(/^.*?:\s*/, ''); }
+  statusErrorMessage(error) {
+    const code = String(error?.code || '');
+    if (['auth/invalid-credential', 'auth/user-not-found', 'auth/wrong-password', 'auth/invalid-email'].includes(code)) {
+      return 'No account matches that Student ID and password. Check your details or register for an account.';
+    }
+    return this.message(error);
+  }
   accountIdKey(value) { return String(value || '').trim().toLowerCase(); }
 
   async submitRegistration(event) {
@@ -116,18 +123,20 @@ export class RegistrationController {
       const values = Object.fromEntries(new FormData(form));
       const credential = await signInWithEmailAndPassword(this.provisioningAuth, this.studentIdToEmail(values.accountId), values.password);
       const accountIdKey = this.accountIdKey(values.accountId);
-      let request; let student;
+      let status;
       try {
-        [request, student] = await Promise.all([
-          getDoc(doc(this.provisioningDb, 'registrationRequests', accountIdKey)),
-          getDoc(doc(this.provisioningDb, 'students', credential.user.uid))
-        ]);
+        const student = await getDoc(doc(this.provisioningDb, 'students', credential.user.uid));
+        if (student.exists() && student.data().birthday === values.birthday) {
+          status = 'existing-account';
+        } else {
+          const request = await getDoc(doc(this.provisioningDb, 'registrationRequests', accountIdKey));
+          status = request.exists() && request.data().uid === credential.user.uid && request.data().birthday === values.birthday
+            ? request.data().status : 'not-found';
+        }
       } finally { await signOut(this.provisioningAuth); }
-      const status = student.exists() && student.data().birthday === values.birthday ? 'existing-account'
-        : request.exists() && request.data().uid === credential.user.uid && request.data().birthday === values.birthday ? request.data().status : 'not-found';
       const text = { pending: 'Pending approval — an administrator still needs to review your request.', approved: 'Approved — you can now sign in using your Student ID and password.', 'existing-account': 'This account is already active. Close this window and sign in using your Student ID and password.', declined: 'Not approved — please contact your school administrator.', 'not-found': 'No matching registration request was found.' }[status] || 'No matching registration request was found.';
       this.statusResult.textContent = text; this.statusResult.hidden = false;
-    } catch (error) { this.statusError.textContent = this.message(error); }
+    } catch (error) { this.statusError.textContent = this.statusErrorMessage(error); }
     finally { this.setBusy(form, false); }
   }
 
