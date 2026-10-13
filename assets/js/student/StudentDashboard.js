@@ -1,7 +1,7 @@
 import { ControllerScope } from '../core/ControllerScope.js';
 import { StudentIdentityController } from '../controllers/StudentIdentityController.js';
 import { StudentAttendanceController } from '../controllers/StudentAttendanceController.js?v=20261011-optimized';
-import { currentUser, currentUserProfile, escapeHtml, formatBirthday, FineModalController, showDashboardToast, createNotification, uploadFacePhotoToDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventLateAfterDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineTimestamp, getFineHistory, updateDashboardGreeting, createDeviceSessionToken, auth, db, signOut, updatePassword, collection, deleteField, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch, sessionState } from '../dashboard.js?v=20261011-optimized';
+import { currentUser, currentUserProfile, escapeHtml, formatBirthday, FineModalController, showDashboardToast, createNotification, uploadFacePhotoToDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineTimestamp, getFineHistory, updateDashboardGreeting, createDeviceSessionToken, auth, db, signOut, updatePassword, collection, deleteField, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch, sessionState } from '../dashboard.js?v=20261011-optimized';
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
 import { AttendancePolicy, LateCheckInModal, AttendanceCheckInController, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261011-optimized';
 import { AttendanceSummaryService } from '../controllers/AttendanceSummaryService.js';
@@ -147,8 +147,7 @@ export class StudentDashboard {
       policy: new AttendancePolicy({
         eventOpenDate,
         eventCloseDate,
-        eventCheckInCloseDate,
-        eventLateAfterDate
+        eventCheckInCloseDate
       }),
       lateModal: new LateCheckInModal(dashboard.document.querySelector("#lateCheckInModal"))
     });
@@ -544,7 +543,7 @@ export class StudentDashboard {
       const partial = record.status === 'checkout-only' || (!hasVerifiedCheckIn && completed);
       const status = partial ? "Partial attendance — check-in missed" : completed ? "Completed" : !hasVerifiedCheckIn ? "Check-in incomplete" : dashboard.summaryService.needsReview(record, event) ? 'Needs review — missed checkout' : readyToCheckOut ? "Ready to check out" : "Checked in";
       const color = partial || readyToCheckOut || status.startsWith('Needs review') ? "orange" : completed ? "green" : status === "Checked in" ? "blue" : "gray";
-      const checkInWindow = event.timeIn ? `${formatEventTime(event.timeIn)} – ${formatEventTime(event.checkInClose || event.timeOut)}` : "Not recorded";
+      const checkInWindow = event.timeIn ? `${formatEventTime(event.timeIn)} – ${formatEventTime(event.checkInCutoff || event.timeOut)}` : "Not recorded";
       const checkOutWindow = event.timeOut ? `${formatEventTime(event.timeOut)} – ${formatEventTime(event.checkOutCutoff || timePlusMinutes(event.timeOut))}` : "Not recorded";
       return `<article class="history-event-card attendance-record-card"><div class="history-card-top"><span class="event-type-badge">${escapeHtml(record.eventType || "School Event")}</span><div class="attendance-record-badges"><span class="badge ${color}">${escapeHtml(status)}</span>${hasVerifiedCheckIn ? arrivalStatusBadge(record.arrivalStatus) : '<span class="badge orange">Absent in</span>'}${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}</div></div><h3>${escapeHtml(record.eventName || "Attendance event")}</h3><p>${escapeHtml(record.location || "Location not recorded")}</p><div class="event-detail-boxes"><div class="${record.arrivalStatus === 'late' ? 'attendance-time-late' : ''}"><span>${record.arrivalStatus === 'late' ? 'Late IN' : 'Checked in'}</span><strong>${escapeHtml(formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>Checked out</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Arrival</span><strong>${escapeHtml(partial ? 'Absent in' : record.arrivalStatus === "late" ? "Late" : "Present")}</strong></div><div><span>Check-in window</span><strong>${escapeHtml(checkInWindow)}</strong></div><div><span>Checkout window</span><strong>${escapeHtml(checkOutWindow)}</strong></div><div><span>Duration</span><strong>${escapeHtml(hasVerifiedCheckIn ? attendanceDuration(checkedInAt, record.checkedOutAt) : 'Not available')}</strong></div></div>${readyToCheckOut ? `<div class="history-card-actions"><button class="primary-button attendance-action-button" type="button" data-check-out-attendance="${escapeHtml(record.id)}">Check out</button></div>` : ""}</article>`;
     }).join("");

@@ -1264,7 +1264,7 @@ export class AdminDashboard {
   duplicateEventSignature(event) {
     const dashboard = this;
     const normalized = value => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
-    return [event.name, event.date, event.location, event.audience, event.timeIn, event.checkInCutoff, event.checkInClose, event.timeOut, event.checkOutCutoff].map(normalized).join("\u001f");
+    return [event.name, event.date, event.location, event.audience, event.timeIn, event.checkInCutoff, event.timeOut, event.checkOutCutoff].map(normalized).join("\u001f");
   }
   async editEvent(id) {
     const dashboard = this;
@@ -1288,7 +1288,6 @@ export class AdminDashboard {
     dashboard.document.querySelector("#eventTimeIn").value = event.timeIn;
     dashboard.document.querySelector("#eventTimeOut").value = event.timeOut;
     dashboard.document.querySelector("#eventCheckInCutoff").value = event.checkInCutoff || timePlusMinutes(event.timeIn) || event.timeOut;
-    dashboard.document.querySelector("#eventCheckInClose").value = event.checkInClose || event.timeOut;
     dashboard.document.querySelector("#eventCheckOutCutoff").value = event.checkOutCutoff || timePlusMinutes(event.timeOut);
     dashboard.document.querySelector("#eventAudience").value = event.audience;
     dashboard.document.querySelector("#eventNotes").value = event.description || event.notes || "";
@@ -1501,8 +1500,6 @@ export class AdminDashboard {
   }
   handleEventTimeOutChange() {
     const dashboard = this;
-    const checkInClose = dashboard.document.querySelector('#eventCheckInClose');
-    if (!checkInClose.value) checkInClose.value = dashboard.document.querySelector('#eventTimeOut').value;
     return dashboard.setDefaultCutoff("#eventTimeOut", "#eventCheckOutCutoff");
   }
   handleRoleChangeModalClick(event) {
@@ -1819,12 +1816,10 @@ export class AdminDashboard {
     const timeIn = dashboard.document.querySelector("#eventTimeIn").value;
     const timeOut = dashboard.document.querySelector("#eventTimeOut").value;
     const checkInCutoff = dashboard.document.querySelector("#eventCheckInCutoff").value;
-    const checkInClose = dashboard.document.querySelector("#eventCheckInClose").value;
     const checkOutCutoff = dashboard.document.querySelector("#eventCheckOutCutoff").value;
     const date = dashboard.document.querySelector("#eventDate").value;
     if (timeOut <= timeIn) return showDashboardToast("Invalid attendance window", "Time Out must be later than Time In.");
-    if (checkInCutoff <= timeIn || checkInCutoff > timeOut) return showDashboardToast("Invalid late threshold", "Late after must be after Time In and no later than Time Out.");
-    if (checkInClose <= checkInCutoff || checkInClose > timeOut) return showDashboardToast("Invalid check-in closing time", "Check-in closes must be after Late after and no later than Time Out.");
+    if (checkInCutoff <= timeIn || checkInCutoff > timeOut) return showDashboardToast("Invalid check-in cutoff", "The check-in cutoff must be after check-in opens and no later than check-out opens.");
     if (checkOutCutoff <= timeOut) return showDashboardToast("Invalid checkout cutoff", "The checkout cutoff must be after Time Out.");
     const id = dashboard.document.querySelector("#editingEventId").value;
     let requestedGeofence;
@@ -1843,15 +1838,13 @@ export class AdminDashboard {
       location: dashboard.document.querySelector("#eventLocation").value.trim(),
       timeIn,
       checkInCutoff,
-      checkInClose,
       timeOut,
       checkOutCutoff,
       audience: dashboard.document.querySelector("#eventAudience").value,
       description: dashboard.document.querySelector("#eventNotes").value.trim(),
       requiresGeofence: geofence.enabled,
       openAt: Timestamp.fromDate(new Date(`${date}T${timeIn}`)),
-      lateAfterAt: Timestamp.fromDate(new Date(`${date}T${checkInCutoff}`)),
-      checkInClosesAt: Timestamp.fromDate(new Date(`${date}T${checkInClose}`)),
+      checkInClosesAt: Timestamp.fromDate(new Date(`${date}T${checkInCutoff}`)),
       closeAt: Timestamp.fromDate(new Date(`${date}T${timeOut}`)),
       checkOutClosesAt: Timestamp.fromDate(new Date(`${date}T${checkOutCutoff}`)),
       updatedAt: serverTimestamp()

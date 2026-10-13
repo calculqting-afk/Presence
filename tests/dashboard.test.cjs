@@ -99,14 +99,14 @@ test('check-in displays real pending progress and restores the button after face
   assert.equal(button.disabled, false); assert.equal(button.innerHTML, 'Check in'); assert.equal(controller.loading.operations.size, 0);
   controller.dispose();
 });
-test('event schedules label opening, late threshold and checkout close separately', async () => {
+test('event schedules label the check-in and checkout openings and cutoffs', async () => {
   const { EventSchedulePresenter } = await isolatedModule('assets/js/controllers/EventSchedulePresenter.js');
   const escapeHtml = value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;');
   const presenter = new EventSchedulePresenter({ formatTime: value => value, escapeHtml, addMinutes: () => '16:30' });
   const event = { timeIn: '16:00', checkInCutoff: '16:10', timeOut: '16:15', checkOutCutoff: '16:25', location: '<script>' };
   const html = presenter.render(event);
   assert.match(html, /Check-in/); assert.match(html, /Check-out/);
-  assert.match(html, /Late after<\/dt><dd>16:10/);
+  assert.match(html, /Check-in[\s\S]*Closes<\/dt><dd>16:10/);
   assert.match(html, /Closes<\/dt><dd>16:25/);
   assert.ok(html.includes('&lt;script&gt;')); assert.ok(!html.includes('<script>'));
   assert.match(presenter.render({ timeIn: '16:00', timeOut: '16:15' }), /Closes<\/dt><dd>16:30/);
@@ -205,16 +205,16 @@ test('shared summary listeners survive navigation and stop during disposal', asy
   subscriptions.stop(); subscriptions.stop(); assert.equal(stops, 1);
 });
 
-test('attendance policy covers opening, cutoff, late window, and event-close boundaries', async () => {
+test('attendance policy covers opening and check-in cutoff boundaries', async () => {
   const { AttendancePolicy } = await isolatedModule('assets/js/controllers/AttendanceController.js', { currentUser: {}, currentUserRole: 'student', formatEventTime: value => value });
   const policy = new AttendancePolicy({ eventOpenDate: event => event.open, eventCloseDate: event => event.close, eventCheckInCloseDate: event => event.cutoff });
   const event = { open: new Date(1000), cutoff: new Date(2000), close: new Date(3000) };
   assert.equal(policy.evaluateCheckIn(null).available, false);
   assert.equal(policy.evaluateCheckIn(event, new Date(999)).available, false);
   assert.equal(policy.evaluateCheckIn(event, new Date(1000)).arrivalStatus, 'present');
-  assert.equal(policy.evaluateCheckIn(event, new Date(2000)).arrivalStatus, 'present');
-  assert.equal(policy.evaluateCheckIn(event, new Date(2001)).arrivalStatus, 'late');
-  assert.equal(policy.evaluateCheckIn(event, new Date(2999)).available, true);
+  assert.equal(policy.evaluateCheckIn(event, new Date(1999)).arrivalStatus, 'present');
+  assert.equal(policy.evaluateCheckIn(event, new Date(2000)).available, false);
+  assert.equal(policy.evaluateCheckIn(event, new Date(2999)).available, false);
   assert.equal(policy.evaluateCheckIn(event, new Date(3000)).available, false);
 });
 

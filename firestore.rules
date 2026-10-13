@@ -118,9 +118,9 @@ service cloud.firestore {
           "audience", "description", "notes", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt",
           "lateAfterAt", "checkOutClosesAt", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt", "hasSurvey", "surveyArchived"
         ])
-        && data.keys().hasAll(["name", "type", "date", "location", "timeIn", "checkInCutoff", "checkInClose", "timeOut", "checkOutCutoff", "audience", "description", "requiresGeofence", "openAt", "lateAfterAt", "checkInClosesAt", "closeAt", "checkOutClosesAt"])
+        && data.keys().hasAll(["name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "audience", "description", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt"])
         && shortText(data.name, 160) && shortText(data.type, 60) && shortText(data.date, 10)
-        && shortText(data.location, 240) && shortText(data.timeIn, 5) && shortText(data.checkInCutoff, 5) && shortText(data.checkInClose, 5)
+        && shortText(data.location, 240) && shortText(data.timeIn, 5) && shortText(data.checkInCutoff, 5) && optionalShortText(data, "checkInClose", 5)
         && shortText(data.timeOut, 5) && shortText(data.checkOutCutoff, 5)
         && data.audience in ["All students", "Section 1A", "Section 1B", "Section 2A", "Section 2B", "Section 3A", "Section 3B", "Section 4A", "Section 4B"]
         && shortText(data.description, 4000) && optionalShortText(data, "notes", 4000)
@@ -130,7 +130,7 @@ service cloud.firestore {
         && (("attendanceRoster" in data) == ("rosterCapturedAt" in data))
         && (!("attendanceRoster" in data) || (data.attendanceRoster is map
           && data.attendanceRoster.keys().size() <= 5000 && data.rosterCapturedAt is timestamp))
-        && data.openAt is timestamp && data.lateAfterAt is timestamp && data.checkInClosesAt is timestamp && data.closeAt is timestamp && data.checkOutClosesAt is timestamp
+        && data.openAt is timestamp && (!('lateAfterAt' in data) || data.lateAfterAt is timestamp) && data.checkInClosesAt is timestamp && data.closeAt is timestamp && data.checkOutClosesAt is timestamp
         && (!('createdAt' in data) || data.createdAt is timestamp)
         && optionalShortText(data, "createdBy", 128)
         && (!('updatedAt' in data) || data.updatedAt is timestamp);
@@ -283,14 +283,11 @@ service cloud.firestore {
         && data.studentId == student.accountId
         && attendanceMatchesEvent(data, event)
         && eligibleForAttendance(event, student, request.auth.uid)
-        // Legacy events used checkInClosesAt as their late threshold. New
-        // events carry lateAfterAt and a separate final check-in close time.
         && request.time >= event.openAt
-        && request.time < (("lateAfterAt" in event) ? event.checkInClosesAt : event.closeAt)
+        && request.time < (("lateAfterAt" in event) ? event.lateAfterAt : event.checkInClosesAt)
         && data.attendedAt == request.time && data.checkedInAt == request.time
         && data.keys().hasAll(["arrivalStatus"])
-        && ((request.time <= (("lateAfterAt" in event) ? event.lateAfterAt : event.checkInClosesAt) && data.arrivalStatus == "present")
-          || (request.time > (("lateAfterAt" in event) ? event.lateAfterAt : event.checkInClosesAt) && data.arrivalStatus == "late"))
+        && data.arrivalStatus == "present"
         && data.status == "checked-in"
         && !data.keys().hasAny(["recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason"])
         && !data.keys().hasAny(["checkedOutAt", "checkOutLocation"])
@@ -418,12 +415,10 @@ service cloud.firestore {
       allow create, update: if canManageAttendance()
         && validEvent(request.resource.data)
         && request.resource.data.openAt is timestamp
-        && request.resource.data.lateAfterAt is timestamp
         && request.resource.data.checkInClosesAt is timestamp
         && request.resource.data.closeAt is timestamp
         && request.resource.data.checkOutClosesAt is timestamp
-        && request.resource.data.openAt < request.resource.data.lateAfterAt
-        && request.resource.data.lateAfterAt < request.resource.data.checkInClosesAt
+        && request.resource.data.openAt < request.resource.data.checkInClosesAt
         && request.resource.data.checkInClosesAt <= request.resource.data.closeAt
         && request.resource.data.closeAt < request.resource.data.checkOutClosesAt
         && (!exists(/databases/$(database)/documents/events/$(eventId))
