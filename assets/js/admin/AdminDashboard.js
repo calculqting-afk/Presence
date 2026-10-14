@@ -181,7 +181,11 @@ export class AdminDashboard {
     dashboard.subscriptions = new ScopedSubscriptions({
       onError: (error, key) => {
         console.error(key, error);
-        showDashboardToast('Data sync unavailable', 'Check your connection and reload to retry.');
+        if (key === 'attendance') dashboard.updateAttendanceSyncStatus({ state: 'error', error });
+        const message = error?.code === 'permission-denied'
+          ? 'Access was denied. Check your signed-in account and deployed database rules.'
+          : error?.message || 'Check your connection and reload to retry.';
+        showDashboardToast('Data sync unavailable', message);
       }
     });
     dashboard.scope.listen(dashboard.window, 'presence:viewchange', dashboard.changeSubscriptions);
@@ -234,6 +238,7 @@ export class AdminDashboard {
       closeDate: eventCheckoutCloseDate, escapeHtml
     });
     dashboard.analyticsController.initialize();
+    dashboard.scope.listen(dashboard.document.querySelector('#retryDashboardAttendance'), 'click', dashboard.handleSyncAttendanceNowClick);
     dashboard.scope.addCleanup(() => dashboard.analyticsController.dispose());
     dashboard.historyController = new AttendanceHistoryController({
       repository: new AttendanceRepository(db),
@@ -704,7 +709,13 @@ export class AdminDashboard {
     history = false
   }) {
     const dashboard = this;
-    if (!history) dashboard.attendanceConfirmed = state === 'live';
+    if (!history) {
+      dashboard.attendanceConfirmed = state === 'live';
+      dashboard.attendanceVerificationState = state;
+      // Records arrive before their metadata status. Redraw once that status
+      // is known, even when no later document changes occur.
+      if (activeView === 'dashboard') dashboard.renderAdminAttendance();
+    }
     if (activeView === 'assign-fine') dashboard.renderFineOptions();
     dashboard.scheduleStudentsRender();
     const labels = {
@@ -889,9 +900,11 @@ export class AdminDashboard {
       rate = dashboard.attendanceConfirmed ? totals.rate : 0;
     dashboard.document.querySelector("#registeredCount").textContent = dashboard.students.length;
     dashboard.document.querySelector("#presentTodayCount").textContent = present;
-    dashboard.document.querySelector("#presentTodayMeta").textContent = !dashboard.attendanceConfirmed ? 'Verifying attendance…' : expected ? `${rate}% of ${expected} scheduled participants` : 'No verified participant roster for today';
-    dashboard.document.querySelector("#notCheckedInCount").textContent = pending;
-    dashboard.document.querySelector("#notCheckedInMeta").textContent = dashboard.attendanceConfirmed ? `${expected ? 'Scheduled participants without a check-in' : 'No verified attendance requirement today'}${unverified ? ` · ${unverified} legacy eligibility unverified` : ''}` : 'Waiting for server attendance verification';
+    const verificationFailed = dashboard.attendanceVerificationState === 'error';
+    dashboard.document.querySelector("#presentTodayMeta").textContent = !dashboard.attendanceConfirmed ? verificationFailed ? 'Unable to verify attendance — Retry' : 'Verifying attendance…' : expected ? `${rate}% of ${expected} scheduled participants` : 'No verified participant roster for today';
+    dashboard.document.querySelector("#notCheckedInCount").textContent = dashboard.attendanceConfirmed ? pending : '—';
+    dashboard.document.querySelector("#notCheckedInMeta").textContent = dashboard.attendanceConfirmed ? `${expected ? 'Scheduled participants without a check-in' : 'No verified attendance requirement today'}${unverified ? ` · ${unverified} legacy eligibility unverified` : ''}` : verificationFailed ? 'Unable to verify attendance — Retry' : 'Waiting for server attendance verification';
+    dashboard.document.querySelector('#retryDashboardAttendance').hidden = !verificationFailed;
     dashboard.document.querySelector("#adminAttendancePercent").textContent = dashboard.attendanceConfirmed ? `${rate}%` : '—';
     dashboard.document.querySelector("#adminAttendanceDetail").textContent = `${present} present`;
     dashboard.document.querySelector("#adminAttendanceRing").style.background = `conic-gradient(var(--blue) 0 ${rate}%, var(--ring-track, #e8eef7) ${rate}% 100%)`;

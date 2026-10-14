@@ -1275,6 +1275,30 @@ test('daily attendance resets at Philippine midnight and catches up after a slee
   clock.dispose(); assert.equal(handlers.size, 0);
 });
 
+test('attendance verification times out and a server retry restores confirmed status', async () => {
+  const { AttendanceSyncService } = await isolatedModule('assets/js/controllers/AttendanceController.js', { currentUser: { getIdTokenResult: async () => ({ claims: {} }) }, currentUserRole: 'head_admin', formatEventTime: value => value });
+  const states = [], timers = new Map(); let sequence = 0;
+  const service = new AttendanceSyncService({ reference: {}, onRecords() {}, onStatus: status => states.push(status),
+    schedule: callback => { timers.set(++sequence, callback); return sequence; }, cancel: timer => timers.delete(timer) });
+  service.start(); assert.equal(states.at(-1).state, 'connecting');
+  timers.get(1)(); assert.equal(states.at(-1).state, 'error');
+  assert.match(states.at(-1).error.message, /timed out/);
+  await service.syncNow(); assert.equal(states.at(-1).state, 'live');
+  service.stop(); assert.equal(timers.size, 0);
+});
+
+test('attendance verification invokes browser timers with their global receiver', async () => {
+  let scheduled = 0;
+  const { AttendanceSyncService } = await isolatedModule('assets/js/controllers/AttendanceController.js',
+    { currentUser: {}, currentUserRole: 'head_admin', formatEventTime: value => value }, {
+      timerHost: true,
+      setTimeout: function() { assert.equal(this.timerHost, true); scheduled++; return 1; },
+      clearTimeout: function() { assert.equal(this.timerHost, true); }
+    });
+  const service = new AttendanceSyncService({ reference: {}, onRecords() {}, onStatus() {} });
+  service.start(); assert.equal(scheduled, 1); service.stop();
+});
+
 test('student attendance pages retain filters and clamp after records change', async () => {
   const browser = fakeBrowser();
   const { StudentAttendanceListController } = await isolatedModule('assets/js/controllers/StudentAttendanceListController.js', {}, browser);

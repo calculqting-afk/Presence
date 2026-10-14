@@ -64,7 +64,10 @@ export class AttendanceCheckInController {
 }
 
 export class AttendanceSyncService {
-  constructor({ onRecords, onStatus, reference = collection(db, "attendance") }) {
+  constructor({ onRecords, onStatus, reference = collection(db, "attendance"), timeoutMs = 15000,
+    schedule = (callback, delay) => globalThis.setTimeout(callback, delay),
+    cancel = timer => globalThis.clearTimeout(timer) }) {
+    Object.assign(this, { timeoutMs, schedule, cancel });
     this.onRecords = onRecords;
     this.onStatus = onStatus;
     this.reference = reference;
@@ -77,24 +80,45 @@ export class AttendanceSyncService {
     this.reference = reference;
     const generation = ++this.generation;
     this.onStatus({ state: "connecting" });
+    this.cancel(this.verificationTimer);
+    this.verificationTimer = this.schedule(() => {
+      if (generation === this.generation) this.onStatus({ state: 'error', error: new Error('Attendance verification timed out. Please retry.') });
+    }, this.timeoutMs);
+    this.verificationTimer?.unref?.();
     this.unsubscribe = onSnapshot(this.reference, { includeMetadataChanges: true }, (snapshot) => {
       if (generation !== this.generation) return;
+      if (!snapshot.metadata.fromCache) this.cancel(this.verificationTimer);
       this.onRecords(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
       this.onStatus({ state: snapshot.metadata.fromCache ? "cached" : "live", syncedAt: new Date() });
-    }, (error) => { if (generation === this.generation) this.onStatus({ state: "error", error }); });
+    }, (error) => { this.cancel(this.verificationTimer); if (generation === this.generation) this.onStatus({ state: "error", error }); });
   }
 
   async syncNow() {
+    if (this.pendingSync) return this.pendingSync;
+    this.pendingSync = this.verifyNow();
+    try { return await this.pendingSync; } finally { this.pendingSync = null; }
+  }
+  async verifyNow() {
     const generation = this.generation;
     this.onStatus({ state: "syncing" });
     let tokenResult;
     try {
       // Force a fresh ID token so recent sign-in or account changes are reflected
       // when Firestore evaluates the Super Admin / Head Admin Rules.
-      tokenResult = await currentUser?.getIdTokenResult(true);
-      const snapshot = await getDocsFromServer(this.reference);
+      const request = async () => {
+        tokenResult = await currentUser?.getIdTokenResult(true);
+        return getDocsFromServer(this.reference);
+      };
+      let timer;
+      const deadline = new Promise((_, reject) => {
+        timer = this.schedule(() => reject(new Error('Attendance verification timed out. Please retry.')), this.timeoutMs);
+        timer?.unref?.();
+      });
+      let snapshot;
+      try { snapshot = await Promise.race([request(), deadline]); } finally { this.cancel(timer); }
       if (generation !== this.generation) return;
       this.onRecords(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+      this.cancel(this.verificationTimer);
       this.onStatus({ state: "live", syncedAt: new Date() });
     } catch (error) {
       console.error("ATTENDANCE SYNC FAILED", {
@@ -113,6 +137,7 @@ export class AttendanceSyncService {
 
   stop() {
     ++this.generation;
+    this.cancel(this.verificationTimer);
     this.unsubscribe?.();
     this.unsubscribe = null;
   }
