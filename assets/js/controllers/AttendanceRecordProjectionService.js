@@ -2,11 +2,11 @@
 // Firestore: a missing check-in and checkout becomes an absence only after the
 // entire attendance period ends, and an administrator can still correct it later.
 export class AttendanceRecordProjectionService {
-  constructor({ getEvents, checkoutCloseDate, now = () => new Date() }) {
-    Object.assign(this, { getEvents, checkoutCloseDate, now });
+  constructor({ getEvents, getStudents = () => [], checkoutCloseDate, now = () => new Date() }) {
+    Object.assign(this, { getEvents, getStudents, checkoutCloseDate, now });
   }
 
-  project(records, { from = '', to = '', eventId = 'all', status = '', section = '' } = {}, attendanceContext = records) {
+  project(records, { from = '', to = '', eventId = 'all', status = '', section = '', search = '' } = {}, attendanceContext = records) {
     const actual = records || [];
     // A generated absence is only meaningful for the unfiltered view or the
     // dedicated absence filter. Other status filters must show actual records
@@ -26,13 +26,28 @@ export class AttendanceRecordProjectionService {
       if ((eventId && eventId !== 'all' && event.id !== eventId)
         || (from && event.date < from) || (to && event.date > to)
         || currentTime <= this.checkoutCloseDate(event)) return [];
-      return Object.entries(event.attendanceRoster || {}).flatMap(([studentUid, rosterSection]) => {
+      const students = new Map(this.getStudents().map(student => [student.uid, student]));
+      const roster = { ...(event.attendanceRoster || {}) };
+      const unverified = new Set();
+      for (const student of students.values()) {
+        if (Object.hasOwn(roster, student.uid) || student.active === false) continue;
+        if (event.audience && event.audience !== 'All students' && event.audience !== `Section ${student.section}`) continue;
+        const joined = student.createdAt?.toDate?.();
+        if (joined && joined > this.checkoutCloseDate(event)) continue;
+        roster[student.uid] = student.section || '';
+        if (!joined || !Number.isFinite(joined.getTime())) unverified.add(student.uid);
+      }
+      return Object.entries(roster).flatMap(([studentUid, rosterSection]) => {
         if (section && rosterSection !== section) return [];
+        const student = students.get(studentUid);
+        const text = [student?.firstName, student?.middleName, student?.lastName, student?.accountId, student?.email].join(' ').toLowerCase();
+        if (search && !text.includes(search.toLowerCase())) return [];
         if (keys.has(this.recordKey(studentUid, event.id))
           || attendanceBySchedule.has(this.scheduleKey(studentUid, event))) return [];
         return [{
           id: `absent:${studentUid}:${event.id}`,
           displayOnly: true,
+          rosterUnverified: unverified.has(studentUid),
           studentUid,
           eventId: event.id,
           eventName: event.name,

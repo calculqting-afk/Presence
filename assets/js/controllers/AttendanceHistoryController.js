@@ -26,8 +26,8 @@ export class AttendanceRepository {
 // Dates are server-filtered; other filters apply to the fetched window. Loading
 // is explicit and bounded, including when searching sparse historical matches.
 export class AttendanceHistoryController {
-  constructor({ repository, getStudents, getEvents, summary, render, notify, onStatus = () => {}, pageSize = 20, requireEvent = false }) {
-    Object.assign(this, { repository, getStudents, getEvents, summary, render, notify, onStatus, pageSize, requireEvent });
+  constructor({ repository, getStudents, getEvents, summary, render, notify, onStatus = () => {}, pageSize = 20, requireEvent = false, prepareRecords = records => records }) {
+    Object.assign(this, { repository, getStudents, getEvents, summary, render, notify, onStatus, pageSize, requireEvent, prepareRecords });
     this.records = []; this.generation = 0; this.page = 0; this.more = true;
   }
   initialize() {
@@ -71,12 +71,12 @@ export class AttendanceHistoryController {
       .map(selector => document.querySelector(selector));
     this.onNext = async () => {
       if (this.busy) return;
-      if ((this.page + 1) * this.pageSize < this.filtered().length) this.page++;
+      if ((this.page + 1) * this.pageSize < this.displayRecords().length) this.page++;
       else if (this.more) {
-        const previousCount = this.filtered().length;
+        const previousCount = this.displayRecords().length;
         const pageWasFull = previousCount >= (this.page + 1) * this.pageSize;
         await this.load();
-        if (pageWasFull && this.filtered().length > (this.page + 1) * this.pageSize) this.page++;
+        if (pageWasFull && this.displayRecords().length > (this.page + 1) * this.pageSize) this.page++;
       }
       this.draw();
     };
@@ -173,6 +173,9 @@ export class AttendanceHistoryController {
       if (generation === this.generation) { this.busy = false; this.draw(); }
     }
   }
+  displayRecords() {
+    return this.prepareRecords(this.filtered(), { busy: this.busy, partial: this.more, verified: this.verified });
+  }
   draw() {
     if (this.requireEvent && (!(this.applied || this.filters()).event || (this.applied || this.filters()).event === 'all')) {
       this.render([], { chooseEvent: true });
@@ -180,11 +183,11 @@ export class AttendanceHistoryController {
       document.querySelector('#attendancePagination').hidden = true;
       return;
     }
-    const records = this.filtered();
+    const records = this.displayRecords();
     this.page = Math.min(this.page, Math.max(0, Math.ceil(records.length / this.pageSize) - 1));
     const shown = records.slice(this.page * this.pageSize, (this.page + 1) * this.pageSize);
     this.render(shown, { busy: this.busy, partial: this.more, verified: this.verified, filtered: Object.values(this.applied || {}).some(value => value && value !== 'all') });
-    this.info.textContent = this.busy ? 'Loading…' : `${shown.length} shown · ${this.records.length} loaded${this.more ? ' · More available' : ''}`;
+    this.info.textContent = this.busy ? 'Loading…' : `${records.length ? this.page * this.pageSize + 1 : 0}–${this.page * this.pageSize + shown.length} of ${records.length} students${this.more ? ' · More available' : ''}`;
     this.info.setAttribute('aria-label', `Page ${this.page + 1}, ${shown.length} shown, ${records.length} matches in ${this.records.length} loaded records${this.more ? ', additional records may match' : ', end of date range'}`);
     document.querySelector('#attendanceCurrentPage').textContent = this.page + 1;
     document.querySelector('#attendancePagination').hidden = !this.busy && !this.more && records.length === 0;

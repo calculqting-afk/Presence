@@ -198,6 +198,7 @@ export class AdminDashboard {
     });
     dashboard.attendanceProjection = new AttendanceRecordProjectionService({
       getEvents: () => dashboard.events,
+      getStudents: () => dashboard.students,
       checkoutCloseDate: eventCheckoutCloseDate
     });
     dashboard.fineEligibility = new FineEligibilityService({ summary: dashboard.summaryService,
@@ -221,22 +222,25 @@ export class AdminDashboard {
     dashboard.historyController = new AttendanceHistoryController({
       repository: new AttendanceRepository(db),
       requireEvent: true,
+      pageSize: 7,
       getStudents: () => dashboard.students,
       getEvents: () => dashboard.events,
       summary: dashboard.summaryService,
       notify: showDashboardToast,
       onStatus: dashboard.updateAttendanceSyncStatus,
+      prepareRecords: (records, state) => {
+        const filters = dashboard.historyController?.applied || {};
+        const projected = state.verified && !state.busy && !state.partial
+          ? dashboard.attendanceProjection.project(records, { ...filters, eventId: filters.event }, dashboard.historyController?.records || records)
+          : records;
+        return dashboard.historyController.sortForDisplay(projected);
+      },
       render: (records, state) => {
         if (state.chooseEvent) {
           dashboard.document.querySelector('#adminAttendanceLine').innerHTML = '<div class="attendance-empty" role="status"><h3>Choose an event to view attendance records.</h3><p>Select an event above to get started.</p></div>';
           return;
         }
-        const filters = dashboard.historyController?.applied || {};
-        const projected = state.verified && !state.busy && !state.partial
-          ? dashboard.attendanceProjection.project(records, { ...filters, eventId: filters.event }, dashboard.historyController?.records || records)
-          : records;
-        const sorted = dashboard.historyController.sortForDisplay(projected);
-        dashboard.document.querySelector('#adminAttendanceLine').innerHTML = sorted.length ? dashboard.attendanceLineMarkup(sorted) : AttendanceToolbarController.emptyState(state);
+        dashboard.document.querySelector('#adminAttendanceLine').innerHTML = records.length ? dashboard.attendanceLineMarkup(records) : AttendanceToolbarController.emptyState(state);
       }
     });
     dashboard.historyController.initialize();
@@ -883,6 +887,7 @@ export class AdminDashboard {
       const student = dashboard.students.find(item => item.uid === record.studentUid);
       const studentName = student ? [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ") : record.studentId || "Student";
       const avatar = student?.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student?.firstName || studentName, student?.lastName || ""));
+      if (record.rosterUnverified) return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || '')} · ${escapeHtml(student?.section || '')}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName)}</strong><small>${escapeHtml(record.eventDate)}</small></div><div class="attendance-line-times">No attendance recorded</div><div class="attendance-line-status"><span class="badge orange">Needs review — registration date unknown</span></div></article>`;
       const checkedInAt = record.checkedInAt || record.attendedAt;
       const completed = Boolean(record.checkedOutAt);
       const absent = record.status === 'absent';

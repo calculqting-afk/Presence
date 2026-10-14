@@ -280,6 +280,24 @@ test('absence projection respects the selected roster section', async () => {
   assert.equal(records.map(record => record.studentUid).join(','), 'sectionTwo');
 });
 
+test('directory reconciliation includes missing participants and excludes attended or later accounts', async () => {
+  const { AttendanceRecordProjectionService } = await isolatedModule('assets/js/controllers/AttendanceRecordProjectionService.js');
+  const event = { id: 'event', date: '2026-10-13', audience: 'All students', attendanceRoster: {} };
+  const students = [
+    { uid: 'allen', section: '3A', createdAt: { toDate: () => new Date(500) } },
+    { uid: 'attended', section: '3A' },
+    { uid: 'later', section: '3A', createdAt: { toDate: () => new Date(1500) } },
+    { uid: 'unknown', section: '3A' },
+    { uid: 'other', section: '2A' }
+  ];
+  const service = new AttendanceRecordProjectionService({ getEvents: () => [event], getStudents: () => students,
+    checkoutCloseDate: () => new Date(1000), now: () => new Date(2000) });
+  const result = service.project([], { section: '3A', status: 'absent' }, [{ studentUid: 'attended', eventId: 'event', checkedInAt: 'time' }]);
+  assert.equal(result.map(record => record.studentUid).join(','), 'allen,unknown');
+  assert.equal(result[0].rosterUnverified, false);
+  assert.equal(result[1].rosterUnverified, true);
+});
+
 test('late check-in cancellation prevents saving and confirmation rechecks the window', async () => {
   const { AttendanceCheckInController } = await isolatedModule('assets/js/controllers/AttendanceController.js', { currentUser: {}, currentUserRole: 'student', formatEventTime: value => value });
   const cancelled = new AttendanceCheckInController({ policy: { evaluateCheckIn: () => ({ available: true, arrivalStatus: 'late' }) }, lateModal: { open: async () => false } });
@@ -1201,6 +1219,23 @@ test('event-required history waits for a selection before fetching records', asy
   await controller.reload(); assert.equal(reads, 1); assert.equal(state.verified, true);
   browser.document.querySelector('#adminAttendanceEventFilter').value = '';
   await controller.reload(); assert.equal(state.chooseEvent, true); assert.equal(reads, 1);
+  controller.dispose();
+});
+
+test('seven-student pagination includes projected rows and clamps the final page', async () => {
+  const browser = fakeBrowser();
+  const { AttendanceHistoryController } = await isolatedModule('assets/js/controllers/AttendanceHistoryController.js', {}, browser);
+  const projected = Array.from({ length: 15 }, (_, index) => ({ id: String(index), displayOnly: true }));
+  let shown;
+  const controller = new AttendanceHistoryController({ repository: {}, getStudents: () => [], getEvents: () => [],
+    summary: { needsReview: () => false }, notify() {}, pageSize: 7,
+    prepareRecords: () => projected, render: records => { shown = records; } });
+  controller.initialize(); controller.more = false; controller.draw();
+  assert.equal(shown.length, 7); assert.equal(shown[0].id, '0');
+  await controller.onNext(); assert.equal(shown.length, 7); assert.equal(shown[0].id, '7');
+  await controller.onNext(); assert.equal(shown.length, 1); assert.equal(shown[0].id, '14');
+  assert.equal(controller.next.disabled, true);
+  controller.onPrevious(); assert.equal(shown[0].id, '7');
   controller.dispose();
 });
 
