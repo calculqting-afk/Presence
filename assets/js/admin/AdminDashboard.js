@@ -471,6 +471,9 @@ export class AdminDashboard {
   }
   wireDirectoryFilters() {
     const dashboard = this;
+    dashboard.document.querySelectorAll("[data-show-student-attendance]").forEach(button => dashboard.scope.listen(button, "click", () => {
+      dashboard.openStudentAttendanceDirectory(button.dataset.showStudentAttendance);
+    }));
     dashboard.scope.listen(dashboard.studentSearch, "input", () => {
       dashboard.window.clearTimeout(dashboard.studentSearchTimer);
       dashboard.studentSearchTimer = dashboard.window.setTimeout(dashboard.resetStudentDirectoryPage, 200);
@@ -483,6 +486,20 @@ export class AdminDashboard {
     dashboard.scope.listen(dashboard.document.querySelector("#refreshStudentStatus"), "click", dashboard.handleRefreshStudentStatusClick);
     dashboard.scope.listen(dashboard.studentDirectoryMediaQuery, "change", dashboard.scheduleStudentsRender);
     dashboard.scope.listen(dashboard.window, "presence:viewchange", dashboard.handleWireDirectoryFiltersPresenceViewchange);
+  }
+  openStudentAttendanceDirectory(attendanceFilter) {
+    const dashboard = this;
+    if (!["present", "absent"].includes(attendanceFilter)) return;
+    dashboard.studentSearch.value = "";
+    dashboard.studentCourseFilter.value = "all";
+    dashboard.studentSectionFilter.value = "all";
+    dashboard.studentFaceFilter.value = "all";
+    dashboard.studentAccountFilter.value = "all";
+    dashboard.studentAttendanceFilter.value = attendanceFilter;
+    dashboard.studentFineFilter.value = "all";
+    dashboard.studentSort.value = "name";
+    openView("modify-students");
+    dashboard.resetStudentDirectoryPage();
   }
   startSubscriptions() {
     const dashboard = this;
