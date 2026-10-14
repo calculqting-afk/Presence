@@ -3,6 +3,7 @@ const GEOFENCE_GPS_ALLOWANCE_CAP_METERS = 20;
 import { AttendanceSubmissionService } from './AttendanceSubmissionService.js?v=20261011-optimized';
 import { GeofenceBoundary } from './GeofenceBoundary.js';
 import { ButtonLoadingController } from './ButtonLoadingController.js';
+import { deviceLocation } from './DeviceLocationService.js';
 
 export class StudentAttendanceController {
   constructor({ getState, setFaceRegistration, showError, bridge, checkIn }) {
@@ -36,18 +37,7 @@ export class StudentAttendanceController {
   }
 
   getCurrentCheckInLocation() {
-    if (!navigator.geolocation) {
-      const locationError = new Error("This browser does not support location services.");
-      locationError.geofenceIssue = "location";
-      return Promise.reject(locationError);
-    }
-    return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, (error) => {
-      const messages = { 1: "Location permission is required for this attendance area.", 2: "Your location could not be determined. Try moving outdoors and try again.", 3: "Location request timed out. Please try again." };
-      const locationError = new Error(messages[error.code] || "Unable to get your location.");
-      locationError.geofenceIssue = "location";
-      locationError.locationErrorCode = error.code;
-      reject(locationError);
-    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }));
+    return deviceLocation.read();
   }
 
 
@@ -107,7 +97,7 @@ export class StudentAttendanceController {
   }
 
   showLocationError(error) {
-    if (error.locationErrorCode === 1) this.showError('Allow location for Presence', 'This browser has not allowed this site to use your location. Set Location to Allow in the site controls, then reload and try again.');
+    if (error.locationErrorCode === 1) this.showError('Allow location for Presence', error.message);
     else this.showError('Location unavailable', error.message);
   }
 

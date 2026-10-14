@@ -1,0 +1,7 @@
+{
+  "appId": "io.github.calculatingafk.presence",
+  "appName": "Presence",
+  "webDir": "mobile-web",
+  "server": { "androidScheme": "https" },
+  "android": { "allowMixedContent": false }
+}

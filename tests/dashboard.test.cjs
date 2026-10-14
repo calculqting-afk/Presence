@@ -1299,6 +1299,35 @@ test('attendance verification invokes browser timers with their global receiver'
   service.start(); assert.equal(scheduled, 1); service.stop();
 });
 
+test('native location uses precise permission and shares an in-flight request', async () => {
+  const { DeviceLocationService } = await isolatedModule('assets/js/controllers/DeviceLocationService.js');
+  let requests = 0, permissions = 0, resolvePosition;
+  const plugin = { checkPermissions: async () => ({ location: 'prompt' }),
+    requestPermissions: async () => { permissions++; return { location: 'granted' }; },
+    getCurrentPosition: () => { requests++; return new Promise(resolve => { resolvePosition = resolve; }); } };
+  const service = new DeviceLocationService({ native: () => ({ isNative: true, geolocation: plugin }), document: {} });
+  const first = service.read(), second = service.read(); assert.equal(first, second);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(permissions, 1); assert.equal(requests, 1);
+  const position = { coords: { latitude: 10, longitude: 124, accuracy: 5 } };
+  resolvePosition(position); assert.equal(await first, position);
+  assert.equal(service.pending, null);
+});
+
+test('native location denial does not request GPS and background results are rejected', async () => {
+  const { DeviceLocationService } = await isolatedModule('assets/js/controllers/DeviceLocationService.js');
+  let requests = 0, onVisibility, resolvePosition;
+  const document = { visibilityState: 'visible', addEventListener: (_, listener) => { onVisibility = listener; }, removeEventListener() {} };
+  const plugin = { checkPermissions: async () => ({ location: 'denied' }), requestPermissions: async () => ({ location: 'denied' }),
+    getCurrentPosition: () => { requests++; return new Promise(resolve => { resolvePosition = resolve; }); } };
+  const service = new DeviceLocationService({ native: () => ({ isNative: true, geolocation: plugin }), document });
+  await assert.rejects(service.read(), error => error.locationErrorCode === 1); assert.equal(requests, 0);
+  plugin.checkPermissions = async () => ({ location: 'granted' });
+  const pending = service.read(); await new Promise(resolve => setTimeout(resolve, 0));
+  document.visibilityState = 'hidden'; onVisibility(); document.visibilityState = 'visible';
+  resolvePosition({ coords: {} }); await assert.rejects(pending, /paused/);
+});
+
 test('student attendance pages retain filters and clamp after records change', async () => {
   const browser = fakeBrowser();
   const { StudentAttendanceListController } = await isolatedModule('assets/js/controllers/StudentAttendanceListController.js', {}, browser);

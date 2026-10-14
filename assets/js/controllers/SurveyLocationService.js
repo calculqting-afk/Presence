@@ -1,4 +1,5 @@
 import { GeofenceBoundary } from './GeofenceBoundary.js';
+import { deviceLocation } from './DeviceLocationService.js';
 
 // Client evidence only: deliberately does not claim trusted/server GPS validation.
 export class SurveyLocationService {
@@ -28,6 +29,9 @@ export class SurveyLocationService {
     }
   }
   readPosition(timeout) {
+    if (globalThis.PresenceNative?.isNative || this.geolocation === globalThis.navigator?.geolocation) return deviceLocation.read(timeout).catch(error => {
+      throw Object.assign(this.issue('unavailable', error.message), { retryable: error.locationErrorCode !== 1 });
+    });
     return new Promise((resolve, reject) => this.geolocation.getCurrentPosition(resolve, error => reject(Object.assign(
       this.issue('unavailable', ({ 1: 'Location permission was denied. Allow access in browser/device settings, or request administrative review.', 2: 'Your location could not be determined. Retry with device location enabled, or request review.', 3: 'Location timed out. Retry, or request administrative review.' })[error.code] || 'Location unavailable.'),
       { retryable: error.code === 2 || error.code === 3 }

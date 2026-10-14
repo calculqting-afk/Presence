@@ -5,9 +5,21 @@
   "scripts": {
     "serve": "node tools/serve.cjs",
     "test": "node --experimental-vm-modules --test tests/*.test.cjs",
-    "check": "node tools/check-modules.cjs"
+    "check": "node tools/check-modules.cjs",
+    "mobile:build": "node tools/build-mobile.cjs",
+    "android:sync": "npm run mobile:build && cap sync android",
+    "android:open": "cap open android",
+    "android:apk": "npm run android:sync && node tools/build-android.cjs"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
+    "esbuild": "^0.28.2",
     "qrcode-generator": "^2.0.4"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/geolocation": "^8.2.3"
   }
 }
