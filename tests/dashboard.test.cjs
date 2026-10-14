@@ -245,6 +245,33 @@ test('attendance projection marks only no-record roster members absent after che
   assert.equal(records.find(record => record.studentUid === 'checkoutOnly').status, 'checkout-only');
 });
 
+test('attendance projection never adds a phantom absence for a duplicate event schedule with real attendance', async () => {
+  const { AttendanceRecordProjectionService } = await isolatedModule('assets/js/controllers/AttendanceRecordProjectionService.js');
+  const original = { id: 'original', name: 'Assembly', date: '2026-10-13', timeIn: '07:10', timeOut: '11:10', audience: 'Section 2A', attendanceRoster: { student: '2A' } };
+  const duplicate = { ...original, id: 'duplicate' };
+  const service = new AttendanceRecordProjectionService({ getEvents: () => [original, duplicate], checkoutCloseDate: () => new Date(1000), now: () => new Date(2000) });
+  const records = service.project([{ id: 'student_original', studentUid: 'student', eventId: 'original', eventName: 'Assembly', eventDate: '2026-10-13', timeIn: '07:10', timeOut: '11:10', audience: 'Section 2A', checkedInAt: 'time', checkedOutAt: 'time', status: 'completed' }]);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].status, 'completed');
+});
+
+test('attendance projection does not append absences to a late-only result', async () => {
+  const { AttendanceRecordProjectionService } = await isolatedModule('assets/js/controllers/AttendanceRecordProjectionService.js');
+  const event = { id: 'event', date: '2026-10-13', attendanceRoster: { absent: '2A', late: '2A' } };
+  const service = new AttendanceRecordProjectionService({ getEvents: () => [event], checkoutCloseDate: () => new Date(1000), now: () => new Date(2000) });
+  const records = service.project([{ id: 'late_event', studentUid: 'late', eventId: 'event', arrivalStatus: 'late' }], { status: 'late' });
+  assert.deepEqual(records.map(record => record.studentUid), ['late']);
+});
+
+test('absence filter keeps completed students out when it projects display-only absences', async () => {
+  const { AttendanceRecordProjectionService } = await isolatedModule('assets/js/controllers/AttendanceRecordProjectionService.js');
+  const event = { id: 'event', date: '2026-10-13', attendanceRoster: { completed: '2A', absent: '2A' } };
+  const service = new AttendanceRecordProjectionService({ getEvents: () => [event], checkoutCloseDate: () => new Date(1000), now: () => new Date(2000) });
+  const completed = { id: 'completed_event', studentUid: 'completed', eventId: 'event', checkedInAt: 'time', checkedOutAt: 'time', status: 'completed' };
+  const records = service.project([], { status: 'absent' }, [completed]);
+  assert.equal(records.map(record => record.studentUid).join(','), 'absent');
+});
+
 test('late check-in cancellation prevents saving and confirmation rechecks the window', async () => {
   const { AttendanceCheckInController } = await isolatedModule('assets/js/controllers/AttendanceController.js', { currentUser: {}, currentUserRole: 'student', formatEventTime: value => value });
   const cancelled = new AttendanceCheckInController({ policy: { evaluateCheckIn: () => ({ available: true, arrivalStatus: 'late' }) }, lateModal: { open: async () => false } });
@@ -1124,6 +1151,27 @@ test('history filters use historical sections and pagination discards stale resp
   assert.equal(controller.records.length, 1); assert.equal(controller.filtered()[0].id, 'new');
   browser.document.querySelector('#attendanceFromDate').value = '2026-10-02'; browser.document.querySelector('#attendanceToDate').value = '2026-10-01';
   await controller.reload(); assert.equal(errors.at(-1)[0], 'Invalid date range'); assert.equal(calls, 2);
+  controller.dispose();
+});
+
+test('attendance history filters late arrivals and redraws immediately while searching', async () => {
+  const browser = fakeBrowser();
+  const { AttendanceHistoryController } = await isolatedModule('assets/js/controllers/AttendanceHistoryController.js', {}, browser);
+  const rendered = [];
+  const controller = new AttendanceHistoryController({ repository: {}, getStudents: () => [{ uid: 'late', firstName: 'Late' }, { uid: 'present', firstName: 'Present' }],
+    getEvents: () => [], summary: { needsReview: () => false }, render: records => rendered.push(records), notify() {} });
+  controller.initialize();
+  controller.records = [{ id: 'late', studentUid: 'late', arrivalStatus: 'late' }, { id: 'present', studentUid: 'present', arrivalStatus: 'present' }];
+  const status = browser.document.querySelector('#attendanceStatus');
+  status.value = 'late'; await status.emit('change');
+  assert.deepEqual(rendered.at(-1).map(record => record.id), ['late']);
+  const search = browser.document.querySelector('#attendanceStudentSearch');
+  search.value = 'present'; await search.emit('input');
+  assert.deepEqual(rendered.at(-1), []);
+  search.value = ''; await search.emit('input');
+  controller.records.push({ id: 'absent', studentUid: 'absent', status: 'absent', arrivalStatus: 'absent' });
+  status.value = 'absent'; await status.emit('change');
+  assert.deepEqual(rendered.at(-1).map(record => record.id), ['absent']);
   controller.dispose();
 });
 

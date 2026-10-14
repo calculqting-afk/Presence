@@ -226,7 +226,7 @@ export class AdminDashboard {
       notify: showDashboardToast,
       onStatus: dashboard.updateAttendanceSyncStatus,
       render: (records, state) => {
-        const projected = dashboard.attendanceProjection.project(records, dashboard.historyController?.applied || {});
+        const projected = dashboard.attendanceProjection.project(records, dashboard.historyController?.applied || {}, dashboard.historyController?.records || records);
         dashboard.document.querySelector('#adminAttendanceLine').innerHTML = projected.length ? dashboard.attendanceLineMarkup(projected) : AttendanceToolbarController.emptyState(state);
       }
     });

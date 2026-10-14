@@ -44,6 +44,22 @@ export class AttendanceHistoryController {
       void this.reload();
     };
     this.onPrevious = () => { this.page = Math.max(0, this.page - 1); this.draw(); };
+    // Searching and selecting from already-loaded history should feel instant.
+    // Date windows are server-backed, so only they restart the subscription.
+    this.onLocalFilter = () => {
+      this.applied = this.filters();
+      this.page = 0;
+      this.draw();
+    };
+    this.onDateFilter = () => { void this.reload(); };
+    this.localFilterControls = [
+      { control: document.querySelector('#attendanceStudentSearch'), event: 'input' },
+      { control: document.querySelector('#attendanceSection'), event: 'change' },
+      { control: document.querySelector('#adminAttendanceEventFilter'), event: 'change' },
+      { control: document.querySelector('#attendanceStatus'), event: 'change' }
+    ];
+    this.dateFilterControls = ['#attendanceFromDate', '#attendanceToDate']
+      .map(selector => document.querySelector(selector));
     this.onNext = async () => {
       if (this.busy) return;
       if ((this.page + 1) * this.pageSize < this.filtered().length) this.page++;
@@ -58,6 +74,8 @@ export class AttendanceHistoryController {
     this.form.addEventListener('submit', this.onFilter);
     this.previous.addEventListener('click', this.onPrevious);
     this.next.addEventListener('click', this.onNext);
+    this.localFilterControls.forEach(({ control, event }) => control.addEventListener(event, this.onLocalFilter));
+    this.dateFilterControls.forEach(control => control.addEventListener('change', this.onDateFilter));
   }
   filters() {
     const value = id => document.querySelector(id).value;
@@ -77,7 +95,9 @@ export class AttendanceHistoryController {
       const review = this.summary.needsReview(record, event);
       return (!filters.search || text.includes(filters.search)) && (!filters.section || section === filters.section)
         && (!filters.event || filters.event === 'all' || filters.event === record.eventId)
-        && (!filters.status || (filters.status === 'review' ? review
+        && (!filters.status || (filters.status === 'absent' ? record.status === 'absent'
+          : filters.status === 'late' ? record.arrivalStatus === 'late'
+          : filters.status === 'review' ? review
           : filters.status === 'completed' ? Boolean(record.checkedOutAt) : !record.checkedOutAt && !review));
     });
   }
@@ -144,6 +164,8 @@ export class AttendanceHistoryController {
     this.toolbar.dispose();
     this.form.removeEventListener('submit', this.onFilter);
     this.previous.removeEventListener('click', this.onPrevious); this.next.removeEventListener('click', this.onNext);
+    this.localFilterControls?.forEach(({ control, event }) => control.removeEventListener(event, this.onLocalFilter));
+    this.dateFilterControls?.forEach(control => control.removeEventListener('change', this.onDateFilter));
     this.initialized = false;
   }
 }
