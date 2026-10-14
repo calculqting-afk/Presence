@@ -121,6 +121,15 @@ test('event form pairs each attendance opening with its cutoff', () => {
   assert.deepEqual(times, ['eventTimeIn', 'eventCheckInCutoff', 'eventTimeOut', 'eventCheckOutCutoff']);
 });
 
+test('student dashboard exposes a current-events card that opens the events view', () => {
+  const html = fs.readFileSync(path.join(root, 'pages/student-dashboard.html'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'assets/js/student/StudentDashboard.js'), 'utf8');
+  assert.match(html, /id="currentEventsCount"/);
+  assert.match(html, /data-go-view="events" aria-label="View current events"/);
+  assert.match(source, /currentEventsForStudent\(\)/);
+  assert.match(source, /#currentEventsMeta/);
+});
+
 test('event update distinguishes a saved event from a linked record synchronization failure', () => {
   const source = fs.readFileSync(path.join(root, 'assets/js/admin/AdminDashboard.js'), 'utf8');
   assert.match(source, /async syncEventRecordsAfterSave\(eventId, event\)/);

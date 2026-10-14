@@ -209,7 +209,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 #refreshStudentStatus.is-refreshing { cursor: wait; opacity: .72; }
 
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
-.stats-grid.student-stats { grid-template-columns: repeat(3, 1fr); }
+.stats-grid.student-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .stat-card, .panel {
   background: white;
   border: 1px solid #e7edf5;
@@ -755,6 +755,7 @@ body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
 
 @media (max-width: 1100px) {
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .stats-grid.student-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .event-grid { grid-template-columns: repeat(2, 1fr); }
   .attendance-line-item { grid-template-columns: minmax(160px, 1fr) minmax(220px, 1.4fr) auto; }
   .attendance-line-event { display: none; }

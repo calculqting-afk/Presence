@@ -410,15 +410,22 @@ export class StudentDashboard {
     dashboard.requiredPasswordChangeModal.hidden = true;
     dashboard.requiredPasswordChangeForm.reset();
   }
+  currentEventsForStudent() {
+    const dashboard = this;
+    const attendedEventIds = new Set(dashboard.attendance.map(record => record.eventId));
+    const student = {
+      ...dashboard.studentProfile,
+      uid: currentUser.uid
+    };
+    return dashboard.events.filter(event => !isEventFinished(event)
+      && (attendedEventIds.has(event.id) || dashboard.summaryService.eligibility(student, event) !== 'excluded'));
+  }
   renderEvents() {
     const dashboard = this;
     if (!['dashboard', 'events', 'history'].includes(dashboard.view)) return;
     if (dashboard.view === 'history') { dashboard.renderAttendanceSummary(); return; }
     const attendanceByEventId = new Map(dashboard.attendance.map(record => [record.eventId, record]));
-    const activeEvents = dashboard.events.filter(event => !isEventFinished(event) && (attendanceByEventId.has(event.id) || dashboard.summaryService.eligibility({
-      ...dashboard.studentProfile,
-      uid: currentUser.uid
-    }, event) !== 'excluded'));
+    const activeEvents = dashboard.currentEventsForStudent();
     const eventGrid = dashboard.document.querySelector("#studentEventGrid");
     const timeline = dashboard.document.querySelector("#studentEventTimeline");
     if (!activeEvents.length) {
@@ -493,9 +500,12 @@ export class StudentDashboard {
       uid: currentUser.uid
     }, event) !== 'excluded'));
     dashboard.document.querySelector("#eventsAttendedCount").textContent = dashboard.attendance.length;
+    const currentEvents = dashboard.currentEventsForStudent();
+    dashboard.document.querySelector("#currentEventsCount").textContent = currentEvents.length;
     dashboard.document.querySelector("#absenceCount").textContent = absences.length;
     dashboard.document.querySelector("#daysPresentCount").textContent = presentDays;
     dashboard.document.querySelector("#eventsAttendedMeta").textContent = dashboard.attendance.length ? `${dashboard.attendance.length} attendance record${dashboard.attendance.length === 1 ? "" : "s"}` : "No attendance recorded yet";
+    dashboard.document.querySelector("#currentEventsMeta").textContent = currentEvents.length ? `${currentEvents.length} active or upcoming event${currentEvents.length === 1 ? "" : "s"}` : "No active or upcoming events";
     dashboard.document.querySelector("#absenceMeta").textContent = `${absences.length} confirmed absences · ${result.unverified.length} historical events unverified · ${result.review.length} checkouts need review`;
     dashboard.document.querySelector("#absenceSummaryCard").setAttribute("aria-label", absences.length ? `View details for ${absences.length} absence${absences.length === 1 ? "" : "s"}` : "View absence details");
     dashboard.document.querySelector("#daysPresentMeta").textContent = presentDays ? `${presentDays} unique event day${presentDays === 1 ? "" : "s"}` : "Based on attended events";
