@@ -1372,6 +1372,20 @@ export class AdminDashboard {
     }))]);
     return attendanceSnapshot.size;
   }
+  async syncEventRecordsAfterSave(eventId, event) {
+    const dashboard = this;
+    try {
+      await dashboard.syncEventRecords(eventId, event);
+      return { synced: true };
+    } catch (error) {
+      console.error("Event saved but linked attendance records could not be synchronized", {
+        eventId,
+        code: firebaseErrorCode(error),
+        message: error?.message
+      });
+      return { synced: false, error };
+    }
+  }
   closePastEventRemovalModal() {
     const dashboard = this;
     dashboard.pastEventRemovalModal.hidden = true;
@@ -1896,6 +1910,7 @@ export class AdminDashboard {
     if (duplicate) {
       return showDashboardToast("Duplicate event", `An event named ${record.name} already uses this date, location, audience, and attendance schedule. Change one of those details before saving.`);
     }
+    let linkedRecordsSynced = true;
     try {
       if (id) {
         const batch = writeBatch(db);
@@ -1904,7 +1919,7 @@ export class AdminDashboard {
         });
         batch.set(doc(db, "eventGeofences", id), geofence);
         await batch.commit();
-        await dashboard.syncEventRecords(id, record);
+        linkedRecordsSynced = (await dashboard.syncEventRecordsAfterSave(id, record)).synced;
         if (!isEventFinished(record)) {
           const recipients = dashboard.students.filter(student => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
           Promise.allSettled(recipients.map(student => createNotification({
@@ -1963,7 +1978,12 @@ export class AdminDashboard {
       const returnView = dashboard.eventForm.dataset.returnView || "modify-events";
       dashboard.resetEventForm();
       openView(returnView);
-      showDashboardToast(id ? "Event updated" : "Event created", id ? "The event and linked attendance records were synced." : "The event and attendance window were saved and synced.");
+      const message = id
+        ? linkedRecordsSynced
+          ? "The event and linked attendance records were synced."
+          : "The event was saved, but existing attendance records could not be updated. Their original event details were kept."
+        : "The event and attendance window were saved and synced.";
+      showDashboardToast(id ? "Event updated" : "Event created", message);
     } catch (error) {
       const message = firebaseErrorCode(error) === "permission-denied" ? "Your account is not allowed to create events. Confirm you are signed in as a Head Admin or Attendance Admin and that the latest Firestore Rules are deployed." : error.message || "The event could not be saved. Please try again.";
       showDashboardToast("Unable to save event", message);

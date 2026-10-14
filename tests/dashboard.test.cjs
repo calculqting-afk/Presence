@@ -120,6 +120,13 @@ test('event form pairs each attendance opening with its cutoff', () => {
   const times = [...form.matchAll(/<label for="(eventTimeIn|eventCheckInCutoff|eventTimeOut|eventCheckOutCutoff)"/g)].map(match => match[1]);
   assert.deepEqual(times, ['eventTimeIn', 'eventCheckInCutoff', 'eventTimeOut', 'eventCheckOutCutoff']);
 });
+
+test('event update distinguishes a saved event from a linked record synchronization failure', () => {
+  const source = fs.readFileSync(path.join(root, 'assets/js/admin/AdminDashboard.js'), 'utf8');
+  assert.match(source, /async syncEventRecordsAfterSave\(eventId, event\)/);
+  assert.match(source, /linkedRecordsSynced = \(await dashboard\.syncEventRecordsAfterSave\(id, record\)\)\.synced/);
+  assert.match(source, /The event was saved, but existing attendance records could not be updated/);
+});
 async function isolatedModule(relative, shared = {}, globals = {}) {
   const context = vm.createContext({ console, setTimeout, clearTimeout, ...globals });
   const modules = new Map();
