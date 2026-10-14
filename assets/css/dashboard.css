@@ -898,11 +898,20 @@ body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
 .attendance-help-content strong { color: var(--ink); }
 .attendance-help-content p { margin: 10px 0 0; }
 .attendance-pagination[hidden], .attendance-page-actions[hidden] { display: none; }
+/* Admin filters have an explicit layout so adding a control cannot push the
+   search field below the date filters or leave an empty grid cell. */
+#attendanceFilters { grid-template-columns: minmax(0, 1fr) minmax(170px, 230px) auto; }
+#attendanceFilters .attendance-event-field { grid-column: 1 / -1; grid-row: 1; }
+#attendanceFilters .attendance-search-field { grid-column: 1; grid-row: 2; }
+#attendanceFilters .attendance-sort-field { grid-column: 2; grid-row: 2; }
+#attendanceFilters .attendance-filter-actions { grid-column: 3; grid-row: 2; justify-content: flex-end; }
+#attendanceFilters .attendance-filter-options { grid-column: 1 / -1; grid-row: 3; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 @media (max-width: 1300px) {
   .attendance-filters { grid-template-columns: minmax(0, 1fr) auto; }
   .attendance-search-field { grid-column: 1; grid-row: 1; }
   .attendance-filter-actions { grid-column: 2; grid-row: 1; }
   .attendance-filter-options { grid-column: 1 / -1; grid-row: 2; }
+  #attendanceFilters .attendance-filter-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 700px) {
   .attendance-section-head { align-items: flex-start; flex-wrap: wrap; gap: 12px; }
@@ -916,6 +925,11 @@ body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
   .attendance-workspace--student .attendance-filter-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .attendance-filters.filters-expanded .attendance-filter-options { display: grid; }
   .attendance-filter-actions { grid-column: 1 / -1; grid-row: 3; justify-content: flex-end; }
+  #attendanceFilters { grid-template-columns: minmax(0, 1fr) auto; }
+  #attendanceFilters .attendance-filter-toggle { grid-row: 2; }
+  #attendanceFilters .attendance-sort-field { grid-column: 1 / -1; grid-row: 3; }
+  #attendanceFilters .attendance-filter-options { grid-row: 4; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #attendanceFilters .attendance-filter-actions { grid-column: 1 / -1; grid-row: 5; }
   .attendance-pagination { flex-wrap: wrap; gap: 12px; }
   .attendance-page-actions { margin-left: auto; }
   .attendance-empty { min-height: 190px; }

@@ -80,12 +80,13 @@
           </div></div>
           <article class="panel attendance-workspace">
             <form id="attendanceFilters" class="attendance-filters">
+              <label class="attendance-event-field">Event<select id="adminAttendanceEventFilter"><option value="">Choose an event…</option></select></label>
               <label class="attendance-search-field">Student<input type="search" id="attendanceStudentSearch" placeholder="Search name, ID or email"></label>
+              <label class="attendance-sort-field">Sort<select id="attendanceSort"><option value="name-asc">First name A–Z</option><option value="name-desc">First name Z–A</option><option value="last-name-asc">Last name A–Z</option><option value="last-name-desc">Last name Z–A</option></select></label>
               <button class="outline-button attendance-filter-toggle" id="attendanceToggleFilters" type="button" aria-expanded="false" aria-controls="attendanceAdvancedFilters">Filters</button>
               <div class="attendance-filter-options" id="attendanceAdvancedFilters">
               <label>From<input type="date" id="attendanceFromDate"></label><label>To<input type="date" id="attendanceToDate"></label>
               <label>Section<select id="attendanceSection"><option value="">All sections</option><option>1A</option><option>1B</option><option>2A</option><option>2B</option><option>3A</option><option>3B</option><option>4A</option><option>4B</option></select></label>
-              <label>Event<select id="adminAttendanceEventFilter"><option value="all">All events</option></select></label>
               <label>Status<select id="attendanceStatus"><option value="">All statuses</option><option value="checked-in">Checked in</option><option value="late">Late check-in</option><option value="completed">Completed</option><option value="review">Needs review — missed checkout</option><option value="absent">Did not attend</option></select></label>
               </div>
               <div class="attendance-filter-actions"><button class="link-button" id="attendanceClearFilters" type="button">Clear</button><button class="primary-button" type="submit">Apply</button></div>

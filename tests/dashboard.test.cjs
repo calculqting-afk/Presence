@@ -272,6 +272,14 @@ test('absence filter keeps completed students out when it projects display-only 
   assert.equal(records.map(record => record.studentUid).join(','), 'absent');
 });
 
+test('absence projection respects the selected roster section', async () => {
+  const { AttendanceRecordProjectionService } = await isolatedModule('assets/js/controllers/AttendanceRecordProjectionService.js');
+  const event = { id: 'event', date: '2026-10-13', attendanceRoster: { sectionOne: '1A', sectionTwo: '2A' } };
+  const service = new AttendanceRecordProjectionService({ getEvents: () => [event], checkoutCloseDate: () => new Date(1000), now: () => new Date(2000) });
+  const records = service.project([], { status: 'absent', section: '2A' });
+  assert.equal(records.map(record => record.studentUid).join(','), 'sectionTwo');
+});
+
 test('late check-in cancellation prevents saving and confirmation rechecks the window', async () => {
   const { AttendanceCheckInController } = await isolatedModule('assets/js/controllers/AttendanceController.js', { currentUser: {}, currentUserRole: 'student', formatEventTime: value => value });
   const cancelled = new AttendanceCheckInController({ policy: { evaluateCheckIn: () => ({ available: true, arrivalStatus: 'late' }) }, lateModal: { open: async () => false } });
@@ -1158,7 +1166,7 @@ test('attendance history filters late arrivals and redraws immediately while sea
   const browser = fakeBrowser();
   const { AttendanceHistoryController } = await isolatedModule('assets/js/controllers/AttendanceHistoryController.js', {}, browser);
   const rendered = [];
-  const controller = new AttendanceHistoryController({ repository: {}, getStudents: () => [{ uid: 'late', firstName: 'Late' }, { uid: 'present', firstName: 'Present' }],
+  const controller = new AttendanceHistoryController({ repository: {}, getStudents: () => [{ uid: 'late', firstName: 'Late' }, { uid: 'present', firstName: 'Present' }, { uid: 'absent', firstName: 'Absent' }],
     getEvents: () => [], summary: { needsReview: () => false }, render: records => rendered.push(records), notify() {} });
   controller.initialize();
   controller.records = [{ id: 'late', studentUid: 'late', arrivalStatus: 'late' }, { id: 'present', studentUid: 'present', arrivalStatus: 'present' }];
@@ -1172,6 +1180,27 @@ test('attendance history filters late arrivals and redraws immediately while sea
   controller.records.push({ id: 'absent', studentUid: 'absent', status: 'absent', arrivalStatus: 'absent' });
   status.value = 'absent'; await status.emit('change');
   assert.deepEqual(rendered.at(-1).map(record => record.id), ['absent']);
+  status.value = ''; await status.emit('change');
+  const sort = browser.document.querySelector('#attendanceSort');
+  sort.value = 'name-desc'; await sort.emit('change');
+  assert.equal(controller.sortForDisplay(rendered.at(-1)).map(record => record.id).join(','), 'present,late,absent');
+  controller.dispose();
+});
+
+test('event-required history waits for a selection before fetching records', async () => {
+  const browser = fakeBrowser();
+  const { AttendanceHistoryController } = await isolatedModule('assets/js/controllers/AttendanceHistoryController.js', {}, browser);
+  let reads = 0, state;
+  const controller = new AttendanceHistoryController({ requireEvent: true,
+    repository: { page: async () => { reads++; return { records: [], more: false }; } },
+    getStudents: () => [], getEvents: () => [], summary: { needsReview: () => false },
+    render: (_, next) => { state = next; }, notify() {} });
+  controller.initialize(); await controller.reload();
+  assert.equal(reads, 0); assert.equal(state.chooseEvent, true);
+  browser.document.querySelector('#adminAttendanceEventFilter').value = 'event';
+  await controller.reload(); assert.equal(reads, 1); assert.equal(state.verified, true);
+  browser.document.querySelector('#adminAttendanceEventFilter').value = '';
+  await controller.reload(); assert.equal(state.chooseEvent, true); assert.equal(reads, 1);
   controller.dispose();
 });
 

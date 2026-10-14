@@ -6,7 +6,7 @@ export class AttendanceRecordProjectionService {
     Object.assign(this, { getEvents, checkoutCloseDate, now });
   }
 
-  project(records, { from = '', to = '', eventId = 'all', status = '' } = {}, attendanceContext = records) {
+  project(records, { from = '', to = '', eventId = 'all', status = '', section = '' } = {}, attendanceContext = records) {
     const actual = records || [];
     // A generated absence is only meaningful for the unfiltered view or the
     // dedicated absence filter. Other status filters must show actual records
@@ -26,7 +26,8 @@ export class AttendanceRecordProjectionService {
       if ((eventId && eventId !== 'all' && event.id !== eventId)
         || (from && event.date < from) || (to && event.date > to)
         || currentTime <= this.checkoutCloseDate(event)) return [];
-      return Object.entries(event.attendanceRoster || {}).flatMap(([studentUid]) => {
+      return Object.entries(event.attendanceRoster || {}).flatMap(([studentUid, rosterSection]) => {
+        if (section && rosterSection !== section) return [];
         if (keys.has(this.recordKey(studentUid, event.id))
           || attendanceBySchedule.has(this.scheduleKey(studentUid, event))) return [];
         return [{

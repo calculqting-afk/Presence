@@ -220,14 +220,23 @@ export class AdminDashboard {
     const dashboard = this;
     dashboard.historyController = new AttendanceHistoryController({
       repository: new AttendanceRepository(db),
+      requireEvent: true,
       getStudents: () => dashboard.students,
       getEvents: () => dashboard.events,
       summary: dashboard.summaryService,
       notify: showDashboardToast,
       onStatus: dashboard.updateAttendanceSyncStatus,
       render: (records, state) => {
-        const projected = dashboard.attendanceProjection.project(records, dashboard.historyController?.applied || {}, dashboard.historyController?.records || records);
-        dashboard.document.querySelector('#adminAttendanceLine').innerHTML = projected.length ? dashboard.attendanceLineMarkup(projected) : AttendanceToolbarController.emptyState(state);
+        if (state.chooseEvent) {
+          dashboard.document.querySelector('#adminAttendanceLine').innerHTML = '<div class="attendance-empty" role="status"><h3>Choose an event to view attendance records.</h3><p>Select an event above to get started.</p></div>';
+          return;
+        }
+        const filters = dashboard.historyController?.applied || {};
+        const projected = state.verified && !state.busy && !state.partial
+          ? dashboard.attendanceProjection.project(records, { ...filters, eventId: filters.event }, dashboard.historyController?.records || records)
+          : records;
+        const sorted = dashboard.historyController.sortForDisplay(projected);
+        dashboard.document.querySelector('#adminAttendanceLine').innerHTML = sorted.length ? dashboard.attendanceLineMarkup(sorted) : AttendanceToolbarController.emptyState(state);
       }
     });
     dashboard.historyController.initialize();
@@ -678,6 +687,7 @@ export class AdminDashboard {
     if (activeView === 'assign-fine') dashboard.renderFineOptions();
     dashboard.scheduleStudentsRender();
     const labels = {
+      idle: ["Choose an event", "gray"],
       connecting: ["Connecting…", "gray"],
       syncing: ["Syncing…", "blue"],
       live: [syncedAt ? `Live · synced ${syncedAt.toLocaleTimeString([], {
@@ -885,11 +895,11 @@ export class AdminDashboard {
   renderAttendanceLine() {
     const dashboard = this;
     const filter = dashboard.document.querySelector("#adminAttendanceEventFilter");
-    const selectedEvent = filter.value || "all";
+    const selectedEvent = filter.value || "";
     const eventOptions = dashboard.events.map(event => `<option value="${escapeHtml(event.id)}">${escapeHtml(event.name)}${event.date ? ` · ${escapeHtml(event.date)}` : ""}</option>`).join("");
-    filter.innerHTML = `<option value="all">All events</option>${eventOptions}`;
-    filter.value = dashboard.events.some(event => event.id === selectedEvent) ? selectedEvent : "all";
-    const records = dashboard.attendance.filter(record => filter.value === "all" || record.eventId === filter.value).sort((first, second) => (second.checkedInAt?.seconds || second.attendedAt?.seconds || 0) - (first.checkedInAt?.seconds || first.attendedAt?.seconds || 0));
+    filter.innerHTML = `<option value="">Choose an event…</option>${eventOptions}`;
+    filter.value = dashboard.events.some(event => event.id === selectedEvent) ? selectedEvent : "";
+    const records = [...dashboard.attendance].sort((first, second) => (second.checkedInAt?.seconds || second.attendedAt?.seconds || 0) - (first.checkedInAt?.seconds || first.attendedAt?.seconds || 0));
     if (activeView === 'attendance-line') dashboard.historyController.draw();
     dashboard.document.querySelector("#adminDashboardAttendanceLine").innerHTML = dashboard.attendanceLineMarkup(records.slice(0, 5));
   }

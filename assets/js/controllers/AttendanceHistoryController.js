@@ -3,7 +3,7 @@ import { AttendanceToolbarController } from './AttendanceToolbarController.js';
 
 export class AttendanceRepository {
   constructor(db, fetch = getDocsFromServer) { this.db = db; this.fetch = fetch; }
-  reference({ from = '', to = '', cursor = null, size = 100 }) {
+  reference({ from = '', to = '', event = '', cursor = null, size = 100 }) {
     const constraints = [orderBy('eventDate', 'desc')];
     if (from) constraints.push(where('eventDate', '>=', from));
     if (to) constraints.push(where('eventDate', '<=', to));
@@ -26,8 +26,8 @@ export class AttendanceRepository {
 // Dates are server-filtered; other filters apply to the fetched window. Loading
 // is explicit and bounded, including when searching sparse historical matches.
 export class AttendanceHistoryController {
-  constructor({ repository, getStudents, getEvents, summary, render, notify, onStatus = () => {}, pageSize = 20 }) {
-    Object.assign(this, { repository, getStudents, getEvents, summary, render, notify, onStatus, pageSize });
+  constructor({ repository, getStudents, getEvents, summary, render, notify, onStatus = () => {}, pageSize = 20, requireEvent = false }) {
+    Object.assign(this, { repository, getStudents, getEvents, summary, render, notify, onStatus, pageSize, requireEvent });
     this.records = []; this.generation = 0; this.page = 0; this.more = true;
   }
   initialize() {
@@ -52,11 +52,20 @@ export class AttendanceHistoryController {
       this.draw();
     };
     this.onDateFilter = () => { void this.reload(); };
+    this.eventControl = document.querySelector('#adminAttendanceEventFilter');
+    this.onEventFilter = () => {
+      const selected = this.getEvents().find(event => event.id === this.eventControl.value);
+      if (selected?.date) {
+        document.querySelector('#attendanceFromDate').value = selected.date;
+        document.querySelector('#attendanceToDate').value = selected.date;
+      }
+      void this.reload();
+    };
     this.localFilterControls = [
       { control: document.querySelector('#attendanceStudentSearch'), event: 'input' },
       { control: document.querySelector('#attendanceSection'), event: 'change' },
-      { control: document.querySelector('#adminAttendanceEventFilter'), event: 'change' },
-      { control: document.querySelector('#attendanceStatus'), event: 'change' }
+      { control: document.querySelector('#attendanceStatus'), event: 'change' },
+      { control: document.querySelector('#attendanceSort'), event: 'change' }
     ];
     this.dateFilterControls = ['#attendanceFromDate', '#attendanceToDate']
       .map(selector => document.querySelector(selector));
@@ -72,6 +81,7 @@ export class AttendanceHistoryController {
       this.draw();
     };
     this.form.addEventListener('submit', this.onFilter);
+    this.eventControl.addEventListener('change', this.onEventFilter);
     this.previous.addEventListener('click', this.onPrevious);
     this.next.addEventListener('click', this.onNext);
     this.localFilterControls.forEach(({ control, event }) => control.addEventListener(event, this.onLocalFilter));
@@ -81,7 +91,7 @@ export class AttendanceHistoryController {
     const value = id => document.querySelector(id).value;
     return { from: value('#attendanceFromDate'), to: value('#attendanceToDate'),
       search: value('#attendanceStudentSearch').trim().toLowerCase(), section: value('#attendanceSection'),
-      event: value('#adminAttendanceEventFilter'), status: value('#attendanceStatus') };
+      event: value('#adminAttendanceEventFilter'), status: value('#attendanceStatus'), sort: value('#attendanceSort') };
   }
   filtered() {
     const filters = this.applied || this.filters();
@@ -101,6 +111,21 @@ export class AttendanceHistoryController {
           : filters.status === 'completed' ? Boolean(record.checkedOutAt) : !record.checkedOutAt && !review));
     });
   }
+  sortForDisplay(records) {
+    const sort = (this.applied || this.filters()).sort || 'name-asc';
+    const direction = sort.endsWith('-desc') ? -1 : 1;
+    const byLastName = sort.startsWith('last-name-');
+    const students = new Map(this.getStudents().map(student => [student.uid, student]));
+    const nameFor = record => {
+      const student = students.get(record.studentUid);
+      const names = byLastName
+        ? [student?.lastName, student?.firstName, student?.middleName]
+        : [student?.firstName, student?.middleName, student?.lastName];
+      return [...names, record.studentId]
+        .filter(Boolean).join(' ').toLocaleLowerCase();
+    };
+    return [...records].sort((first, second) => direction * nameFor(first).localeCompare(nameFor(second)));
+  }
   async reload() {
     const filters = this.filters();
     if (filters.from && filters.to && filters.from > filters.to) {
@@ -108,6 +133,10 @@ export class AttendanceHistoryController {
     }
     this.applied = filters;
     this.suspend(); this.records = []; this.cursor = null; this.page = 0; this.more = true;
+    this.verified = false;
+    if (this.requireEvent && (!filters.event || filters.event === 'all')) {
+      this.more = false; this.onStatus({ state: 'idle' }); this.draw(); return;
+    }
     const generation = this.generation;
     await this.load();
     if (generation !== this.generation || !this.repository.watch) return;
@@ -136,6 +165,7 @@ export class AttendanceHistoryController {
       if (generation !== this.generation) return;
       const ids = new Set(this.records.map(record => record.id));
       this.records.push(...result.records.filter(record => !ids.has(record.id))); this.cursor = result.cursor; this.more = result.more;
+      this.verified = true;
       this.onStatus({ state: 'live', syncedAt: new Date() });
     } catch (error) {
       if (generation === this.generation) { this.onStatus({ state: 'error', error }); this.notify('History unavailable', error.message || 'Please retry.'); }
@@ -144,10 +174,16 @@ export class AttendanceHistoryController {
     }
   }
   draw() {
+    if (this.requireEvent && (!(this.applied || this.filters()).event || (this.applied || this.filters()).event === 'all')) {
+      this.render([], { chooseEvent: true });
+      this.info.textContent = '';
+      document.querySelector('#attendancePagination').hidden = true;
+      return;
+    }
     const records = this.filtered();
     this.page = Math.min(this.page, Math.max(0, Math.ceil(records.length / this.pageSize) - 1));
     const shown = records.slice(this.page * this.pageSize, (this.page + 1) * this.pageSize);
-    this.render(shown, { busy: this.busy, partial: this.more, filtered: Object.values(this.applied || {}).some(value => value && value !== 'all') });
+    this.render(shown, { busy: this.busy, partial: this.more, verified: this.verified, filtered: Object.values(this.applied || {}).some(value => value && value !== 'all') });
     this.info.textContent = this.busy ? 'Loading…' : `${shown.length} shown · ${this.records.length} loaded${this.more ? ' · More available' : ''}`;
     this.info.setAttribute('aria-label', `Page ${this.page + 1}, ${shown.length} shown, ${records.length} matches in ${this.records.length} loaded records${this.more ? ', additional records may match' : ', end of date range'}`);
     document.querySelector('#attendanceCurrentPage').textContent = this.page + 1;
@@ -163,6 +199,7 @@ export class AttendanceHistoryController {
     if (!this.initialized) return;
     this.toolbar.dispose();
     this.form.removeEventListener('submit', this.onFilter);
+    this.eventControl.removeEventListener('change', this.onEventFilter);
     this.previous.removeEventListener('click', this.onPrevious); this.next.removeEventListener('click', this.onNext);
     this.localFilterControls?.forEach(({ control, event }) => control.removeEventListener(event, this.onLocalFilter));
     this.dateFilterControls?.forEach(control => control.removeEventListener('change', this.onDateFilter));
