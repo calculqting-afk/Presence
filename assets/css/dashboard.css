@@ -898,6 +898,25 @@ body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
 .attendance-help-content strong { color: var(--ink); }
 .attendance-help-content p { margin: 10px 0 0; }
 .attendance-pagination[hidden], .attendance-page-actions[hidden] { display: none; }
+.attendance-analytics-modal { width: min(920px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); box-sizing: border-box; padding: 28px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface, var(--white)); color: var(--ink); box-shadow: var(--shadow); }
+.attendance-analytics-modal::backdrop { background: rgb(4 13 29 / .7); backdrop-filter: blur(5px); }
+.attendance-analytics-modal header, .attendance-analytics-modal footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.attendance-analytics-modal header h2 { margin: 0; }
+.attendance-analytics-modal header p, .analytics-message { color: var(--muted); font-size: .85rem; }
+.attendance-analytics-modal [data-analytics-close] { background: transparent; border: 0; color: var(--ink); font-size: 28px; cursor: pointer; }
+.analytics-filters { display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 14px; margin: 20px 0; }
+.analytics-filters label { display: grid; gap: 8px; font-size: .8rem; color: var(--muted); }
+.analytics-filters input, .analytics-filters select { width: 100%; min-width: 0; box-sizing: border-box; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--sky); color: var(--ink); font: inherit; }
+.analytics-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.analytics-totals button { display: grid; gap: 10px; text-align: left; padding: 16px; background: var(--sky); border: 1px solid var(--line); border-radius: 12px; color: var(--ink); cursor: pointer; }
+.analytics-totals button[aria-pressed="true"] { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); }
+.analytics-totals strong { font-size: 1.6rem; }
+.analytics-students { display: grid; gap: 8px; margin: 16px 0; }
+.analytics-students article { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.analytics-students span, .analytics-students small { color: var(--muted); }
+.attendance-analytics-modal footer { font-size: .8rem; color: var(--muted); }
+.attendance-analytics-modal footer > div { display: flex; gap: 8px; }
+@media (max-width: 600px) { .attendance-analytics-modal { padding: 18px; } .analytics-filters { grid-template-columns: 1fr; } .analytics-totals { grid-template-columns: repeat(2, 1fr); } .analytics-students article { grid-template-columns: 1fr; } .attendance-analytics-modal footer { flex-wrap: wrap; } }
 /* Admin filters have an explicit layout so adding a control cannot push the
    search field below the date filters or leave an empty grid cell. */
 #attendanceFilters { grid-template-columns: minmax(0, 1fr) minmax(170px, 230px) auto; }

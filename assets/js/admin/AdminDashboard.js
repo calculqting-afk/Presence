@@ -11,6 +11,8 @@ import { getDocFromServer } from '../dashboard.js?v=20261011-optimized';
 import { AttendanceHistoryController, AttendanceRepository } from '../controllers/AttendanceHistoryController.js?v=20261011-optimized';
 import { AttendanceToolbarController } from '../controllers/AttendanceToolbarController.js';
 import { AttendanceRecordProjectionService } from '../controllers/AttendanceRecordProjectionService.js';
+import { AttendanceAnalyticsController } from '../controllers/AttendanceAnalyticsController.js';
+import { DailyAttendanceClock } from '../controllers/DailyAttendanceClock.js';
 import { EventSchedulePresenter } from '../controllers/EventSchedulePresenter.js';
 import { StudentActionsPresenter } from '../controllers/StudentActionsPresenter.js';
 export class AdminDashboard {
@@ -151,6 +153,13 @@ export class AdminDashboard {
     this.wireStudentAccountActions();
     this.wireDirectoryFilters();
     this.startSubscriptions();
+    this.dailyClock = new DailyAttendanceClock({ window: this.window, document: this.document, onDayChange: () => {
+      this.renderAdminAttendance();
+      this.renderAttendanceLine();
+      this.scheduleStudentsRender();
+    } });
+    this.dailyClock.initialize();
+    this.scope.addCleanup(() => this.dailyClock.dispose());
   }
   initializeState() {
     const dashboard = this;
@@ -219,6 +228,13 @@ export class AdminDashboard {
   }
   initializeAttendanceTools() {
     const dashboard = this;
+    dashboard.analyticsController = new AttendanceAnalyticsController({
+      document: dashboard.document, repository: new AttendanceRepository(db),
+      getEvents: () => dashboard.events, getStudents: () => dashboard.students,
+      closeDate: eventCheckoutCloseDate, escapeHtml
+    });
+    dashboard.analyticsController.initialize();
+    dashboard.scope.addCleanup(() => dashboard.analyticsController.dispose());
     dashboard.historyController = new AttendanceHistoryController({
       repository: new AttendanceRepository(db),
       requireEvent: true,
@@ -227,7 +243,7 @@ export class AdminDashboard {
       getEvents: () => dashboard.events,
       summary: dashboard.summaryService,
       notify: showDashboardToast,
-      onStatus: dashboard.updateAttendanceSyncStatus,
+      onStatus: status => dashboard.updateAttendanceSyncStatus({ ...status, history: true }),
       prepareRecords: (records, state) => {
         const filters = dashboard.historyController?.applied || {};
         const projected = state.verified && !state.busy && !state.partial
@@ -684,10 +700,11 @@ export class AdminDashboard {
   updateAttendanceSyncStatus({
     state,
     syncedAt,
-    error
+    error,
+    history = false
   }) {
     const dashboard = this;
-    dashboard.attendanceConfirmed = state === 'live';
+    if (!history) dashboard.attendanceConfirmed = state === 'live';
     if (activeView === 'assign-fine') dashboard.renderFineOptions();
     dashboard.scheduleStudentsRender();
     const labels = {
@@ -861,8 +878,7 @@ export class AdminDashboard {
   }
   renderAdminAttendance() {
     const dashboard = this;
-    const now = new Date();
-    const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const localDate = DailyAttendanceClock.dateKey();
     const totals = dashboard.summaryService.today(dashboard.students, dashboard.events, dashboard.attendance, localDate);
     const {
       present,
@@ -873,10 +889,10 @@ export class AdminDashboard {
       rate = dashboard.attendanceConfirmed ? totals.rate : 0;
     dashboard.document.querySelector("#registeredCount").textContent = dashboard.students.length;
     dashboard.document.querySelector("#presentTodayCount").textContent = present;
-    dashboard.document.querySelector("#presentTodayMeta").textContent = expected ? `${rate}% of ${expected} scheduled participants` : 'No verified participant roster for today';
+    dashboard.document.querySelector("#presentTodayMeta").textContent = !dashboard.attendanceConfirmed ? 'Verifying attendance…' : expected ? `${rate}% of ${expected} scheduled participants` : 'No verified participant roster for today';
     dashboard.document.querySelector("#notCheckedInCount").textContent = pending;
     dashboard.document.querySelector("#notCheckedInMeta").textContent = dashboard.attendanceConfirmed ? `${expected ? 'Scheduled participants without a check-in' : 'No verified attendance requirement today'}${unverified ? ` · ${unverified} legacy eligibility unverified` : ''}` : 'Waiting for server attendance verification';
-    dashboard.document.querySelector("#adminAttendancePercent").textContent = `${rate}%`;
+    dashboard.document.querySelector("#adminAttendancePercent").textContent = dashboard.attendanceConfirmed ? `${rate}%` : '—';
     dashboard.document.querySelector("#adminAttendanceDetail").textContent = `${present} present`;
     dashboard.document.querySelector("#adminAttendanceRing").style.background = `conic-gradient(var(--blue) 0 ${rate}%, var(--ring-track, #e8eef7) ${rate}% 100%)`;
   }
@@ -904,7 +920,7 @@ export class AdminDashboard {
     const eventOptions = dashboard.events.map(event => `<option value="${escapeHtml(event.id)}">${escapeHtml(event.name)}${event.date ? ` · ${escapeHtml(event.date)}` : ""}</option>`).join("");
     filter.innerHTML = `<option value="">Choose an event…</option>${eventOptions}`;
     filter.value = dashboard.events.some(event => event.id === selectedEvent) ? selectedEvent : "";
-    const records = [...dashboard.attendance].sort((first, second) => (second.checkedInAt?.seconds || second.attendedAt?.seconds || 0) - (first.checkedInAt?.seconds || first.attendedAt?.seconds || 0));
+    const records = dashboard.attendance.filter(record => record.eventDate === DailyAttendanceClock.dateKey()).sort((first, second) => (second.checkedInAt?.seconds || second.attendedAt?.seconds || 0) - (first.checkedInAt?.seconds || first.attendedAt?.seconds || 0));
     if (activeView === 'attendance-line') dashboard.historyController.draw();
     dashboard.document.querySelector("#adminDashboardAttendanceLine").innerHTML = dashboard.attendanceLineMarkup(records.slice(0, 5));
   }
@@ -1118,7 +1134,7 @@ export class AdminDashboard {
       updateFilterOptions(dashboard.studentCourseFilter, "courses", courses);
       updateFilterOptions(dashboard.studentSectionFilter, "sections", sections);
     }
-    const localDate = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const localDate = DailyAttendanceClock.dateKey();
     const presentToday = new Set(dashboard.attendance.filter(record => record.eventDate === localDate).map(record => record.studentUid));
     const pendingService = new Set(dashboard.fines.filter(fine => fine.status !== "Completed").map(fine => fine.studentUid));
     const activityTime = uid => {

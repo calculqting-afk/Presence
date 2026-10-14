@@ -1239,6 +1239,42 @@ test('seven-student pagination includes projected rows and clamps the final page
   controller.dispose();
 });
 
+test('analytics separates late check-ins, completed attendance, partial checkout and true absence', async () => {
+  const { AttendanceAnalyticsController } = await isolatedModule('assets/js/controllers/AttendanceAnalyticsController.js');
+  const event = { id: 'event', date: '2026-10-14', audience: 'All students', attendanceRoster: { late: '2A', missed: '2A', out: '2A', absent: '3A' } };
+  const controller = new AttendanceAnalyticsController({ getEvents: () => [event], getStudents: () => [],
+    closeDate: () => new Date(1000), now: () => new Date(2000) });
+  controller.records = [{ studentUid: 'late', eventId: 'event', checkedInAt: true, checkedOutAt: true, arrivalStatus: 'late' },
+    { studentUid: 'missed', eventId: 'event', checkedInAt: true }, { studentUid: 'out', eventId: 'event', checkedOutAt: true }];
+  const rows = controller.rows('2026-10-14');
+  assert.equal(rows.filter(row => row.present).length, 2);
+  assert.equal(rows.filter(row => row.late).length, 1);
+  assert.equal(rows.filter(row => row.completed).length, 1);
+  assert.equal(rows.filter(row => row.missed).length, 1);
+  assert.equal(rows.filter(row => row.checkout).length, 1);
+  assert.equal(rows.filter(row => row.absent).length, 1);
+  assert.equal(controller.rows('2026-10-14', 'event', '3A').length, 1);
+  controller.now = () => new Date(500);
+  assert.equal(controller.rows('2026-10-14').filter(row => row.absent || row.missed).length, 0);
+});
+
+test('daily attendance resets at Philippine midnight and catches up after a sleeping tab', async () => {
+  const { DailyAttendanceClock } = await isolatedModule('assets/js/controllers/DailyAttendanceClock.js');
+  let now = new Date('2026-10-14T15:59:59Z'), callback, delay, changes = 0;
+  const handlers = new Map();
+  const target = { addEventListener: (type, handler) => handlers.set(type, handler), removeEventListener: type => handlers.delete(type),
+    clearTimeout() {}, setTimeout(handler, ms) { callback = handler; delay = ms; return 1; } };
+  const clock = new DailyAttendanceClock({ window: target, document: target, now: () => now, onDayChange: () => changes++ });
+  clock.initialize(); clock.initialize();
+  assert.equal(delay, 1000); assert.equal(clock.day, '2026-10-14');
+  now = new Date('2026-10-14T16:00:00Z'); callback();
+  assert.equal(clock.day, '2026-10-15'); assert.equal(changes, 1);
+  handlers.get('focus')(); assert.equal(changes, 1);
+  now = new Date('2026-10-16T01:00:00Z'); handlers.get('visibilitychange')();
+  assert.equal(clock.day, '2026-10-16'); assert.equal(changes, 2);
+  clock.dispose(); assert.equal(handlers.size, 0);
+});
+
 test('student attendance pages retain filters and clamp after records change', async () => {
   const browser = fakeBrowser();
   const { StudentAttendanceListController } = await isolatedModule('assets/js/controllers/StudentAttendanceListController.js', {}, browser);
