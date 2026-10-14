@@ -188,7 +188,7 @@ function attendanceDuration(checkIn, checkOut) {
 }
 function getEventStatus(event, now = new Date()) {
   if (now < eventOpenDate(event)) return "upcoming";
-  if (now > eventCheckInCloseDate(event)) return "closed";
+  if (now > eventCheckoutCloseDate(event)) return "closed";
   return "open";
 }
 function arrivalStatusBadge(arrivalStatus) {

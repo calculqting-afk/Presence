@@ -146,8 +146,8 @@ export class StudentDashboard {
     dashboard.attendanceCheckInController = new AttendanceCheckInController({
       policy: new AttendancePolicy({
         eventOpenDate,
-        eventCloseDate,
-        eventCheckInCloseDate
+        eventCheckInCloseDate,
+        eventCheckoutCloseDate
       }),
       lateModal: new LateCheckInModal(dashboard.document.querySelector("#lateCheckInModal"))
     });
@@ -431,17 +431,17 @@ export class StudentDashboard {
         const attendanceRecord = attendanceByEventId.get(event.id);
         const attended = Boolean(attendanceRecord);
         const completed = attendanceRecord?.status === "completed" || Boolean(attendanceRecord?.checkedOutAt);
-        const checkoutOpen = attended && !completed && isCheckoutAvailable(event);
-        const missedCheckIn = !attended && isCheckoutAvailable(event);
-        const canCheckout = checkoutOpen || missedCheckIn;
-        const disabled = completed || (attended ? !checkoutOpen : !(missedCheckIn || checkInResult.available));
-        const buttonText = completed ? "✓ Attendance completed" : attended ? checkoutOpen ? "Check out" : "✓ Checked in" : missedCheckIn ? "Check out" : checkInResult.available ? checkInResult.arrivalStatus === "late" ? "Check in late" : "Check in" : status === "closed" ? "Check-in unavailable" : "Not open yet";
-        const attendanceBadge = completed ? '<span class="badge green">Completed</span>' : attended ? `<span class="badge green">${checkoutOpen ? "Checkout available" : "Checked in"}</span>` : missedCheckIn ? '<span class="badge orange">Check-in missed · checkout available</span>' : checkInResult.available && checkInResult.arrivalStatus === "late" ? '<span class="badge orange">Late check-in</span>' : eventStatusBadge(status);
+        const checkoutOpen = !completed && isCheckoutAvailable(event);
+        const checkInAvailable = !attended && checkInResult.available;
+        const attendanceBadge = completed ? '<span class="badge green">Completed</span>' : attended ? `<span class="badge green">${checkoutOpen ? "Checkout available" : "Checked in"}</span>` : checkInAvailable && checkInResult.arrivalStatus === "late" ? '<span class="badge orange">Late check-in available</span>' : checkoutOpen ? '<span class="badge blue">Checkout available</span>' : eventStatusBadge(status);
         const description = event.description || event.notes || `Attendance event for ${event.audience}.`;
-        const missedCheckInMessage = missedCheckIn ? `<p class="event-card-notice">Check-in was missed. You may still record checkout; it will be marked as partial attendance for review.</p>` : "";
-        const action = canCheckout ? `data-check-out-event="${escapeHtml(event.id)}"` : `data-attend-event="${escapeHtml(event.id)}"`;
-        const buttonClass = canCheckout || !attended && checkInResult.available ? "primary-button" : "outline-button";
-        return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div>${dashboard.schedulePresenter.render(event)}${missedCheckInMessage}${event.hasSurvey && !event.surveyArchived ? `<div class="survey-student-tools"><button class="outline-button" type="button" data-survey-event="${escapeHtml(event.id)}">Open / resume survey</button></div>` : ""}<div class="event-card-actions">${attendanceBadge}<button class="${buttonClass} attendance-action-button" type="button" ${action} ${disabled ? "disabled" : ""}>${buttonText}</button></div></div></article>`;
+        const actionNotice = !attended && checkoutOpen ? '<p class="event-card-notice">Check-in remains available as Late until checkout closes. You may also check out without checking in; that records partial attendance.</p>' : checkInAvailable && checkInResult.arrivalStatus === "late" ? `<p class="event-card-notice">Check-in is late after ${escapeHtml(formatEventTime(event.checkInCutoff || event.timeOut))}. It remains available until checkout closes.</p>` : "";
+        const actionButtons = completed
+          ? '<button class="outline-button attendance-action-button" type="button" disabled>✓ Attendance completed</button>'
+          : attended
+            ? `<button class="${checkoutOpen ? "primary-button" : "outline-button"} attendance-action-button" type="button" data-check-out-event="${escapeHtml(event.id)}" ${checkoutOpen ? "" : "disabled"}>${checkoutOpen ? "Check out" : "✓ Checked in"}</button>`
+            : `${checkInAvailable ? `<button class="primary-button attendance-action-button" type="button" data-attend-event="${escapeHtml(event.id)}">${checkInResult.arrivalStatus === "late" ? "Check in late" : "Check in"}</button>` : ""}${checkoutOpen ? `<button class="outline-button attendance-action-button" type="button" data-check-out-event="${escapeHtml(event.id)}">Check out</button>` : ""}${!checkInAvailable && !checkoutOpen ? `<button class="outline-button attendance-action-button" type="button" disabled>${status === "closed" ? "Attendance unavailable" : "Not open yet"}</button>` : ""}`;
+        return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div>${dashboard.schedulePresenter.render(event)}${actionNotice}${event.hasSurvey && !event.surveyArchived ? `<div class="survey-student-tools"><button class="outline-button" type="button" data-survey-event="${escapeHtml(event.id)}">Open / resume survey</button></div>` : ""}<div class="event-card-actions">${attendanceBadge}<div class="event-card-attendance-actions">${actionButtons}</div></div></div></article>`;
       }).join(""));
       if (dashboard.view === 'dashboard') dashboard.updateMarkup(timeline, `<div class="timeline">${activeEvents.slice(0, 4).map(event => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${attendanceByEventId.has(event.id) ? '<span class="badge green">Attended</span>' : eventStatusBadge(getEventStatus(event))}</div>`).join("")}</div>`);
     }

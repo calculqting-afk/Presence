@@ -304,6 +304,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 @media (max-width: 580px) { .event-schedule { grid-template-columns: minmax(0, 1fr); } }
 .event-card-notice { margin: 14px 0 -2px; padding: 10px 12px; color: #94561d; background: #fff7eb; border: 1px solid #f6dfbf; border-radius: 9px; font-size: .72rem; line-height: 1.5; }
 .event-card-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.event-card-attendance-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .event-card-actions .primary-button, .event-card-actions .outline-button { min-height: 36px; padding-inline: 13px; }
 .event-card-actions button:disabled { cursor: default; opacity: .72; transform: none; }
 .attendance-action-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 180px; min-height: 36px; }
@@ -312,7 +313,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .attendance-progress-announcer { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @keyframes attendance-button-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .attendance-button-spinner { animation: none; } }
-@media (max-width: 580px) { .event-card-actions { flex-wrap: wrap; } .attendance-action-button { max-width: 100%; } }
+@media (max-width: 580px) { .event-card-actions { flex-wrap: wrap; } .event-card-attendance-actions { width: 100%; justify-content: stretch; } .attendance-action-button { flex: 1 1 100%; max-width: 100%; } }
 .history-section { margin-top: 22px; }
 .history-card-grid, .admin-event-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 #studentFineList { align-items: start; }

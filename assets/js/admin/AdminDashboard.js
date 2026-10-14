@@ -198,7 +198,7 @@ export class AdminDashboard {
     });
     dashboard.attendanceProjection = new AttendanceRecordProjectionService({
       getEvents: () => dashboard.events,
-      checkInCloseDate: eventCheckInCloseDate
+      checkoutCloseDate: eventCheckoutCloseDate
     });
     dashboard.fineEligibility = new FineEligibilityService({ summary: dashboard.summaryService,
       loadEvent: async id => {

@@ -6,14 +6,15 @@ export class AttendancePolicy {
   constructor(windows) { this.windows = windows; }
 
   evaluateCheckIn(event, now = new Date()) {
-    const { eventOpenDate, eventCloseDate, eventCheckInCloseDate } = this.windows;
+    const { eventOpenDate, eventCheckInCloseDate, eventCheckoutCloseDate } = this.windows;
     if (!event) return { available: false, reason: 'not-open' };
-    const open = eventOpenDate(event), close = eventCloseDate(event);
-    const checkInClose = eventCheckInCloseDate(event);
-    if (![open, close, checkInClose, now].every(value => Number.isFinite(value?.getTime?.())) || open >= close || checkInClose <= open || checkInClose > close) return { available: false, reason: 'invalid-window' };
+    const open = eventOpenDate(event);
+    const lateAfter = eventCheckInCloseDate(event);
+    const checkoutClose = eventCheckoutCloseDate(event);
+    if (![open, lateAfter, checkoutClose, now].every(value => Number.isFinite(value?.getTime?.())) || open >= lateAfter || lateAfter > checkoutClose) return { available: false, reason: 'invalid-window' };
     if (now < open) return { available: false, reason: "not-open" };
-    if (now >= checkInClose) return { available: false, reason: "check-in-closed" };
-    return { available: true, arrivalStatus: "present" };
+    if (now > checkoutClose) return { available: false, reason: "check-in-closed" };
+    return { available: true, arrivalStatus: now >= lateAfter ? "late" : "present" };
   }
 }
 

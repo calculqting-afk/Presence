@@ -1,9 +1,9 @@
 // Builds display-only records. Absences are intentionally not written to
 // Firestore: a missing check-in and checkout becomes an absence only after the
-// check-in window closes, and an administrator can still correct it later.
+// entire attendance period ends, and an administrator can still correct it later.
 export class AttendanceRecordProjectionService {
-  constructor({ getEvents, checkInCloseDate, now = () => new Date() }) {
-    Object.assign(this, { getEvents, checkInCloseDate, now });
+  constructor({ getEvents, checkoutCloseDate, now = () => new Date() }) {
+    Object.assign(this, { getEvents, checkoutCloseDate, now });
   }
 
   project(records, { from = '', to = '', eventId = 'all' } = {}) {
@@ -13,7 +13,7 @@ export class AttendanceRecordProjectionService {
     const absences = this.getEvents().flatMap(event => {
       if ((eventId && eventId !== 'all' && event.id !== eventId)
         || (from && event.date < from) || (to && event.date > to)
-        || currentTime <= this.checkInCloseDate(event)) return [];
+        || currentTime <= this.checkoutCloseDate(event)) return [];
       return Object.entries(event.attendanceRoster || {}).flatMap(([studentUid]) => {
         if (keys.has(`${studentUid}:${event.id}`)) return [];
         return [{

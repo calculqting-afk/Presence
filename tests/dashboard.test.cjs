@@ -106,7 +106,7 @@ test('event schedules label the check-in and checkout openings and cutoffs', asy
   const event = { timeIn: '16:00', checkInCutoff: '16:10', timeOut: '16:15', checkOutCutoff: '16:25', location: '<script>' };
   const html = presenter.render(event);
   assert.match(html, /Check-in/); assert.match(html, /Check-out/);
-  assert.match(html, /Check-in[\s\S]*Closes<\/dt><dd>16:10/);
+  assert.match(html, /Check-in[\s\S]*Late after<\/dt><dd>16:10/);
   assert.match(html, /Closes<\/dt><dd>16:25/);
   assert.ok(html.includes('&lt;script&gt;')); assert.ok(!html.includes('<script>'));
   assert.match(presenter.render({ timeIn: '16:00', timeOut: '16:15' }), /Closes<\/dt><dd>16:30/);
@@ -205,23 +205,24 @@ test('shared summary listeners survive navigation and stop during disposal', asy
   subscriptions.stop(); subscriptions.stop(); assert.equal(stops, 1);
 });
 
-test('attendance policy covers opening and check-in cutoff boundaries', async () => {
+test('attendance policy keeps check-in open as late until checkout closes', async () => {
   const { AttendancePolicy } = await isolatedModule('assets/js/controllers/AttendanceController.js', { currentUser: {}, currentUserRole: 'student', formatEventTime: value => value });
-  const policy = new AttendancePolicy({ eventOpenDate: event => event.open, eventCloseDate: event => event.close, eventCheckInCloseDate: event => event.cutoff });
-  const event = { open: new Date(1000), cutoff: new Date(2000), close: new Date(3000) };
+  const policy = new AttendancePolicy({ eventOpenDate: event => event.open, eventCheckInCloseDate: event => event.cutoff, eventCheckoutCloseDate: event => event.checkoutClose });
+  const event = { open: new Date(1000), cutoff: new Date(2000), checkoutClose: new Date(4000) };
   assert.equal(policy.evaluateCheckIn(null).available, false);
   assert.equal(policy.evaluateCheckIn(event, new Date(999)).available, false);
   assert.equal(policy.evaluateCheckIn(event, new Date(1000)).arrivalStatus, 'present');
   assert.equal(policy.evaluateCheckIn(event, new Date(1999)).arrivalStatus, 'present');
-  assert.equal(policy.evaluateCheckIn(event, new Date(2000)).available, false);
-  assert.equal(policy.evaluateCheckIn(event, new Date(2999)).available, false);
-  assert.equal(policy.evaluateCheckIn(event, new Date(3000)).available, false);
+  assert.equal(policy.evaluateCheckIn(event, new Date(2000)).arrivalStatus, 'late');
+  assert.equal(policy.evaluateCheckIn(event, new Date(3999)).arrivalStatus, 'late');
+  assert.equal(policy.evaluateCheckIn(event, new Date(4000)).arrivalStatus, 'late');
+  assert.equal(policy.evaluateCheckIn(event, new Date(4001)).available, false);
 });
 
-test('attendance projection marks only no-record roster members absent after check-in closes', async () => {
+test('attendance projection marks only no-record roster members absent after checkout closes', async () => {
   const { AttendanceRecordProjectionService } = await isolatedModule('assets/js/controllers/AttendanceRecordProjectionService.js');
   const event = { id: 'event', name: 'Assembly', date: '2026-10-13', attendanceRoster: { absent: '2A', checkoutOnly: '2A' } };
-  const service = new AttendanceRecordProjectionService({ getEvents: () => [event], checkInCloseDate: () => new Date(1000), now: () => new Date(2000) });
+  const service = new AttendanceRecordProjectionService({ getEvents: () => [event], checkoutCloseDate: () => new Date(1000), now: () => new Date(2000) });
   const records = service.project([{ id: 'checkoutOnly_event', studentUid: 'checkoutOnly', eventId: 'event', status: 'checkout-only', checkedOutAt: 'time' }]);
   assert.equal(records.length, 2);
   assert.equal(records.find(record => record.studentUid === 'absent').status, 'absent');
@@ -257,12 +258,12 @@ test('submission preflight failure never writes and identifies the failing stage
 
 test('attendance policy rejects malformed, reversed and nonfinite window dates', async () => {
   const { AttendancePolicy } = await isolatedModule('assets/js/controllers/AttendanceController.js', { currentUser: {}, currentUserRole: 'student', formatEventTime: value => value });
-  const policy = new AttendancePolicy({ eventOpenDate: event => event.open, eventCloseDate: event => event.close, eventCheckInCloseDate: event => event.cutoff });
+  const policy = new AttendancePolicy({ eventOpenDate: event => event.open, eventCheckInCloseDate: event => event.cutoff, eventCheckoutCloseDate: event => event.checkoutClose });
   for (const event of [
-    { open: new Date(NaN), close: new Date(3000), cutoff: new Date(2000) },
-    { open: new Date(3000), close: new Date(1000), cutoff: new Date(2000) },
-    { open: new Date(1000), close: new Date(3000), cutoff: new Date(4000) },
-    { open: new Date(1000), close: new Date(3000), cutoff: new Date(500) }
+    { open: new Date(NaN), cutoff: new Date(2000), checkoutClose: new Date(3000) },
+    { open: new Date(3000), cutoff: new Date(2000), checkoutClose: new Date(4000) },
+    { open: new Date(1000), cutoff: new Date(4000), checkoutClose: new Date(3000) },
+    { open: new Date(1000), cutoff: new Date(500), checkoutClose: new Date(3000) }
   ]) assert.equal(policy.evaluateCheckIn(event, new Date(2000)).reason, 'invalid-window');
 });
 

@@ -320,11 +320,13 @@ service cloud.firestore {
         && data.studentId == student.accountId
         && attendanceMatchesEvent(data, event)
         && eligibleForAttendance(event, student, request.auth.uid)
-        && request.time >= event.openAt
-        && request.time < (("lateAfterAt" in event) ? event.lateAfterAt : event.checkInClosesAt)
+        && request.time >= event.openAt && request.time <= event.checkOutClosesAt
         && data.attendedAt == request.time && data.checkedInAt == request.time
         && data.keys().hasAll(["arrivalStatus"])
-        && data.arrivalStatus == "present"
+        && ((request.time < (("lateAfterAt" in event) ? event.lateAfterAt : event.checkInClosesAt)
+          && data.arrivalStatus == "present")
+          || (request.time >= (("lateAfterAt" in event) ? event.lateAfterAt : event.checkInClosesAt)
+            && data.arrivalStatus == "late"))
         && data.status == "checked-in"
         && !data.keys().hasAny(["recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason"])
         && !data.keys().hasAny(["checkedOutAt", "checkOutLocation"])
