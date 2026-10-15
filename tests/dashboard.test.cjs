@@ -1446,3 +1446,24 @@ test('attendance toolbars have matching HTML controls and honest partial empty s
   assert.match(AttendanceToolbarController.emptyState({ filtered: true }), /Try clearing your filters/);
   assert.match(AttendanceToolbarController.emptyState({ busy: true }), /Loading attendance/);
 });
+
+test('face registration mirrors live and review previews consistently but captures original camera pixels', async () => {
+  const css = fs.readFileSync(path.join(root, 'assets/css/dashboard.css'), 'utf8');
+  const mirrorRules = [...css.matchAll(/([^{}]+)\{[^{}]*transform:\s*scaleX\(-1\)[^{}]*\}/g)];
+  assert.equal(mirrorRules.length, 1);
+  assert.match(mirrorRules[0][1], /#faceCameraBox #cameraPreview,\s*#faceCameraBox #faceCapturePreview\s*$/);
+  assert.doesNotMatch(mirrorRules[0][1], /#faceRegistrationGuide/);
+  const names = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared = Object.fromEntries(names.map(name => [name, () => '']));
+  const { StudentDashboard } = await isolatedModule('assets/js/student/StudentDashboard.js', shared, fakeBrowser());
+  const draws = [];
+  const canvas = { getContext: () => ({ drawImage: (...args) => draws.push(args) }), toDataURL: () => 'data:image/jpeg;base64,original' };
+  const state = { document: { createElement: () => canvas },
+    cameraPreview: { videoWidth: 1280, videoHeight: 720, hidden: false },
+    faceCapturePreview: {}, faceRegistrationGuide: {}, retakeFaceButton: {}, captureFaceButton: {}, setFaceGuidance() {} };
+  StudentDashboard.prototype.captureFacePhoto.call(state);
+  assert.equal(canvas.width, 640); assert.equal(canvas.height, 360);
+  assert.deepEqual(draws[0], [state.cameraPreview, 0, 0, 640, 360]);
+  assert.equal(state.faceCapturePreview.src, 'data:image/jpeg;base64,original');
+  assert.equal(state.cameraPreview.hidden, true); assert.equal(state.faceCapturePreview.hidden, false);
+});
