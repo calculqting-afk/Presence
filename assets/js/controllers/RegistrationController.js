@@ -68,13 +68,22 @@ export class RegistrationController {
   }
   accountIdKey(value) { return String(value || '').trim().toLowerCase(); }
 
+  registrationValidationMessage(values) {
+    const required = ['accountId', 'birthday', 'firstName', 'lastName', 'course', 'section', 'password', 'confirmPassword'];
+    if (required.some(name => !String(values[name] ?? '').trim())) {
+      return 'Fill all the fields first before proceeding';
+    }
+    if (values.password !== values.confirmPassword) return 'Passwords do not match.';
+    if (String(values.password).length < 8) return 'Use a password with at least 8 characters.';
+    return '';
+  }
+
   async submitRegistration(event) {
     event.preventDefault();
     const form = this.registrationForm;
     const values = Object.fromEntries(new FormData(form));
-    this.registrationError.textContent = '';
-    if (values.password !== values.confirmPassword) { this.registrationError.textContent = 'Passwords do not match.'; return; }
-    if (String(values.password).length < 8) { this.registrationError.textContent = 'Use a password with at least 8 characters.'; return; }
+    this.registrationError.textContent = this.registrationValidationMessage(values);
+    if (this.registrationError.textContent) return;
     const submit = form.querySelector('[type="submit"]'); submit.dataset.defaultLabel ||= submit.textContent;
     this.setBusy(form, true, 'Sending…');
     try {
