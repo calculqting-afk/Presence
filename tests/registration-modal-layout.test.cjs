@@ -31,7 +31,16 @@ test('registration submit appears above Cancel in visual and keyboard order', ()
   assert.ok(form);
   assert.match(form, /Send registration request<\/button>\s*<button[^>]*data-close-registration[^>]*>Cancel<\/button>/);
   const css = fs.readFileSync(path.join(__dirname, '../assets/css/style.css'), 'utf8');
-  assert.match(css, /#registrationForm \.dialog-actions\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;[^}]*flex-direction:\s*column;[^}]*align-items:\s*center/);
-  assert.match(css, /#registrationForm \.dialog-actions \.dialog-action\s*\{[^}]*width:\s*min\(100%, 320px\)/);
+  assert.match(css, /\.registration-dialog \.dialog-actions\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;[^}]*flex-direction:\s*column;[^}]*align-items:\s*center/);
+  assert.match(css, /\.registration-dialog \.dialog-actions \.dialog-action\s*\{[^}]*width:\s*min\(100%, 320px\)/);
   assert.match(css, /\.dialog \.registration-error\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/);
+});
+
+test('registration status uses the same centered actions with Close below Check status', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const form = html.match(/<form id="registrationStatusForm"[\s\S]*?<\/form>/)?.[0];
+  assert.ok(form);
+  assert.match(form, /Check status<\/button>\s*<button[^>]*data-close-registration-status[^>]*>Close<\/button>/);
+  const css = fs.readFileSync(path.join(__dirname, '../assets/css/style.css'), 'utf8');
+  assert.match(css, /\.dialog \.registration-status-result\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/);
 });

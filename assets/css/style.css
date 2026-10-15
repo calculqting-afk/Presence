@@ -39,7 +39,6 @@
 :root[data-theme="dark"] .dialog, :root[data-theme="dark"] .toast { background: #15243b; border-color: #334660; }
 :root[data-theme="dark"] .system-status,
 :root[data-theme="dark"] .remember,
-:root[data-theme="dark"] .feature small,
 :root[data-theme="dark"] .privacy-note,
 :root[data-theme="dark"] footer { color: #b1bfd4; }
 :root[data-theme="dark"] footer { border-color: #334660; }
@@ -60,7 +59,6 @@
 :root[data-theme="dark"] .eyebrow,
 :root[data-theme="dark"] .overline,
 :root[data-theme="dark"] .text-button,
-:root[data-theme="dark"] .feature-icon,
 :root[data-theme="dark"] .dialog-icon { color: #83b4ff; }
 :root[data-theme="dark"] .password-toggle:hover { background: #243c5c; }
 :root[data-theme="dark"] .input-icon,
@@ -220,35 +218,11 @@ h1 em {
 
 .hero-intro {
   max-width: 500px;
-  margin: 30px 0 36px;
+  margin: 30px 0 0;
   color: var(--muted);
   font-size: 1.06rem;
   line-height: 1.7;
 }
-
-.feature-row {
-  display: flex;
-  gap: 32px;
-  padding-top: 28px;
-  border-top: 1px solid var(--line);
-}
-
-.feature { display: flex; align-items: center; gap: 12px; transition: transform .25s cubic-bezier(.22, 1, .36, 1); }
-.feature:hover { transform: translateY(-2px); }
-.feature-icon {
-  width: 35px;
-  height: 35px;
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  color: var(--blue-700);
-  background: var(--blue-100);
-  border-radius: 10px;
-  font-weight: 700;
-}
-.feature strong, .feature small { display: block; }
-.feature strong { font-size: .82rem; margin-bottom: 3px; }
-.feature small { color: #8792a4; font-size: .68rem; }
 
 .login-wrap { position: relative; }
 
@@ -400,17 +374,17 @@ label, .label-row { color: #374763; font-size: .75rem; font-weight: 700; }
 .registration-form input:focus, .registration-form select:focus { outline: 3px solid rgba(42, 111, 220, .18); border-color: var(--blue-600); }
 .registration-grid { display: grid; grid-column: span 2; grid-template-columns: 1fr 1fr; gap: 16px; }
 .dialog .registration-error { grid-column: 1 / -1; min-height: 0; margin: -4px 0 0; color: var(--danger); font-size: .78rem; }
-.dialog .registration-status-result { grid-column: span 2; margin: 0 !important; padding: 13px 14px; color: #2458a8; background: #edf4ff; border: 1px solid #c6dbf7; border-radius: 10px; font-size: .85rem; }
+.dialog .registration-status-result { grid-column: 1 / -1; margin: 0 !important; padding: 13px 14px; color: #2458a8; background: #edf4ff; border: 1px solid #c6dbf7; border-radius: 10px; font-size: .85rem; }
 .dialog-actions { grid-column: span 2; display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-top: 6px; padding-top: 18px; border-top: 1px solid var(--line); }
-#registrationForm .dialog-actions {
+.registration-dialog .dialog-actions {
   grid-column: 1 / -1;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 8px;
 }
-#registrationForm .dialog-actions .dialog-action { width: min(100%, 320px); }
-#registrationForm .dialog-actions .text-button { min-height: 44px; padding: 10px 24px; }
+.registration-dialog .dialog-actions .dialog-action { width: min(100%, 320px); }
+.registration-dialog .dialog-actions .text-button { min-height: 44px; padding: 10px 24px; }
 .registration-dialog .dialog-action { min-height: 46px; padding-inline: 20px; }
 .registration-status-dialog .registration-form > label { grid-column: span 2; }
 
@@ -502,7 +476,7 @@ footer {
 .registration-dialog .text-button:active, .registration-dialog .dialog-action:active { transform: translateY(1px) scale(.98); }
 
 @media (max-width: 880px) {
-  .hero { grid-template-columns: 1fr; gap: 50px; padding-top: 38px; }
+  .hero { grid-template-columns: 1fr; gap: 32px; padding-top: 38px; }
   .hero-copy { max-width: 650px; }
   .login-wrap { width: min(560px, 100%); margin-inline: auto; }
 }
@@ -516,7 +490,6 @@ footer {
   .hero { padding: 38px 0 60px; }
   h1 { font-size: clamp(3.15rem, 15vw, 4.6rem); }
   .hero-intro { margin-top: 24px; }
-  .feature-row { gap: 22px; flex-direction: column; }
   .login-card { border-radius: 21px; }
   .decor-one { right: -90px; }
   footer { min-height: 90px; flex-direction: column; justify-content: center; gap: 7px; }

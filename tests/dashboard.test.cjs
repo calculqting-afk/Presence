@@ -58,7 +58,7 @@ test('login and both dashboard pages load shared authentication progress styles'
   }
   const css = fs.readFileSync(path.join(root, 'assets/css/button-loading.css'), 'utf8');
   assert.match(css, /prefers-reduced-motion/);
-  assert.match(fs.readFileSync(path.join(root, 'assets/js/script.js'), 'utf8'), /loginAction.run/);
+  assert.match(fs.readFileSync(path.join(root, 'assets/js/controllers/LoginController.js'), 'utf8'), /loginAction.run/);
   assert.match(fs.readFileSync(path.join(root, 'assets/js/controllers/DashboardNavigationController.js'), 'utf8'), /logoutAction.run/);
 });
 
@@ -889,6 +889,13 @@ for (const role of ['admin', 'student']) test(`the real ${role} bootstrap evalua
   await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve));
   assert.equal(surveySections,1, browser.document.querySelector('#dashboardToastMessage').textContent); assert.equal(notificationPanels,1); assert.equal(logoutPanels,1);
   assert.equal(entry.namespace.currentUserRole, role === 'admin' ? 'super_admin' : 'student'); assert.equal(entry.namespace.sessionState.dashboard.dashboard.constructor.name, role === 'admin' ? 'AdminDashboard' : 'StudentDashboard');
+  assert.equal(entry.namespace.sessionState.constructor.name, 'DashboardState');
+  assert.equal(entry.namespace.sessionState.user.uid, role);
+  assert.equal(entry.namespace.sessionState.role, entry.namespace.currentUserRole);
+  entry.namespace.setDashboardViewState({ activeView: 'dashboard', previousView: 'events' });
+  assert.equal(entry.namespace.activeView, 'dashboard');
+  assert.equal(entry.namespace.previousView, 'events');
+  assert.equal(entry.namespace.sessionState.previousView, 'events');
   assert.equal([...modules.keys()].some(file => path.basename(file) === 'SurveyController.js'), false, 'survey implementation must not load at startup');
   if (role === 'student') {
     const controller = entry.namespace.sessionState.dashboard.dashboard;
