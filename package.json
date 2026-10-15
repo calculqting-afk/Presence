@@ -9,7 +9,8 @@
     "mobile:build": "node tools/build-mobile.cjs",
     "android:sync": "npm run mobile:build && cap sync android",
     "android:open": "cap open android",
-    "android:apk": "npm run android:sync && node tools/build-android.cjs"
+    "android:apk": "npm run android:sync && node tools/build-android.cjs",
+    "android:beta": "npm run android:sync && node tools/build-android.cjs --beta"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.3",

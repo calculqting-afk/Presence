@@ -3,12 +3,14 @@ apply plugin: 'com.android.application'
 android {
     namespace = "io.github.calculatingafk.presence"
     compileSdk = rootProject.ext.compileSdkVersion
+    buildFeatures { buildConfig true }
     defaultConfig {
         applicationId "io.github.calculatingafk.presence"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 3
+        versionName "1.2"
+        buildConfigField "boolean", "DISTRIBUTION_UPDATES", "false"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -17,6 +19,14 @@ android {
         }
     }
     buildTypes {
+        debug {
+            buildConfigField "boolean", "DISTRIBUTION_UPDATES", "true"
+        }
+        beta {
+            initWith debug
+            matchingFallbacks = ['debug']
+            buildConfigField "boolean", "DISTRIBUTION_UPDATES", "true"
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

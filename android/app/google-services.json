@@ -1,0 +1,17 @@
+{
+  "project_info": {
+    "project_number": "248498873583",
+    "project_id": "presence-a873f",
+    "storage_bucket": "presence-a873f.firebasestorage.app"
+  },
+  "client": [{
+    "client_info": {
+      "mobilesdk_app_id": "1:248498873583:android:22acd24040a8f650ec671a",
+      "android_client_info": { "package_name": "io.github.calculatingafk.presence" }
+    },
+    "oauth_client": [],
+    "api_key": [{ "current_key": "AIzaSyAIYuLVLAwH6Uk2JSbd0ORv7DxNHnbFg6M" }],
+    "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+  }],
+  "configuration_version": "1"
+}
