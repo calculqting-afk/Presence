@@ -1467,3 +1467,70 @@ test('face registration mirrors live and review previews consistently but captur
   assert.equal(state.faceCapturePreview.src, 'data:image/jpeg;base64,original');
   assert.equal(state.cameraPreview.hidden, true); assert.equal(state.faceCapturePreview.hidden, false);
 });
+
+function birthdayOnboardingShared(overrides = {}) {
+  const names = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  return { ...Object.fromEntries(names.map(name => [name, () => ''])), db: {}, currentUser:{uid:'student-1'}, currentUserProfile:{accountId:'12345678',birthday:'2005-01-02'}, ...overrides };
+}
+
+test('Add Student derives birthday password and marks only the new profile for first-login change', async () => {
+  const browser = fakeBrowser(), writes = [], credentials = [], toasts = [];
+  const shared = birthdayOnboardingShared({ studentIdToEmail:id=>`${id}@students.test`,
+    getDoc:async()=>({exists:()=>false}), doc:(_,collection,id)=>({collection,id}),
+    createUserWithEmailAndPassword:async(_,email,password)=>{credentials.push({email,password}); return {user:{uid:'new-student'}};},
+    updateProfile:async()=>{}, signOut:async()=>{}, showDashboardToast:(...args)=>toasts.push(args),
+    writeBatch:()=>({set:(ref,data)=>writes.push({ref,data}),commit:async()=>{}}) });
+  const { AdminDashboard } = await isolatedModule('assets/js/admin/AdminDashboard.js', shared, browser);
+  for (const [id,value] of Object.entries({managedStudentId:'12345678',managedFirstName:'Anne',managedLastName:'Test',managedBirthday:'2005-01-02',managedSection:'2A',managedCourse:'BSA',managedPassword:'ignored input'})) browser.document.querySelector('#'+id).value=value;
+  let resets=0;
+  const state={document:browser.document,can:()=>true,students:[],resetStudentForm:()=>resets++};
+  await AdminDashboard.prototype.handleStudentFormSubmit.call(state,{preventDefault(){}});
+  assert.equal(credentials[0].password,'01022005'); assert.equal(credentials[0].email,'12345678@students.test');
+  const saved=writes.find(w=>w.ref.collection==='students').data;
+  assert.equal(saved.mustChangePassword,true); assert.equal(saved.birthday,'2005-01-02'); assert.equal('password' in saved,false); assert.equal(resets,1);
+  assert.equal(state.studentAccountBusy,false); assert.equal(browser.document.querySelector('#studentSubmitButton').disabled,false);
+  browser.document.querySelector('#managedBirthday').value='';
+  await AdminDashboard.prototype.handleStudentFormSubmit.call(state,{preventDefault(){}});
+  assert.equal(credentials.length,1); assert.equal(toasts.at(-1)[0],'Birthday required');
+});
+
+test('editing an existing student never changes Auth password or resets the first-login flag', async () => {
+  const browser=fakeBrowser(), writes=[]; let authChanges=0;
+  const shared=birthdayOnboardingShared({doc:(_,collection,id)=>({collection,id}),createUserWithEmailAndPassword:()=>authChanges++,
+    writeBatch:()=>({set:(ref,data)=>writes.push({ref,data}),commit:async()=>{}})});
+  const {AdminDashboard}=await isolatedModule('assets/js/admin/AdminDashboard.js',shared,browser);
+  browser.document.querySelector('#originalStudentId').value='existing';browser.document.querySelector('#managedStudentId').value='12345678';
+  const state={document:browser.document,can:()=>true,students:[{uid:'existing',accountId:'12345678'}],resetStudentForm(){}};
+  await AdminDashboard.prototype.handleStudentFormSubmit.call(state,{preventDefault(){}});
+  assert.equal(authChanges,0);assert.equal('mustChangePassword' in writes[0].data,false);assert.equal('password' in writes[0].data,false);
+});
+
+test('first-login password change rejects reuse, updates Auth before profile and handles duplicate submits', async () => {
+  const browser=fakeBrowser(), steps=[], toasts=[];let finish;
+  const shared=birthdayOnboardingShared({showDashboardToast:(...args)=>toasts.push(args),
+    updatePassword:async(_,password)=>{steps.push(['auth',password]);await new Promise(resolve=>finish=resolve);},
+    setDoc:async(_,data)=>steps.push(['profile',data]),doc:()=> 'students/student-1',serverTimestamp:()=> 'server'});
+  const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
+  let closed=0;
+  const state={document:browser.document,studentProfile:shared.currentUserProfile,completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),closeRequiredPasswordChangeModal:()=>closed++};
+  const set=(a,b=a)=>{browser.document.querySelector('#requiredNewPassword').value=a;browser.document.querySelector('#requiredConfirmPassword').value=b;};
+  set('01022005');await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});assert.equal(steps.length,0);assert.match(toasts.at(-1)[1],/birthday/);
+  set('Student!42','different');await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});assert.equal(steps.length,0);
+  set('Student!42');const pending=StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});
+  await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});assert.equal(steps.length,1);
+  finish();await pending;assert.equal(steps[1][0],'profile');assert.equal(steps[1][1].mustChangePassword,false);assert.equal(closed,1);assert.equal(state.requiredPasswordChangeBusy,false);
+});
+
+test('failed Auth password change does not clear setup; failed profile save explains the new password', async () => {
+  for(const failAt of ['auth','profile']) {
+    const browser=fakeBrowser(),toasts=[];let profileWrites=0,closed=0;
+    const shared=birthdayOnboardingShared({showDashboardToast:(...args)=>toasts.push(args),updatePassword:async()=>{if(failAt==='auth')throw Error('offline');},
+      setDoc:async()=>{profileWrites++;throw Error('offline');}});
+    const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
+    browser.document.querySelector('#requiredNewPassword').value='Student!42';browser.document.querySelector('#requiredConfirmPassword').value='Student!42';
+    const state={document:browser.document,studentProfile:shared.currentUserProfile,completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),closeRequiredPasswordChangeModal:()=>closed++};
+    await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});
+    assert.equal(profileWrites,failAt==='auth'?0:1);assert.equal(closed,0);assert.equal(state.completeRequiredPasswordChange.disabled,false);
+    if(failAt==='profile')assert.match(toasts.at(-1)[1],/Sign in with the new password/);
+  }
+});

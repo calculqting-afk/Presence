@@ -1,4 +1,5 @@
 import { ControllerScope } from '../core/ControllerScope.js';
+import { StudentPasswordPolicy } from '../core/StudentPasswordPolicy.js';
 import { StudentIdentityController } from '../controllers/StudentIdentityController.js';
 import { StudentAttendanceController } from '../controllers/StudentAttendanceController.js?v=20261011-optimized';
 import { currentUser, currentUserProfile, escapeHtml, formatBirthday, FineModalController, showDashboardToast, createNotification, uploadFacePhotoToDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineTimestamp, getFineHistory, updateDashboardGreeting, createDeviceSessionToken, auth, db, signOut, updatePassword, collection, deleteField, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch, sessionState } from '../dashboard.js?v=20261011-optimized';
@@ -177,6 +178,19 @@ export class StudentDashboard {
     dashboard.scope.listen(dashboard.studentProfileModal, "click", dashboard.handleStudentProfileModalClick);
     dashboard.scope.listen(dashboard.document, "keydown", dashboard.handleWireProfileActionsKeydown);
     dashboard.scope.listen(dashboard.requiredPasswordChangeForm, "submit", dashboard.handleRequiredPasswordChangeFormSubmit);
+    dashboard.scope.listen(dashboard.document.querySelector('#requiredPasswordSignOut'), 'click', async () => {
+      try { await signOut(auth); dashboard.window.location.replace('../index.html'); }
+      catch { showDashboardToast('Unable to sign out', 'Please try again.'); }
+    });
+    dashboard.scope.listen(dashboard.requiredPasswordChangeModal, 'keydown', event => {
+      if (event.key === 'Escape') event.preventDefault();
+      if (event.key !== 'Tab') return;
+      const controls = [...dashboard.requiredPasswordChangeModal.querySelectorAll('input, button')].filter(node => !node.disabled && !node.hidden);
+      if (!controls.length) return;
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && dashboard.document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && dashboard.document.activeElement === last) { event.preventDefault(); first.focus(); }
+    });
   }
   wireFineActions() {
     const dashboard = this;
@@ -403,11 +417,13 @@ export class StudentDashboard {
     if (!dashboard.requiredPasswordChangeModal.hidden) return;
     dashboard.requiredPasswordChangeForm.reset();
     dashboard.requiredPasswordChangeModal.hidden = false;
+    dashboard.document.querySelector('.app-shell')?.setAttribute('inert', '');
     dashboard.document.querySelector("#requiredNewPassword").focus();
   }
   closeRequiredPasswordChangeModal() {
     const dashboard = this;
     dashboard.requiredPasswordChangeModal.hidden = true;
+    dashboard.document.querySelector('.app-shell')?.removeAttribute('inert');
     dashboard.requiredPasswordChangeForm.reset();
   }
   currentEventsForStudent() {
@@ -893,10 +909,12 @@ export class StudentDashboard {
   async handleRequiredPasswordChangeFormSubmit(event) {
     const dashboard = this;
     event.preventDefault();
+    if (dashboard.requiredPasswordChangeBusy) return;
     const newPassword = dashboard.document.querySelector("#requiredNewPassword").value;
     const confirmPassword = dashboard.document.querySelector("#requiredConfirmPassword").value;
-    if (!/^\d{6,8}$/.test(newPassword)) {
-      showDashboardToast("Invalid password", "Use a new password containing 6 to 8 digits.");
+    const passwordError = StudentPasswordPolicy.newPasswordError(newPassword, dashboard.studentProfile || currentUserProfile);
+    if (passwordError) {
+      showDashboardToast("Invalid password", passwordError);
       dashboard.document.querySelector("#requiredNewPassword").focus();
       return;
     }
@@ -905,7 +923,9 @@ export class StudentDashboard {
       dashboard.document.querySelector("#requiredConfirmPassword").focus();
       return;
     }
+    dashboard.requiredPasswordChangeBusy = true;
     dashboard.completeRequiredPasswordChange.disabled = true;
+    dashboard.document.querySelector('#requiredPasswordSignOut').disabled = true;
     dashboard.completeRequiredPasswordChange.textContent = "Saving password…";
     let passwordUpdated = false;
     try {
@@ -920,9 +940,11 @@ export class StudentDashboard {
       dashboard.closeRequiredPasswordChangeModal();
       showDashboardToast("Password changed", "Your new password is now active.");
     } catch (error) {
-      const message = passwordUpdated ? "Your password was changed, but Presence could not unlock the dashboard. Refresh after the latest Firestore Rules are published." : error.code === "auth/requires-recent-login" ? "Please sign out and sign in again with the temporary password, then create your new password immediately." : error.code === "auth/weak-password" ? "The new password must contain at least 6 characters." : error.message || "Your password could not be changed.";
+      const message = passwordUpdated ? "Your password was changed, but Presence could not finish setup. Sign in with the new password and retry after checking your connection and Firestore rules." : error.code === "auth/requires-recent-login" ? "Please sign out and sign in again, then create your new password immediately." : error.code === "auth/weak-password" ? "Use a stronger password with at least 8 characters." : error.message || "Your password could not be changed.";
       showDashboardToast("Unable to finish password change", message);
     } finally {
+      dashboard.requiredPasswordChangeBusy = false;
+      dashboard.document.querySelector('#requiredPasswordSignOut').disabled = false;
       dashboard.completeRequiredPasswordChange.disabled = false;
       dashboard.completeRequiredPasswordChange.textContent = "Save new password";
     }

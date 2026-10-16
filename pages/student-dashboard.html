@@ -171,9 +171,9 @@
       <h2 id="requiredPasswordChangeTitle">Create your new password</h2>
       <p id="requiredPasswordChangeMessage">You signed in with a temporary password. Create a new password before continuing.</p>
       <form id="requiredPasswordChangeForm">
-        <div class="field"><label for="requiredNewPassword">New password</label><input id="requiredNewPassword" type="text" required minlength="6" maxlength="8" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password"><small>Use 6 to 8 digits. Do not reuse the temporary password.</small></div>
-        <div class="field"><label for="requiredConfirmPassword">Confirm new password</label><input id="requiredConfirmPassword" type="text" required minlength="6" maxlength="8" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password"></div>
-        <div class="modal-actions"><button class="primary-button" id="completeRequiredPasswordChange" type="submit">Save new password</button></div>
+        <div class="field"><label for="requiredNewPassword">New password</label><input id="requiredNewPassword" type="password" required minlength="8" maxlength="128" autocomplete="new-password"><small>Use 8–128 characters. Letters, numbers and symbols are allowed. Do not reuse your birthday password or Student ID.</small></div>
+        <div class="field"><label for="requiredConfirmPassword">Confirm new password</label><input id="requiredConfirmPassword" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></div>
+        <div class="modal-actions"><button class="primary-button" id="completeRequiredPasswordChange" type="submit">Save new password</button><button class="link-button" id="requiredPasswordSignOut" type="button">Sign out</button></div>
       </form>
     </section>
   </div>

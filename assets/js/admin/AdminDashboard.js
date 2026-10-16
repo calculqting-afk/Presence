@@ -1,4 +1,5 @@
 import { ControllerScope } from '../core/ControllerScope.js';
+import { StudentPasswordPolicy } from '../core/StudentPasswordPolicy.js';
 import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261011-optimized';
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
 import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261011-optimized';
@@ -482,6 +483,7 @@ export class AdminDashboard {
   }
   wireStudentAccountActions() {
     const dashboard = this;
+    for (const type of ['input', 'change']) dashboard.scope.listen(dashboard.document.querySelector('#managedBirthday'), type, () => dashboard.syncBirthdayPassword());
     dashboard.scope.listen(dashboard.studentForm, "submit", dashboard.handleStudentFormSubmit);
     dashboard.scope.listen(dashboard.document.querySelector("#cancelStudentForm"), "click", dashboard.handleCancelStudentFormClick);
     dashboard.scope.listen(dashboard.studentTableBody, "click", dashboard.handleStudentTableBodyClick);
@@ -1471,16 +1473,23 @@ export class AdminDashboard {
     if (edit) dashboard.editEvent(edit.dataset.editEvent);
     if (remove) dashboard.openPastEventRemovalModal(remove.dataset.deleteEvent);
   }
+  syncBirthdayPassword() {
+    if (this.document.querySelector('#originalStudentId').value) return;
+    const password = this.document.querySelector('#managedPassword');
+    try { password.value = StudentPasswordPolicy.birthdayPassword(this.document.querySelector('#managedBirthday').value); }
+    catch { password.value = ''; }
+  }
   resetStudentForm() {
     const dashboard = this;
     dashboard.studentForm.reset();
     dashboard.document.querySelector("#originalStudentId").value = "";
     dashboard.document.querySelector("#managedStudentId").disabled = false;
+    dashboard.document.querySelector("#managedBirthday").required = true;
     dashboard.document.querySelector("#managedPassword").required = true;
     dashboard.document.querySelector("#managedPassword").disabled = false;
     dashboard.document.querySelector("#managedPassword").value = "";
-    dashboard.document.querySelector("#managedPassword").placeholder = "Visible · up to 8 digits";
-    dashboard.document.querySelector("#managedPasswordHelp").textContent = "The password stays visible while you type, accepts digits only, and is limited to 8 digits.";
+    dashboard.document.querySelector("#managedPassword").placeholder = "Choose a birthday first";
+    dashboard.document.querySelector("#managedPasswordHelp").textContent = "Birthday in MMDDYYYY format (January 2, 2005 → 01022005). The student must choose a new password on first login.";
     dashboard.document.querySelector("#studentPageTitle").textContent = "Add Student";
     dashboard.document.querySelector("#studentFormTitle").textContent = "Student information";
     dashboard.document.querySelector("#studentSubmitButton").textContent = "Add student";
@@ -1496,6 +1505,7 @@ export class AdminDashboard {
     dashboard.document.querySelector("#managedFirstName").value = student.firstName;
     dashboard.document.querySelector("#managedMiddleName").value = student.middleName || "";
     dashboard.document.querySelector("#managedBirthday").value = student.birthday || "";
+    dashboard.document.querySelector("#managedBirthday").required = false;
     dashboard.document.querySelector("#managedLastName").value = student.lastName;
     dashboard.document.querySelector("#managedSection").value = student.section;
     dashboard.document.querySelector("#managedCourse").value = student.course || "";
@@ -2067,6 +2077,7 @@ export class AdminDashboard {
       return;
     }
     submitEvent.preventDefault();
+    if (dashboard.studentAccountBusy) return;
     const uid = dashboard.document.querySelector("#originalStudentId").value;
     const student = {
       accountId: dashboard.document.querySelector("#managedStudentId").value.trim(),
@@ -2084,6 +2095,12 @@ export class AdminDashboard {
       showDashboardToast("Invalid Student ID", "Use only letters, numbers, periods, underscores, or dashes.");
       return;
     }
+    if (!uid) {
+      try { student.password = StudentPasswordPolicy.birthdayPassword(student.birthday); }
+      catch (error) { showDashboardToast('Birthday required', error.message); return; }
+    }
+    dashboard.studentAccountBusy = true;
+    dashboard.document.querySelector('#studentSubmitButton').disabled = true;
     try {
       if (uid) {
         const studentIdKey = student.accountId.toLowerCase();
@@ -2152,6 +2169,7 @@ export class AdminDashboard {
             uid: credential.user.uid,
             authEmail,
             active: true,
+            mustChangePassword: true,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp()
           });
@@ -2170,7 +2188,7 @@ export class AdminDashboard {
       }
       dashboard.resetStudentForm();
       openView("modify-students");
-      showDashboardToast(uid ? "Student updated" : "Student created", `${student.accountId} is ready to sign in.`);
+      showDashboardToast(uid ? "Student updated" : "Student created", uid ? `${student.accountId} was updated. The password is unchanged.` : `${student.accountId} can sign in with their birthday (MMDDYYYY), then create a new password.`);
     } catch (error) {
       console.error("FULL FIREBASE ERROR:", error);
       const messages = {
@@ -2182,6 +2200,9 @@ export class AdminDashboard {
       };
       const message = messages[error.code] || error.message || "The student could not be saved.";
       showDashboardToast("Unable to save student", message);
+    } finally {
+      dashboard.studentAccountBusy = false;
+      dashboard.document.querySelector('#studentSubmitButton').disabled = false;
     }
   }
   handleCancelStudentFormClick() {
