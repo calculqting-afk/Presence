@@ -7,6 +7,9 @@
   <meta name="theme-color" content="#f5f9ff">
   <script src="assets/js/controllers/ThemeController.js?v=20261010-shared-theme"></script>
   <script src="assets/js/theme.js?v=20261010-shared-theme"></script>
+  <link rel="stylesheet" href="assets/css/launch-intro.css?v=20261016">
+  <script src="assets/js/controllers/LaunchIntroController.js?v=20261016"></script>
+  <script src="assets/js/launch-intro.js?v=20261016"></script>
   <meta name="description" content="Presence — a simple, reliable attendance portal for students and administrators.">
   <title>Presence</title>
   <link rel="icon" type="image/png" sizes="any" href="assets/images/presence-logo.png?v=20260926">
@@ -19,6 +22,12 @@
   <link rel="stylesheet" href="assets/css/button-loading.css?v=20261010-auth-progress">
 </head>
 <body>
+  <div class="launch-intro" aria-hidden="true" hidden>
+    <div class="launch-intro__brand">
+      <img class="launch-intro__logo" src="assets/images/presence-logo.png?v=20260926" width="116" height="116" alt="" fetchpriority="high">
+      <span class="launch-intro__name">Presence</span>
+    </div>
+  </div>
   <div class="page-shell">
     <header class="site-header">
       <a class="brand" href="#" aria-label="Presence home">

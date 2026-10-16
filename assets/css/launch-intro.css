@@ -1,0 +1,70 @@
+/* Default hidden markup means a failed/disabled script never covers the login. */
+.launch-intro { display: none; }
+html[data-launch-intro] .launch-intro[hidden] {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid !important;
+  place-items: center;
+  overflow: hidden;
+  background: #f5f9ff;
+  color: #10213e;
+  /* CSS also fails open if JavaScript is interrupted after startup. */
+  animation: presence-intro-exit 2.5s ease both;
+}
+:root[data-theme="dark"][data-launch-intro] .launch-intro { background: #0b1628; color: #eef4ff; }
+.launch-intro__brand {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 40px;
+}
+.launch-intro__brand::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 210px;
+  height: 210px;
+  top: -8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(59, 130, 246, .24), rgba(59, 130, 246, 0) 70%);
+  animation: presence-intro-glow .95s .12s ease-out both;
+}
+.launch-intro__logo {
+  width: clamp(90px, 24vw, 116px);
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: contain;
+  animation: presence-intro-logo .6s cubic-bezier(.22, 1, .36, 1) both;
+}
+.launch-intro__name {
+  font-family: "Manrope", "Segoe UI", sans-serif;
+  font-size: clamp(32px, 9vw, 44px);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -.045em;
+  animation: presence-intro-word .6s .18s cubic-bezier(.22, 1, .36, 1) both;
+}
+@keyframes presence-intro-logo {
+  from { opacity: 0; transform: scale(.88); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes presence-intro-word {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes presence-intro-glow {
+  0%, 100% { opacity: 0; transform: scale(.85); }
+  45% { opacity: 1; transform: scale(1.08); }
+}
+@keyframes presence-intro-exit {
+  0%, 72% { opacity: 1; visibility: visible; pointer-events: auto; }
+  100% { opacity: 0; visibility: hidden; pointer-events: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-launch-intro] .launch-intro[hidden] { display: none !important; animation: none; }
+  .launch-intro__brand::before, .launch-intro__logo, .launch-intro__name { animation: none; }
+}

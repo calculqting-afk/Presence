@@ -72,7 +72,7 @@ test('login and both dashboards load one shared controller before CSS with one a
     const filename = path.join(__dirname, '..', file);
     const html = fs.readFileSync(filename, 'utf8');
     const scriptPaths = [...html.matchAll(/<script src="([^"]+)"/g)].map(match => match[1]);
-    assert.equal(scriptPaths.length, 2, file);
+    assert.equal(scriptPaths.length, file === 'index.html' ? 4 : 2, file);
     assert.ok(scriptPaths[0].includes('controllers/ThemeController.js?v=20261010-shared-theme'), file);
     assert.ok(scriptPaths[1].includes('theme.js?v=20261010-shared-theme'), file);
     assert.ok(html.indexOf('controllers/ThemeController.js') < html.indexOf('rel="stylesheet"'), file);
