@@ -812,7 +812,7 @@ body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
   .geofence-manager-head { align-items: flex-start; flex-direction: column; }
   .geofence-map { height: 270px; }
   #studentProfileModal .form-grid { grid-template-columns: 1fr; }
-  .dashboard-modal-backdrop { align-items: start; padding: 12px; }
+  .dashboard-modal-backdrop { align-items: center; padding: 12px; }
   .dashboard-modal { max-height: calc(100dvh - 24px); padding: 22px; }
   #studentProfileModal .modal-actions { bottom: -22px; margin-inline: -22px; padding: 14px 22px 16px; }
   .profile-photo-control { align-items: flex-start; flex-direction: column; }

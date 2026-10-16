@@ -24,9 +24,9 @@ function page({ storage = new Map(), reduced = false, blocked = false, search = 
   return { window, attributes, timers, listeners, motionListeners, storage, controller: vm.runInContext('launchIntro', context) };
 }
 
-test('launch intro starts once, sets a 2.5-second deadline and releases all resources', () => {
+test('launch intro starts once, sets a 4-second deadline and releases all resources', () => {
   const p = page(); assert.equal(p.attributes.has('data-launch-intro'), true);
-  assert.equal(p.timers.size, 1); assert.equal([...p.timers.values()][0].ms, 2500);
+  assert.equal(p.timers.size, 1); assert.equal([...p.timers.values()][0].ms, 4000);
   p.controller.initialize(); assert.equal(p.timers.size, 1);
   [...p.timers.values()][0].callback();
   assert.equal(p.attributes.has('data-launch-intro'), false); assert.equal(p.timers.size, 0);
@@ -38,6 +38,18 @@ test('returning to login in the same session skips intro; a new session can show
   const storage = new Map(); page({ storage });
   assert.equal(page({ storage }).attributes.has('data-launch-intro'), false);
   assert.equal(page().attributes.has('data-launch-intro'), true);
+});
+
+test('reference reveal uses rings, a turning logo and eight letters that settle before the fade', () => {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(root, 'assets/css/launch-intro.css'), 'utf8');
+  assert.equal([...html.matchAll(/class="launch-intro__ring"/g)].length, 3);
+  assert.equal([...html.matchAll(/--letter:\d/g)].length, 8);
+  assert.match(css, /presence-intro-ring 2s/);
+  assert.match(css, /rotate\(-145deg\)/);
+  assert.match(css, /presence-intro-letter \.9s calc\(1\.25s \+ var\(--letter\) \* \.1s\)/);
+  assert.ok(1.25 + 7 * .1 + .9 < 4 * .84);
+  assert.doesNotMatch(css, /\binfinite\b/);
 });
 
 test('reduced motion, QR links and blocked storage never delay login', () => {
@@ -58,9 +70,10 @@ test('intro is decorative, fails open without JavaScript and keeps authenticatio
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   const css = fs.readFileSync(path.join(root, 'assets/css/launch-intro.css'), 'utf8');
   assert.match(html, /class="launch-intro" aria-hidden="true" hidden/);
-  assert.match(html, /class="launch-intro__name">Presence/);
+  assert.match(html, /class="launch-intro__name" aria-label="Presence"/);
+  assert.equal([...html.matchAll(/class="launch-intro__letter"[^>]*>([^<]+)<\/span>/g)].map(match => match[1]).join(''), 'Presence');
   assert.match(css, /prefers-reduced-motion: reduce/);
-  assert.match(css, /presence-intro-exit 2\.5s/);
+  assert.match(css, /presence-intro-exit 4s/);
   assert.match(css, /100% \{ opacity: 0; visibility: hidden; pointer-events: none;/);
   assert.ok(html.indexOf('launch-intro.js') < html.indexOf('fonts.googleapis.com'));
   assert.doesNotMatch(source + bootstrap, /import.*firebase|fetch\s*\(/i);

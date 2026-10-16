@@ -1473,6 +1473,72 @@ function birthdayOnboardingShared(overrides = {}) {
   return { ...Object.fromEntries(names.map(name => [name, () => ''])), db: {}, currentUser:{uid:'student-1'}, currentUserProfile:{accountId:'12345678',birthday:'2005-01-02'}, ...overrides };
 }
 
+function historyRemovalFixture(browser, confirmation) {
+  const button = { dataset:{dismissHistory:'event-1'}, textContent:'Remove from history', disabled:false };
+  const state = {document:browser.document,scope:{initialized:true},view:'history',events:[{id:'event-1',name:'School event'}],dismissedIds:new Set(),
+    historyRemovalConfirmation:confirmation,scheduleEventRender(){this.rendered=(this.rendered||0)+1;}};
+  return {state,button,click:{target:{closest:()=>button}}};
+}
+
+test('student history removal waits five seconds AND an explicit click, and only writes a dismissal', async () => {
+  const browser=fakeBrowser(), writes=[], toasts=[];
+  const shared=birthdayOnboardingShared({isEventFinished:()=>true,doc:(_,collection,id)=>({collection,id}),setDoc:async(ref,data)=>writes.push({ref,data}),showDashboardToast:(...args)=>toasts.push(args),serverTimestamp:()=> 'server'});
+  const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
+  const {SurveyConfirmationController}=await isolatedModule('assets/js/controllers/SurveyConfirmationController.js');
+  let now=0,tick;
+  const nodes=new Map(), get=selector=>{if(!nodes.has(selector))nodes.set(selector,{disabled:false,textContent:'',addEventListener(){},focus(){},classList:{toggle(){}}});return nodes.get(selector);};
+  const attrs={};const dialog={setAttribute:(key,value)=>attrs[key]=value,querySelector:get,addEventListener(){},showModal(){},close(){},remove(){}};
+  const confirmation=new SurveyConfirmationController({document:{createElement:()=>dialog,body:{append(){}}},titleId:'studentHistoryRemovalTitle',now:()=>now,schedule:fn=>{tick=fn;return 1;},cancelTimer(){}});
+  const {state,button,click}=historyRemovalFixture(browser,confirmation);
+  const pending=StudentDashboard.prototype.handleStudentEventHistoryClick.call(state,click);
+  assert.equal(attrs['aria-labelledby'],'studentHistoryRemovalTitle');assert.equal(get('h2').id,'studentHistoryRemovalTitle');
+  assert.equal(button.disabled,true);assert.equal(get('[data-confirm]').textContent,'Wait 5s');
+  await StudentDashboard.prototype.handleStudentEventHistoryClick.call(state,click);assert.equal(writes.length,0);
+  confirmation.finish(true);assert.equal(writes.length,0);
+  now=4999;tick();assert.equal(get('[data-confirm]').disabled,true);confirmation.finish(true);assert.equal(writes.length,0);
+  now=5000;tick();assert.equal(get('[data-confirm]').disabled,false);assert.equal(writes.length,0);
+  confirmation.finish(true);await pending;
+  assert.equal(writes.length,1);assert.equal(writes[0].ref.collection,'dismissedHistory');assert.equal(writes[0].ref.id,'student-1_event-1');
+  assert.equal(writes[0].data.studentUid,'student-1');assert.equal(writes[0].data.eventId,'event-1');
+  assert.equal(state.dismissedIds.has('event-1'),true);assert.equal(state.rendered,1);assert.equal(button.disabled,false);assert.equal(state.historyRemovalBusy,false);
+  assert.match(toasts.at(-1)[1],/attendance record is unchanged/);confirmation.dispose();
+});
+
+test('history cancellation, disposal, navigation and stale event state never save a dismissal', async () => {
+  for(const reason of ['cancel','dispose','navigate','missing','dismissed','not-finished']) {
+    const browser=fakeBrowser();let settle,writes=0,finished=true;
+    const shared=birthdayOnboardingShared({isEventFinished:()=>finished,setDoc:async()=>writes++});
+    const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
+    const {state,button,click}=historyRemovalFixture(browser,{open:()=>new Promise(resolve=>settle=resolve)});
+    const pending=StudentDashboard.prototype.handleStudentEventHistoryClick.call(state,click);
+    if(reason==='dispose')state.scope.initialized=false;
+    if(reason==='navigate')state.view='events';
+    if(reason==='missing')state.events=[];
+    if(reason==='dismissed')state.dismissedIds.add('event-1');
+    if(reason==='not-finished')finished=false;
+    settle(reason!=='cancel');await pending;
+    assert.equal(writes,0,reason);assert.equal(button.disabled,false);assert.equal(state.historyRemovalBusy,false);
+  }
+});
+
+test('failed history save keeps the entry visible and permits retry without claiming success', async () => {
+  const browser=fakeBrowser(),toasts=[];
+  const shared=birthdayOnboardingShared({isEventFinished:()=>true,setDoc:async()=>{throw Error('offline');},showDashboardToast:(...args)=>toasts.push(args)});
+  const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
+  const {state,button,click}=historyRemovalFixture(browser,{open:async()=>true});
+  await StudentDashboard.prototype.handleStudentEventHistoryClick.call(state,click);
+  assert.equal(state.dismissedIds.size,0);assert.equal(button.disabled,false);assert.equal(button.textContent,'Remove from history');
+  assert.equal(toasts.at(-1)[0],'Unable to remove history entry');assert.equal(state.historyRemovalBusy,false);
+});
+
+test('leaving the history view cancels its pending confirmation', async () => {
+  const browser=fakeBrowser(),shared=birthdayOnboardingShared();let cancelled;
+  const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
+  const state={historyRemovalConfirmation:{finish:value=>cancelled=value},subscriptions:{setView(){}},scheduleEventRender(){},renderMyAttendances(){}};
+  StudentDashboard.prototype.changeSubscriptions.call(state,{detail:{viewName:'events'}});
+  assert.equal(cancelled,false);
+});
+
 test('Add Student derives birthday password and marks only the new profile for first-login change', async () => {
   const browser = fakeBrowser(), writes = [], credentials = [], toasts = [];
   const shared = birthdayOnboardingShared({ studentIdToEmail:id=>`${id}@students.test`,

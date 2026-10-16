@@ -7,8 +7,8 @@
   <meta name="theme-color" content="#f5f9ff">
   <script src="assets/js/controllers/ThemeController.js?v=20261010-shared-theme"></script>
   <script src="assets/js/theme.js?v=20261010-shared-theme"></script>
-  <link rel="stylesheet" href="assets/css/launch-intro.css?v=20261016">
-  <script src="assets/js/controllers/LaunchIntroController.js?v=20261016"></script>
+  <link rel="stylesheet" href="assets/css/launch-intro.css?v=20261016-reference-reveal-4s">
+  <script src="assets/js/controllers/LaunchIntroController.js?v=20261016-4s"></script>
   <script src="assets/js/launch-intro.js?v=20261016"></script>
   <meta name="description" content="Presence — a simple, reliable attendance portal for students and administrators.">
   <title>Presence</title>
@@ -24,8 +24,13 @@
 <body>
   <div class="launch-intro" aria-hidden="true" hidden>
     <div class="launch-intro__brand">
-      <img class="launch-intro__logo" src="assets/images/presence-logo.png?v=20260926" width="116" height="116" alt="" fetchpriority="high">
-      <span class="launch-intro__name">Presence</span>
+      <div class="launch-intro__stage">
+        <span class="launch-intro__ring" style="--ring:0"></span>
+        <span class="launch-intro__ring" style="--ring:1"></span>
+        <span class="launch-intro__ring" style="--ring:2"></span>
+        <img class="launch-intro__logo" src="assets/images/presence-logo.png?v=20260926" width="116" height="116" alt="" fetchpriority="high">
+      </div>
+      <span class="launch-intro__name" aria-label="Presence"><span class="launch-intro__letter" style="--letter:0">P</span><span class="launch-intro__letter" style="--letter:1">r</span><span class="launch-intro__letter" style="--letter:2">e</span><span class="launch-intro__letter" style="--letter:3">s</span><span class="launch-intro__letter" style="--letter:4">e</span><span class="launch-intro__letter" style="--letter:5">n</span><span class="launch-intro__letter" style="--letter:6">c</span><span class="launch-intro__letter" style="--letter:7">e</span></span>
     </div>
   </div>
   <div class="page-shell">

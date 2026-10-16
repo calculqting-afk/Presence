@@ -1,13 +1,16 @@
 // Native dialog provides modal focus containment and Escape handling.
 export class SurveyConfirmationController {
-  constructor({ document = globalThis.document, now = () => Date.now(), schedule = callback => setInterval(callback, 200), cancelTimer = timer => clearInterval(timer) } = {}) { Object.assign(this, { document, now, schedule, cancelTimer }); }
+  constructor({ document = globalThis.document, titleId = 'surveyToggleTitle', now = () => Date.now(), schedule = callback => setInterval(callback, 200), cancelTimer = timer => clearInterval(timer) } = {}) { Object.assign(this, { document, titleId, now, schedule, cancelTimer }); }
   open(enabled, options = {}) {
     if (this.resolve) return Promise.resolve(false);
     if (!this.dialog) {
       this.dialog = this.document.createElement('dialog');
       this.dialog.className = 'survey-confirmation';
-      this.dialog.setAttribute('aria-labelledby', 'surveyToggleTitle');
-      this.dialog.innerHTML = '<h2 id="surveyToggleTitle"></h2><p></p><div class="modal-actions"><button type="button" class="outline-button" data-cancel>Cancel</button><button type="button" class="primary-button" data-confirm></button></div>';
+      this.dialog.setAttribute('aria-labelledby', this.titleId);
+      this.dialog.setAttribute('aria-describedby', this.titleId + 'Message');
+      this.dialog.innerHTML = '<h2></h2><p></p><div class="modal-actions"><button type="button" class="outline-button" data-cancel>Cancel</button><button type="button" class="primary-button" data-confirm></button></div>';
+      this.dialog.querySelector('h2').id = this.titleId;
+      this.dialog.querySelector('p').id = this.titleId + 'Message';
       this.dialog.querySelector('[data-cancel]').addEventListener('click', () => this.finish(false));
       this.dialog.querySelector('[data-confirm]').addEventListener('click', () => this.finish(true));
       this.dialog.addEventListener('cancel', event => { event.preventDefault(); this.finish(false); });

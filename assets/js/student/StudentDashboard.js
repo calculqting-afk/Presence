@@ -1,5 +1,6 @@
 import { ControllerScope } from '../core/ControllerScope.js';
 import { StudentPasswordPolicy } from '../core/StudentPasswordPolicy.js';
+import { SurveyConfirmationController } from '../controllers/SurveyConfirmationController.js';
 import { StudentIdentityController } from '../controllers/StudentIdentityController.js';
 import { StudentAttendanceController } from '../controllers/StudentAttendanceController.js?v=20261011-optimized';
 import { currentUser, currentUserProfile, escapeHtml, formatBirthday, FineModalController, showDashboardToast, createNotification, uploadFacePhotoToDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineTimestamp, getFineHistory, updateDashboardGreeting, createDeviceSessionToken, auth, db, signOut, updatePassword, collection, deleteField, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch, sessionState } from '../dashboard.js?v=20261011-optimized';
@@ -231,6 +232,8 @@ export class StudentDashboard {
       dashboard.attendanceList.dispose();
       dashboard.attendanceController.dispose();
     });
+    dashboard.historyRemovalConfirmation = new SurveyConfirmationController({ document: dashboard.document, titleId: 'studentHistoryRemovalTitle', now: () => dashboard.window.performance?.now() ?? Date.now() });
+    dashboard.scope.addCleanup(() => dashboard.historyRemovalConfirmation.dispose());
     dashboard.scope.listen(dashboard.document.querySelector("#studentEventHistory"), "click", dashboard.handleStudentEventHistoryClick);
     dashboard.scope.listen(dashboard.document.querySelector("#studentAttendanceList"), "click", dashboard.handleStudentAttendanceListClick);
   }
@@ -329,6 +332,7 @@ export class StudentDashboard {
   changeSubscriptions(event) {
     const dashboard = this;
     dashboard.view = event.detail.viewName;
+    if (dashboard.view !== 'history') dashboard.historyRemovalConfirmation?.finish(false);
     dashboard.subscriptions.setView(dashboard.view);
     dashboard.scheduleEventRender();
     dashboard.renderMyAttendances();
@@ -975,13 +979,39 @@ export class StudentDashboard {
   async handleStudentEventHistoryClick(clickEvent) {
     const dashboard = this;
     const button = clickEvent.target.closest("[data-dismiss-history]");
-    if (!button) return;
-    await setDoc(doc(db, "dismissedHistory", `${currentUser.uid}_${button.dataset.dismissHistory}`), {
-      studentUid: currentUser.uid,
-      eventId: button.dataset.dismissHistory,
-      dismissedAt: serverTimestamp()
-    });
-    showDashboardToast("History entry removed", "The finished event is hidden from your history.");
+    if (!button || dashboard.historyRemovalBusy || !dashboard.scope.initialized || dashboard.view !== 'history') return;
+    const eventId = button.dataset.dismissHistory;
+    const event = dashboard.events.find(item => item.id === eventId);
+    if (!event || !isEventFinished(event) || dashboard.dismissedIds.has(eventId)) return;
+    const uid = currentUser?.uid;
+    if (!uid) return;
+    const originalLabel = button.textContent;
+    dashboard.historyRemovalBusy = true;
+    button.disabled = true;
+    try {
+      const confirmed = await dashboard.historyRemovalConfirmation.open(false, {
+        title: 'Remove from your history?',
+        message: `Hide “${event.name || 'this event'}” from your event history? Your attendance records and the school event will NOT be deleted. Wait five seconds, then confirm to continue.`,
+        label: 'Remove from history', countdown: 5
+      });
+      if (!confirmed || !dashboard.scope.initialized || dashboard.view !== 'history' || currentUser?.uid !== uid) return;
+      const latestEvent = dashboard.events.find(item => item.id === eventId);
+      if (!latestEvent || !isEventFinished(latestEvent) || dashboard.dismissedIds.has(eventId)) return;
+      button.textContent = 'Removing…';
+      await setDoc(doc(db, 'dismissedHistory', `${uid}_${eventId}`), {
+        studentUid: uid, eventId, dismissedAt: serverTimestamp()
+      });
+      if (!dashboard.scope.initialized) return;
+      dashboard.dismissedIds.add(eventId);
+      dashboard.scheduleEventRender();
+      showDashboardToast('History entry removed', 'Hidden from your history. Your attendance record is unchanged.');
+    } catch (error) {
+      if (dashboard.scope.initialized) showDashboardToast('Unable to remove history entry', 'The removal could not be confirmed. Check your connection and refresh before retrying.');
+    } finally {
+      dashboard.historyRemovalBusy = false;
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
   }
   async handleStudentAttendanceListClick(clickEvent) {
     const dashboard = this;

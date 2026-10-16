@@ -10,9 +10,16 @@ html[data-launch-intro] .launch-intro[hidden] {
   background: #f5f9ff;
   color: #10213e;
   /* CSS also fails open if JavaScript is interrupted after startup. */
-  animation: presence-intro-exit 2.5s ease both;
+  animation: presence-intro-exit 4s ease both;
 }
 :root[data-theme="dark"][data-launch-intro] .launch-intro { background: #0b1628; color: #eef4ff; }
+.launch-intro::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 43%, rgba(37, 132, 255, .25), transparent 65%);
+  animation: presence-intro-atmosphere 3s ease-out both;
+}
 .launch-intro__brand {
   position: relative;
   isolation: isolate;
@@ -22,49 +29,70 @@ html[data-launch-intro] .launch-intro[hidden] {
   gap: 20px;
   padding: 40px;
 }
-.launch-intro__brand::before {
-  content: "";
+.launch-intro__stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: clamp(90px, 24vw, 116px);
+  aspect-ratio: 1;
+}
+.launch-intro__ring {
   position: absolute;
+  inset: -12%;
   z-index: -1;
-  width: 210px;
-  height: 210px;
-  top: -8px;
+  border: 1px solid rgba(55, 139, 255, .24);
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(59, 130, 246, .24), rgba(59, 130, 246, 0) 70%);
-  animation: presence-intro-glow .95s .12s ease-out both;
+  background: radial-gradient(circle, rgba(59, 130, 246, .06) 36%, rgba(55, 139, 255, .16) 72%, transparent 73%);
+  animation: presence-intro-ring 2s calc(var(--ring) * .2s) cubic-bezier(.16, .7, .3, 1) both;
 }
 .launch-intro__logo {
-  width: clamp(90px, 24vw, 116px);
+  position: relative;
+  width: 100%;
   height: auto;
   aspect-ratio: 1;
   object-fit: contain;
-  animation: presence-intro-logo .6s cubic-bezier(.22, 1, .36, 1) both;
+  animation: presence-intro-logo 1.7s .2s cubic-bezier(.22, 1, .36, 1) both;
 }
 .launch-intro__name {
+  display: inline-flex;
   font-family: "Manrope", "Segoe UI", sans-serif;
   font-size: clamp(32px, 9vw, 44px);
   font-weight: 800;
-  line-height: 1.15;
+  line-height: 1.2;
   letter-spacing: -.045em;
-  animation: presence-intro-word .6s .18s cubic-bezier(.22, 1, .36, 1) both;
 }
+.launch-intro__letter {
+  --letter-x: 12px;
+  --letter-y: 24px;
+  --letter-turn: 14deg;
+  display: inline-block;
+  animation: presence-intro-letter .9s calc(1.25s + var(--letter) * .1s) cubic-bezier(.22, 1, .36, 1) both;
+}
+.launch-intro__letter:nth-child(even) { --letter-x: -10px; --letter-y: -18px; --letter-turn: -12deg; }
 @keyframes presence-intro-logo {
-  from { opacity: 0; transform: scale(.88); }
-  to { opacity: 1; transform: scale(1); }
+  0% { opacity: 0; transform: scale(.18) rotate(-145deg); clip-path: circle(12%); }
+  45% { opacity: 1; clip-path: circle(75%); }
+  74% { opacity: 1; transform: scale(1.06) rotate(8deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0); clip-path: circle(75%); }
 }
-@keyframes presence-intro-word {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+@keyframes presence-intro-letter {
+  0% { opacity: 0; transform: translate(var(--letter-x), var(--letter-y)) rotate(var(--letter-turn)) scale(.88); }
+  100% { opacity: 1; transform: translate(0, 0) rotate(0) scale(1); }
 }
-@keyframes presence-intro-glow {
-  0%, 100% { opacity: 0; transform: scale(.85); }
-  45% { opacity: 1; transform: scale(1.08); }
+@keyframes presence-intro-ring {
+  0% { opacity: 0; transform: scale(.15); }
+  24% { opacity: .85; }
+  100% { opacity: 0; transform: scale(2.7); }
+}
+@keyframes presence-intro-atmosphere {
+  0%, 100% { opacity: 0; }
+  32% { opacity: 1; }
 }
 @keyframes presence-intro-exit {
-  0%, 72% { opacity: 1; visibility: visible; pointer-events: auto; }
+  0%, 84% { opacity: 1; visibility: visible; pointer-events: auto; }
   100% { opacity: 0; visibility: hidden; pointer-events: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   html[data-launch-intro] .launch-intro[hidden] { display: none !important; animation: none; }
-  .launch-intro__brand::before, .launch-intro__logo, .launch-intro__name { animation: none; }
+  .launch-intro *, .launch-intro::before { animation: none !important; }
 }

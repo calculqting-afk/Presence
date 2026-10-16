@@ -30,7 +30,7 @@ class LaunchIntroController {
     this.window.addEventListener('pointerdown', this.finish, { once: true });
     this.motion.addEventListener?.('change', this.onMotionChange);
     // The deadline includes page loading, not an extra delay after login is ready.
-    this.timer = this.window.setTimeout(this.finish, 2500);
+    this.timer = this.window.setTimeout(this.finish, 4000);
   }
 
   finish() {
