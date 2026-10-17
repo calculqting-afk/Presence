@@ -27,7 +27,7 @@ Web: a local PDF Blob starts the browser download. PDF libraries, font and logo 
 
 Android: the `AttendancePdf` Capacitor plugin uses the system Create Document picker for **Save PDF**, and a read-granted FileProvider URI with the Android chooser for **Share PDF**. No broad storage permission is added. Cancelling the save picker is handled normally. Shared PDFs remain in private app cache until Android or the user clears that cache; saved/shared copies are outside Presence's control. Share only with authorized recipients.
 
-The source and native plugin must ship together. Website publishing is separate from APK delivery. Increment the Android version code/name and rebuild a signed APK for a future release; an already-built APK does not acquire these changes. This implementation synced web assets and compiled `:app:compileBetaJavaWithJavac`, without rebuilding/replacing the existing v1.5 APK or release JSON.
+The source and native plugin must ship together. Website publishing is separate from APK delivery. Android version 1.6 (code 7) now bundles these changes in the beta APK, with matching `presence-update.json`. Its certificate matches the previous distributed test APK; the manifest checksum and packaged PDF assets/native plugin were verified. This retains the existing debug signing identity, not a Google Play production signing configuration. The release has not been published. Real-device update/save/share testing remains required before distribution.
 
 ## Verification performed
 
