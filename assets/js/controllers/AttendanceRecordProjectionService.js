@@ -8,10 +8,9 @@ export class AttendanceRecordProjectionService {
 
   project(records, { from = '', to = '', eventId = 'all', status = '', section = '', search = '' } = {}, attendanceContext = records) {
     const actual = records || [];
-    // A generated absence is only meaningful for the unfiltered view or the
-    // dedicated absence filter. Other status filters must show actual records
-    // only—for example, "Late check-in" must never append absent students.
-    if (status && status !== 'absent') return actual;
+    // Only absence/review views may add roster-only rows. A deleted profile
+    // needs review, not a confirmed absence; late/completed views stay actual-only.
+    if (status && !['absent', 'review'].includes(status)) return actual;
     // Filtering can intentionally omit completed records (for example while
     // viewing "Did not attend"). Use the unfiltered loaded history to decide
     // who truly has attendance, while returning only the filtered rows.
@@ -40,6 +39,9 @@ export class AttendanceRecordProjectionService {
       return Object.entries(roster).flatMap(([studentUid, rosterSection]) => {
         if (section && rosterSection !== section) return [];
         const student = students.get(studentUid);
+        const profileMissing = !student;
+        if ((status === 'absent' && profileMissing)
+          || (status === 'review' && !profileMissing && !unverified.has(studentUid))) return [];
         const text = [student?.firstName, student?.middleName, student?.lastName, student?.accountId, student?.email].join(' ').toLowerCase();
         if (search && !text.includes(search.toLowerCase())) return [];
         if (keys.has(this.recordKey(studentUid, event.id))
@@ -48,6 +50,8 @@ export class AttendanceRecordProjectionService {
           id: `absent:${studentUid}:${event.id}`,
           displayOnly: true,
           rosterUnverified: unverified.has(studentUid),
+          profileMissing,
+          rosterSection,
           studentUid,
           eventId: event.id,
           eventName: event.name,
@@ -57,8 +61,8 @@ export class AttendanceRecordProjectionService {
           timeOut: event.timeOut,
           location: event.location,
           audience: event.audience,
-          status: 'absent',
-          arrivalStatus: 'absent'
+          status: profileMissing ? 'review' : 'absent',
+          arrivalStatus: profileMissing ? 'unknown' : 'absent'
         }];
       });
     });

@@ -102,13 +102,13 @@ export class AttendanceHistoryController {
       const event = events.get(record.eventId);
       const section = event?.attendanceRoster?.[record.studentUid] ?? student?.section;
       const text = [student?.firstName, student?.middleName, student?.lastName, student?.accountId, student?.email, record.studentId].join(' ').toLowerCase();
-      const review = this.summary.needsReview(record, event);
+      const review = !student || record.rosterUnverified || this.summary.needsReview(record, event);
       return (!filters.search || text.includes(filters.search)) && (!filters.section || section === filters.section)
         && (!filters.event || filters.event === 'all' || filters.event === record.eventId)
-        && (!filters.status || (filters.status === 'absent' ? record.status === 'absent'
+        && (!filters.status || (filters.status === 'absent' ? record.status === 'absent' && !review
           : filters.status === 'late' ? record.arrivalStatus === 'late'
           : filters.status === 'review' ? review
-          : filters.status === 'completed' ? Boolean(record.checkedOutAt) : !record.checkedOutAt && !review));
+          : filters.status === 'completed' ? Boolean(record.checkedOutAt) && !review : !record.checkedOutAt && !review));
     });
   }
   sortForDisplay(records) {

@@ -1,9 +1,15 @@
 package io.github.calculatingafk.presence;
 
 import com.getcapacitor.BridgeActivity;
+import android.os.Bundle;
 
 public class MainActivity extends BridgeActivity {
     private GithubUpdateController updates;
+
+    @Override public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(AttendancePdfPlugin.class);
+        super.onCreate(savedInstanceState);
+    }
 
     @Override public void onResume() {
         super.onResume();

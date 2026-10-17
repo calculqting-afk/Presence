@@ -235,10 +235,30 @@ test('attendance policy keeps check-in open as late until checkout closes', asyn
   assert.equal(policy.evaluateCheckIn(event, new Date(4001)).available, false);
 });
 
+test('deleted profile attendance UI shows saved section and timestamps without an absence badge', async () => {
+  const names = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared = Object.fromEntries(names.map(name => [name, () => '']));
+  shared.escapeHtml = String; shared.formatAttendanceTimestamp = value => value || 'Not recorded';
+  const { AdminDashboard } = await isolatedModule('assets/js/admin/AdminDashboard.js', shared, fakeBrowser());
+  const state = { students: [], events: [{ id: 'event', attendanceRoster: { deleted: '2B' } }] };
+  const html = AdminDashboard.prototype.attendanceLineMarkup.call(state, [{ studentUid: 'deleted', eventId: 'event', checkedInAt: 'saved-check-in', checkedOutAt: 'saved-checkout', studentId: 'SAVED-ID' }]);
+  for (const expected of ['Deleted/missing student profile', 'Needs review — profile missing', '2B', 'SAVED-ID', 'saved-check-in', 'saved-checkout']) assert.ok(html.includes(expected), expected);
+  assert.ok(!html.includes('Absent in')); assert.ok(!html.includes('Absent — no attendance'));
+});
+
+test('missing-profile history is review-only rather than confirmed absent/completed', async () => {
+  const { AttendanceHistoryController } = await isolatedModule('assets/js/controllers/AttendanceHistoryController.js');
+  const controller = new AttendanceHistoryController({ getStudents: () => [], getEvents: () => [{ id: 'event', attendanceRoster: { deleted: '2B' } }], summary: { needsReview: () => false } });
+  controller.records = [{ studentUid: 'deleted', eventId: 'event', status: 'absent' }, { studentUid: 'deleted', eventId: 'event', checkedOutAt: 'saved' }];
+  controller.applied = { status: 'review', section: '2B' }; assert.equal(controller.filtered().length, 2);
+  controller.applied.status = 'absent'; assert.equal(controller.filtered().length, 0);
+  controller.applied.status = 'completed'; assert.equal(controller.filtered().length, 0);
+});
+
 test('attendance projection marks only no-record roster members absent after checkout closes', async () => {
   const { AttendanceRecordProjectionService } = await isolatedModule('assets/js/controllers/AttendanceRecordProjectionService.js');
   const event = { id: 'event', name: 'Assembly', date: '2026-10-13', attendanceRoster: { absent: '2A', checkoutOnly: '2A' } };
-  const service = new AttendanceRecordProjectionService({ getEvents: () => [event], checkoutCloseDate: () => new Date(1000), now: () => new Date(2000) });
+  const service = new AttendanceRecordProjectionService({ getEvents: () => [event], getStudents: () => [{ uid: 'absent', section: '2A' }], checkoutCloseDate: () => new Date(1000), now: () => new Date(2000) });
   const records = service.project([{ id: 'checkoutOnly_event', studentUid: 'checkoutOnly', eventId: 'event', status: 'checkout-only', checkedOutAt: 'time' }]);
   assert.equal(records.length, 2);
   assert.equal(records.find(record => record.studentUid === 'absent').status, 'absent');
@@ -266,7 +286,7 @@ test('attendance projection does not append absences to a late-only result', asy
 test('absence filter keeps completed students out when it projects display-only absences', async () => {
   const { AttendanceRecordProjectionService } = await isolatedModule('assets/js/controllers/AttendanceRecordProjectionService.js');
   const event = { id: 'event', date: '2026-10-13', attendanceRoster: { completed: '2A', absent: '2A' } };
-  const service = new AttendanceRecordProjectionService({ getEvents: () => [event], checkoutCloseDate: () => new Date(1000), now: () => new Date(2000) });
+  const service = new AttendanceRecordProjectionService({ getEvents: () => [event], getStudents: () => [{ uid: 'absent', section: '2A' }], checkoutCloseDate: () => new Date(1000), now: () => new Date(2000) });
   const completed = { id: 'completed_event', studentUid: 'completed', eventId: 'event', checkedInAt: 'time', checkedOutAt: 'time', status: 'completed' };
   const records = service.project([], { status: 'absent' }, [completed]);
   assert.equal(records.map(record => record.studentUid).join(','), 'absent');
@@ -275,7 +295,7 @@ test('absence filter keeps completed students out when it projects display-only 
 test('absence projection respects the selected roster section', async () => {
   const { AttendanceRecordProjectionService } = await isolatedModule('assets/js/controllers/AttendanceRecordProjectionService.js');
   const event = { id: 'event', date: '2026-10-13', attendanceRoster: { sectionOne: '1A', sectionTwo: '2A' } };
-  const service = new AttendanceRecordProjectionService({ getEvents: () => [event], checkoutCloseDate: () => new Date(1000), now: () => new Date(2000) });
+  const service = new AttendanceRecordProjectionService({ getEvents: () => [event], getStudents: () => [{ uid: 'sectionOne', section: '1A' }, { uid: 'sectionTwo', section: '2A' }], checkoutCloseDate: () => new Date(1000), now: () => new Date(2000) });
   const records = service.project([], { status: 'absent', section: '2A' });
   assert.equal(records.map(record => record.studentUid).join(','), 'sectionTwo');
 });

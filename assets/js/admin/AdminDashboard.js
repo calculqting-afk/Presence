@@ -1,4 +1,5 @@
 import { ControllerScope } from '../core/ControllerScope.js';
+import { AttendanceReportController } from '../controllers/AttendanceReportController.js';
 import { StudentPasswordPolicy } from '../core/StudentPasswordPolicy.js';
 import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261011-optimized';
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
@@ -183,6 +184,7 @@ export class AdminDashboard {
       onError: (error, key) => {
         console.error(key, error);
         if (key === 'attendance') dashboard.updateAttendanceSyncStatus({ state: 'error', error });
+        if (key === 'students') { dashboard.studentsLoaded = false; dashboard.attendanceReport?.refreshContext(); }
         const message = error?.code === 'permission-denied'
           ? 'Access was denied. Check your signed-in account and deployed database rules.'
           : error?.message || 'Check your connection and reload to retry.';
@@ -266,6 +268,12 @@ export class AdminDashboard {
       }
     });
     dashboard.historyController.initialize();
+    dashboard.attendanceReport = new AttendanceReportController({ document: dashboard.document, window: dashboard.window, db,
+      can: () => dashboard.can('viewAttendance'), summary: dashboard.summaryService, checkoutCloseDate: eventCheckoutCloseDate,
+      context: () => ({ filters: dashboard.historyController.filters(), events: dashboard.events, students: dashboard.students, studentsReady: dashboard.studentsLoaded }),
+      notify: showDashboardToast });
+    dashboard.attendanceReport.initialize();
+    dashboard.scope.addCleanup(() => dashboard.attendanceReport.dispose());
     dashboard.document.querySelector('#attendanceFromDate').value = dashboard.recentAttendanceFrom;
     dashboard.scope.listen(dashboard.window, 'presence:viewchange', dashboard.onHistoryView);
     dashboard.scope.addCleanup(() => {
@@ -569,7 +577,7 @@ export class AdminDashboard {
       dashboard.scheduleAdminEventStatusRefresh();
     });
     dashboard.listen('students', ["dashboard", "create", "modify-events", "past-events", "modify-students", "assign-fine", "attendance-line", "profile"], collection(db, "students"), snapshot => {
-      dashboard.studentsLoaded = !snapshot.metadata?.fromCache;
+      dashboard.studentsLoaded = !snapshot.metadata?.fromCache && !snapshot.metadata?.hasPendingWrites;
       dashboard.students = snapshot.docs.map(item => ({
         uid: item.id,
         ...item.data()
@@ -918,6 +926,10 @@ export class AdminDashboard {
       const student = dashboard.students.find(item => item.uid === record.studentUid);
       const studentName = student ? [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ") : record.studentId || "Student";
       const avatar = student?.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student?.firstName || studentName, student?.lastName || ""));
+      if (!student) {
+        const section = dashboard.events.find(event => event.id === record.eventId)?.attendanceRoster?.[record.studentUid] ?? record.rosterSection ?? record.section;
+        return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>Deleted/missing student profile</strong><small>${escapeHtml(record.studentId || 'Student ID unavailable')}${section ? ` · ${escapeHtml(section)}` : ''}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || 'Attendance event')}</strong><small>${escapeHtml(record.eventDate || 'Date unavailable')}</small></div><div class="attendance-line-times"><div><span>IN</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedInAt || record.attendedAt))}</strong></div><div><span>OUT</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div></div><div class="attendance-line-status"><span class="badge orange">Needs review — profile missing</span></div></article>`;
+      }
       if (record.rosterUnverified) return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || '')} · ${escapeHtml(student?.section || '')}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName)}</strong><small>${escapeHtml(record.eventDate)}</small></div><div class="attendance-line-times">No attendance recorded</div><div class="attendance-line-status"><span class="badge orange">Needs review — registration date unknown</span></div></article>`;
       const checkedInAt = record.checkedInAt || record.attendedAt;
       const completed = Boolean(record.checkedOutAt);
@@ -930,6 +942,7 @@ export class AdminDashboard {
   }
   renderAttendanceLine() {
     const dashboard = this;
+    dashboard.attendanceReport?.refreshContext();
     const filter = dashboard.document.querySelector("#adminAttendanceEventFilter");
     const selectedEvent = filter.value || "";
     const eventOptions = dashboard.events.map(event => `<option value="${escapeHtml(event.id)}">${escapeHtml(event.name)}${event.date ? ` · ${escapeHtml(event.date)}` : ""}</option>`).join("");

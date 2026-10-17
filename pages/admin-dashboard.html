@@ -21,6 +21,7 @@
   <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/button-loading.css?v=20261010-auth-progress">
   <link rel="stylesheet" href="../assets/css/survey.css?v=20261011-survey-archive">
+  <link rel="stylesheet" href="../assets/css/attendance-report.css?v=20261017">
 </head>
 <body data-dashboard="admin">
   <div class="app-shell">
@@ -75,6 +76,7 @@
           <div class="section-head attendance-section-head"><h2>Attendance records</h2><div class="button-row attendance-header-actions">
             <span class="badge gray" id="attendanceSyncStatus" role="status" aria-live="polite">Connecting…</span>
             <button class="outline-button" id="syncAttendanceNow" type="button"><span aria-hidden="true">↻</span> Refresh</button>
+            <button class="outline-button" id="openAttendanceReport" type="button">Live report / PDF</button>
             <button class="primary-button" type="button" id="addAttendanceCorrection"><span aria-hidden="true">＋</span> Set attendance</button>
             <details class="attendance-help" id="attendanceHelp"><summary aria-label="Attendance help"><span aria-hidden="true">i</span></summary><div class="attendance-help-content"><strong>About these records</strong><p>Dates filter server records. Other filters search loaded records; use Load more to continue.</p><p>Section uses the event roster when available, otherwise the current profile.</p><p>Missed checkout needs review, not an automatic absence or fine.</p></div></details>
           </div></div>
