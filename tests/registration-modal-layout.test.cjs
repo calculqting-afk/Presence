@@ -3,6 +3,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
+test('student registration offers the four requested courses in a required dropdown', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const form = html.match(/<form id="registrationForm"[\s\S]*?<\/form>/)?.[0];
+  const select = form?.match(/<select name="course" required>([\s\S]*?)<\/select>/)?.[1];
+  assert.ok(select, 'Course remains a required form field');
+  const options = [...select.matchAll(/<option value="([^"]*)">([^<]*)<\/option>/g)].map(match => [match[1], match[2]]);
+  assert.deepEqual(options, [['', 'Choose course'], ['BSA', 'BSA'], ['BS Info Tech', 'BS Info Tech'], ['BSMB', 'BSMB'], ['BSFI', 'BSFI']]);
+  assert.doesNotMatch(form, /<input[^>]*name="course"/);
+});
+
 test('registration errors use theme-aware red instead of dialog paragraph muted text', () => {
   const css = fs.readFileSync(path.join(__dirname, '../assets/css/style.css'), 'utf8');
   assert.match(css, /\.dialog \.registration-error\s*\{[^}]*color:\s*var\(--danger\)/);

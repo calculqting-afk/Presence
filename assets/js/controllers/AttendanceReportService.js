@@ -1,5 +1,7 @@
 import { AttendanceRecordProjectionService } from './AttendanceRecordProjectionService.js';
 import { EventAudiencePolicy } from './EventAudiencePolicy.js';
+import { AttendanceSort } from './AttendanceSort.js';
+import { CoursePolicy } from '../core/CoursePolicy.js';
 
 export class AttendanceReportService {
   constructor({ summary, checkoutCloseDate, now = () => new Date() }) { Object.assign(this, { summary, checkoutCloseDate, now }); }
@@ -74,19 +76,23 @@ export class AttendanceReportService {
         studentId: AttendanceReportService.clean(student?.accountId || record.studentId || 'Unavailable'),
         name: AttendanceReportService.clean([student?.firstName, student?.middleName, student?.lastName].filter(Boolean).join(' ') || record.studentName || 'Deleted/missing student profile'),
         sortName: AttendanceReportService.clean(student?.lastName || record.studentName || ''),
-        course: AttendanceReportService.clean(record.studentCourse || student?.course || 'Unavailable'),
+        course: AttendanceReportService.clean(CoursePolicy.normalize(record.studentCourse || student?.course || 'Unavailable')),
         section: AttendanceReportService.clean(event.attendanceRoster?.[record.studentUid] ?? record.rosterSection ?? student?.section ?? record.section ?? 'Unavailable'),
         checkIn: AttendanceReportService.time(checkIn), checkOut: AttendanceReportService.time(record.checkedOutAt),
+        checkInMilliseconds: AttendanceSort.checkIn(record),
         arrival: record.pending && !profileMissing ? 'Not yet checked in' : absent ? 'Absent' : !checkIn ? 'No check-in' : record.arrivalStatus === 'late' ? 'Late' : 'Present',
         completion: profileMissing ? 'Needs review - profile missing' : status === 'completed' ? 'Completed' : status === 'review' ? 'Needs review' : status === 'absent' ? 'Absent' : status === 'pending' ? 'Pending' : 'Checked in',
         status, late: Boolean(checkIn) && record.arrivalStatus === 'late', corrected: record.recordSource === 'admin-corrected'
       };
     });
     rows = rows.filter(row => (!filters.section || row.section === filters.section)
+      && (!filters.course || row.course === filters.course)
       && (!filters.status || (filters.status === 'late' ? row.late : row.status === filters.status)));
     const lastName = String(filters.sort || '').startsWith('last-name');
-    const direction = String(filters.sort || '').endsWith('-desc') ? -1 : 1;
-    rows.sort((a, b) => direction * (lastName ? a.sortName : a.name).localeCompare(lastName ? b.sortName : b.name) || a.studentId.localeCompare(b.studentId));
+    rows.sort((a, b) => AttendanceSort.compare(a, b, { sort: filters.sort || 'check-in-desc',
+      time: row => row.checkInMilliseconds,
+      name: row => lastName ? row.sortName : row.name, key: row => row.studentId }));
+    rows = rows.map(({ checkInMilliseconds, ...row }) => row);
     if (rows.length > 5000) throw new Error('This report exceeds 5,000 rows. Select a section to reduce its size.');
     const totals = { rows: rows.length, present: 0, late: 0, completed: 0, review: 0, absent: 0, pending: 0 };
     for (const row of rows) {
@@ -97,9 +103,9 @@ export class AttendanceReportService {
     const safe = AttendanceReportService.clean;
     return { title: 'Live attendance report', school: 'Southern Leyte State University - Bontoc Campus',
       event: { id: event.id, name: safe(event.name), date: safe(event.date), location: safe(event.location), audience: safe(EventAudiencePolicy.label(event)), time: safe([event.timeIn, event.timeOut].filter(Boolean).join(' - ')), schedule: this.schedule(event) },
-      filters: { section: safe(filters.section || 'All sections'), status: safe(filters.status || 'All statuses'), search: safe(filters.search || ''), sort: safe(filters.sort || 'name-asc') },
+      filters: { section: safe(filters.section || 'All sections'), course: safe(filters.course || 'All courses'), status: safe(filters.status || 'All statuses'), search: safe(filters.search || ''), sort: safe(filters.sort || 'check-in-desc') },
       rows, totals, generatedAt: now.toISOString(), verifiedAt: verifiedAt.toISOString(), timezone: 'Asia/Manila', closed, duplicateCount: records.length - unique.size,
       note: `${closed ? 'Event closed.' : 'Event not final. Pending students are not automatically absent.'} ${records.length - unique.size} duplicate attendance record(s) consolidated. Late and completed counts may overlap with present. Names/course use the current profile; section uses the event roster when available.`,
-      filtered: Boolean(filters.section || filters.status || filters.search) };
+      filtered: Boolean(filters.section || filters.course || filters.status || filters.search) };
   }
 }

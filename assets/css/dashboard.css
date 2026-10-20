@@ -305,6 +305,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .event-session-schedule + .event-session-schedule { margin-top: 18px; }
 .event-session-title { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0 0 9px; color: var(--ink); font-size: .88rem; }
 .event-session-title span { padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: .67rem; font-weight: 600; }
+.attendance-line-times .attendance-time-since { display: block; margin-top: 5px; color: var(--muted); font-size: .65rem; font-weight: 400; line-height: 1.4; }
 @media (max-width: 580px) { .event-schedule { grid-template-columns: minmax(0, 1fr); } }
 .event-card-notice { margin: 14px 0 -2px; padding: 10px 12px; color: #94561d; background: #fff7eb; border: 1px solid #f6dfbf; border-radius: 9px; font-size: .72rem; line-height: 1.5; }
 .event-card-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
@@ -352,6 +353,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .attendance-line-person strong, .attendance-line-event strong { color: #254668; font-size: .72rem; }
 .attendance-line-person small, .attendance-line-event small { margin-top: 3px; color: var(--muted); font-size: .62rem; }
 .attendance-line-times { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.attendance-line-times > .attendance-no-record { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: .65rem; font-weight: 400; line-height: 1.4; overflow-wrap: normal; }
 .attendance-line-times > div { min-width: 0; padding: 8px; background: #f4f8fd; border: 1px solid #e4edf7; border-radius: 7px; }
 .attendance-line-times span, .attendance-line-times strong { display: block; overflow-wrap: anywhere; }
 .attendance-line-times span { margin-bottom: 3px; color: #8995a7; font-size: .54rem; font-weight: 800; letter-spacing: .05em; }
@@ -931,7 +933,7 @@ body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
 #attendanceFilters .attendance-search-field { grid-column: 1; grid-row: 2; }
 #attendanceFilters .attendance-sort-field { grid-column: 2; grid-row: 2; }
 #attendanceFilters .attendance-filter-actions { grid-column: 3; grid-row: 2; justify-content: flex-end; }
-#attendanceFilters .attendance-filter-options { grid-column: 1 / -1; grid-row: 3; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+#attendanceFilters .attendance-filter-options { grid-column: 1 / -1; grid-row: 3; grid-template-columns: repeat(5, minmax(0, 1fr)); }
 @media (max-width: 1300px) {
   .attendance-filters { grid-template-columns: minmax(0, 1fr) auto; }
   .attendance-search-field { grid-column: 1; grid-row: 1; }

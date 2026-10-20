@@ -1,3 +1,4 @@
+export const MAX_CIRCLE_RADIUS_METERS = 100000;
 const radians = value => value * Math.PI / 180;
 const validPoint = point => point && typeof point.latitude === 'number' && typeof point.longitude === 'number'
   && Number.isFinite(point.latitude) && Math.abs(point.latitude) <= 90
@@ -17,7 +18,7 @@ const intersects = (a, b, c, d) => (cross(a, b, c) * cross(a, b, d) < 0 && cross
 export class CircleGeofence {
   constructor(area) { this.area = area; }
   validate() {
-    if (!validPoint(this.area) || !Number.isFinite(this.area.radiusMeters) || this.area.radiusMeters <= 0 || this.area.radiusMeters > 10000) throw new Error('Choose a valid center and radius.');
+    if (!validPoint(this.area) || !Number.isFinite(this.area.radiusMeters) || this.area.radiusMeters <= 0 || this.area.radiusMeters > MAX_CIRCLE_RADIUS_METERS) throw new Error('Choose a valid center and circle radius greater than 0 and no more than 100,000 meters.');
     return this;
   }
   evaluate(point, allowance = 0) {

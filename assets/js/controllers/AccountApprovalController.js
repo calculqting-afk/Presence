@@ -1,4 +1,5 @@
 import { collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+import { CoursePolicy } from '../core/CoursePolicy.js';
 
 export class AccountApprovalController {
   constructor({ document = globalThis.document, db, user, canApprove, studentIdToEmail, onApprovedStudent = () => {}, notify = () => {} } = {}) {
@@ -19,7 +20,7 @@ export class AccountApprovalController {
     this.modal?.addEventListener('click', event => { if (event.target === this.modal || event.target.closest('[data-close-account-approval]')) this.closeModal(); });
     this.confirm?.addEventListener('click', () => this.confirmDecision());
     this.unsubscribe = onSnapshot(query(collection(this.db, 'registrationRequests'), orderBy('requestedAt', 'desc')), snapshot => {
-      this.requests = snapshot.docs.map(item => ({ id: item.id, ...item.data() })).filter(item => item.status === 'pending'); this.render();
+      this.requests = snapshot.docs.map(item => CoursePolicy.profile({ id: item.id, ...item.data() })).filter(item => item.status === 'pending'); this.render();
     }, () => { this.list.innerHTML = '<div class="empty-state">Unable to load registration requests.</div>'; });
   }
   dispose() { this.unsubscribe?.(); this.unsubscribe = null; this.initialized = false; }
@@ -37,7 +38,7 @@ export class AccountApprovalController {
       uid: request.uid, accountId: request.accountId, accountIdKey,
       authEmail: this.studentIdToEmail(request.accountId), birthday: request.birthday,
       firstName: request.firstName, middleName: '', lastName: request.lastName,
-      course: request.course, section: request.section, active: true,
+      course: CoursePolicy.normalize(request.course), section: request.section, active: true,
       createdAt: serverTimestamp(), updatedAt: serverTimestamp()
     };
   }

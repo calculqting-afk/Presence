@@ -38,15 +38,20 @@ test('invalid, missing, overlapping and pre-noon afternoon windows are rejected'
   }
 });
 
-test('opened schedules are immutable, while upcoming afternoon can be added after morning opens', async () => {
+test('ongoing schedules can change with confirmation while closed schedules and opened dates stay protected', async () => {
   const {EventSessionPolicy:Policy} = await load();
   const later = new Date('2026-10-20T10:00:00'), previous=record();
   assert.equal(Policy.prepare({...options(),previous,now:later}).afternoon.timeIn,'13:00');
-  assert.throws(()=>Policy.prepare({...options(),previous,now:later,record:{...record(),timeIn:'07:30'}}),/schedule is locked/);
+  const changed={...record(),timeIn:'07:30'};
+  assert.equal(Policy.prepare({...options(),previous,now:later,record:changed}).primary.timeIn,'07:30');
+  assert.equal(Policy.needsScheduleConfirmation(changed,previous,later),true);
+  assert.equal(Policy.needsScheduleConfirmation(record(),previous,later),false);
+  assert.throws(()=>Policy.prepare({...options(),previous,now:later,record:{...record(),date:'2026-10-21'}}),/date unchanged/);
   assert.throws(()=>Policy.prepare({...options(),previous,now:new Date('2026-10-20T13:00:00')}),/before its check-in/);
   const afternoon=Policy.prepare(options()).afternoon;
   assert.throws(()=>Policy.prepare({...options(),previous,afternoon,enabled:false}),/preserved/);
-  assert.throws(()=>Policy.prepare({...options(),previous,afternoon,now:new Date('2026-10-20T14:00:00'),times:['13:00','14:00','16:30','17:30']}),/schedule is locked/);
+  assert.equal(Policy.prepare({...options(),previous,afternoon,now:new Date('2026-10-20T14:00:00'),times:['13:00','14:00','16:30','17:30']}).afternoon.timeOut,'16:30');
+  assert.throws(()=>Policy.prepare({...options(),previous,afternoon,now:new Date('2026-10-20T18:00:00'),times:['13:00','14:00','16:30','17:30']}),/Closed-session/);
 });
 
 test('closed afternoon groups retain their roster and cannot gain new obligations', async () => {
@@ -56,6 +61,15 @@ test('closed afternoon groups retain their roster and cannot gain new obligation
   assert.equal(Object.hasOwn(plan.afternoon,'attendanceRoster'),false);
   assert.equal(Object.hasOwn(plan.afternoon,'rosterVersion'),false);
   assert.throws(()=>Policy.prepare({...options(),previous:record(),afternoon,sections:['2B'],now:new Date('2026-10-20T18:00:00')}),/Closed afternoon/);
+});
+
+test('legacy cutoff aliases follow edited primary and afternoon schedules, never the other session', async () => {
+  const {EventSessionPolicy:Policy}=await load(),previous={...record(),lateAfterAt:record().checkInClosesAt,checkInClose:'09:00'};
+  const changed={...record(),checkInCutoff:'09:30',checkInClosesAt:stamp(new Date('2026-10-20T09:30:00'))};
+  const plan=Policy.prepare({...options(),previous,record:changed,now:new Date('2026-10-20T10:00:00')});
+  assert.equal(plan.primary.checkInClose,'09:30');assert.equal(+plan.primary.lateAfterAt.toDate(),+changed.checkInClosesAt.toDate());
+  assert.equal(plan.afternoon.checkInClose,'14:00');assert.equal(+plan.afternoon.lateAfterAt.toDate(),+plan.afternoon.checkInClosesAt.toDate());
+  assert.equal(previous.checkInClose,'09:00');
 });
 
 test('report scopes keep morning and afternoon separate instead of consolidating their students', async () => {

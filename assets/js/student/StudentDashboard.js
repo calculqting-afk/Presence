@@ -1,4 +1,5 @@
 import { ControllerScope } from '../core/ControllerScope.js';
+import { CoursePolicy } from '../core/CoursePolicy.js';
 import { EventAudiencePolicy } from '../controllers/EventAudiencePolicy.js';
 import { StudentPasswordPolicy } from '../core/StudentPasswordPolicy.js';
 import { SurveyConfirmationController } from '../controllers/SurveyConfirmationController.js';
@@ -317,7 +318,7 @@ export class StudentDashboard {
   }
   applyProfile(profile) {
     if (!this.scope.initialized || !profile || !Object.keys(profile).length) return;
-    this.studentProfile = { ...profile };
+    this.studentProfile = CoursePolicy.profile(profile);
     this.identity.save(currentUser.uid, profile);
     this.renderProfile();
     this.scheduleEventRender();
@@ -807,7 +808,7 @@ export class StudentDashboard {
     dashboard.document.querySelector("#profileMiddleName").value = dashboard.studentProfile.middleName || "";
     dashboard.document.querySelector("#profileLastName").value = dashboard.studentProfile.lastName || "";
     dashboard.document.querySelector("#profileBirthday").value = dashboard.studentProfile.birthday || "";
-    dashboard.document.querySelector("#profileCourse").value = dashboard.studentProfile.course || "BSInfo Tech";
+    dashboard.document.querySelector("#profileCourse").value = CoursePolicy.normalize(dashboard.studentProfile.course);
     dashboard.document.querySelector("#profileSection").value = dashboard.studentProfile.section || "1A";
     dashboard.document.querySelector("#profileEmail").value = dashboard.studentProfile.email || "";
     dashboard.document.querySelector("#profilePhone").value = dashboard.studentProfile.phone || "";
@@ -843,7 +844,7 @@ export class StudentDashboard {
         middleName: dashboard.document.querySelector("#profileMiddleName").value.trim(),
         lastName: dashboard.document.querySelector("#profileLastName").value.trim(),
         birthday: dashboard.document.querySelector("#profileBirthday").value,
-        course: dashboard.document.querySelector("#profileCourse").value,
+        course: CoursePolicy.normalize(dashboard.document.querySelector("#profileCourse").value),
         section: dashboard.document.querySelector("#profileSection").value,
         email: dashboard.document.querySelector("#profileEmail").value.trim(),
         phone: dashboard.document.querySelector("#profilePhone").value.trim(),

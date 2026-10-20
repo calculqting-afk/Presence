@@ -153,14 +153,20 @@ test('all students see events, only selected sections can act, and removed check
 test('saving an ongoing event refreshes section assignment, targets matching notifications, and rejects a stale editor', async () => {
   const names=fs.readFileSync(path.join(root,'assets/js/dashboard.js'),'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
   const shared=Object.fromEntries(names.map(name=>[name,()=> ''])), browser=fakeBrowser(), writes=[], recipients=[], messages=[];
+  let allowScheduleChange=false,confirmationCalls=0;
   const previous={id:'event',audience:'All students',attendanceRoster:{a:'2A'},rosterCapturedAt:{toDate:()=>new Date(Date.now()-86400000)},openAt:{toDate:()=>new Date(Date.now()-3600000)},checkOutClosesAt:{toDate:()=>new Date(Date.now()+3600000)}};
   Object.assign(shared,{currentUser:{uid:'head'},Timestamp:{fromDate:date=>({toDate:()=>date})},serverTimestamp:()=>({server:true}),isEventFinished:()=>false,
     getDocFromServer:async()=>({exists:()=>true,data:()=>previous}),doc:(_db,collection,id)=>({collection,id}),
     writeBatch:()=>({set:(reference,data,options)=>writes.push({reference,data,options}),commit:async()=>{}}),createNotification:async data=>recipients.push(data.recipientUid),showDashboardToast:(...args)=>messages.push(args)});
   const {AdminDashboard}=await isolatedModule('assets/js/admin/AdminDashboard.js',shared,browser);
   for(const [id,value] of Object.entries({editingEventId:'event',eventName:'Assembly',eventDate:'2026-10-20',eventTimeIn:'07:00',eventCheckInCutoff:'09:00',eventTimeOut:'11:00',eventCheckOutCutoff:'12:10',eventType:'Assembly',eventLocation:'Hall',eventAudience:'Selected sections',eventNotes:''}))browser.document.querySelector('#'+id).value=value;
-  const state={document:browser.document,can:()=>true,studentsLoaded:true,students:[{uid:'a',active:true,section:'2A'},{uid:'b',active:true,section:'2B'},{uid:'c',active:true,section:'1A'}],events:[previous],eventForm:{dataset:{rosterVersion:'0'}},eventAudienceEditor:{read:()=>['2A','2B']},eventGeofenceEditor:{validate:()=>({enabled:false})},duplicateEventSignature:AdminDashboard.prototype.duplicateEventSignature,syncEventRecordsAfterSave:async()=>({synced:true}),notifyRoles:async()=>{},resetEventForm(){}};
+  const state={document:browser.document,can:()=>true,studentsLoaded:true,students:[{uid:'a',active:true,section:'2A'},{uid:'b',active:true,section:'2B'},{uid:'c',active:true,section:'1A'}],events:[previous],eventForm:{dataset:{rosterVersion:'0'}},eventAudienceEditor:{read:()=>['2A','2B']},eventGeofenceEditor:{validate:()=>({enabled:false})},scheduleConfirmation:{open:async()=>true},duplicateEventSignature:AdminDashboard.prototype.duplicateEventSignature,syncEventRecordsAfterSave:async()=>({synced:true}),notifyRoles:async()=>{},resetEventForm(){}};
+  state.scheduleConfirmation={open:async()=>{confirmationCalls++;return allowScheduleChange;}};
   await AdminDashboard.prototype.handleEventFormSubmit.call(state,{preventDefault(){}});
+  assert.equal(writes.length,0,'canceling the ongoing schedule dialog must not save any event or attendance');assert.equal(recipients.length,0);
+  allowScheduleChange=true;
+  await AdminDashboard.prototype.handleEventFormSubmit.call(state,{preventDefault(){}});
+  assert.equal(confirmationCalls,2);
   const saved=writes.find(write=>write.reference.collection==='events').data;
   assert.equal(JSON.stringify(writes.find(write=>write.reference.collection==='events').options.mergeFields),JSON.stringify(Object.keys(saved)));
   assert.deepEqual(Object.keys(saved.attendanceRoster),['a','b']); assert.equal(saved.rosterVersion,1); assert.equal(saved.audience,'Selected sections');
@@ -170,7 +176,7 @@ test('saving an ongoing event refreshes section assignment, targets matching not
   assert.equal(writes.length,0);assert.match(messages.at(-1)[1],/Participants changed/);
 });
 
-test('admin session form toggles afternoon, locks opened schedules and resets without changing attendance-card markup', async () => {
+test('admin session form permits ongoing time edits while retaining date/mode and closed-session locks', async () => {
   const browser=fakeBrowser(), mounts=[];
   const scope={mount:(_target,_where,html)=>mounts.push(html),listen:(target,name,callback)=>target.addEventListener(name,callback)};
   const {EventSessionController}=await isolatedModule('assets/js/controllers/EventSessionController.js',{},browser);
@@ -182,10 +188,14 @@ test('admin session form toggles afternoon, locks opened schedules and resets wi
   assert.equal(browser.document.querySelector('#eventAfternoonTimeIn').required,true);
   const afternoon={timeIn:'13:00',checkInCutoff:'14:00',timeOut:'16:00',checkOutCutoff:'17:00',rosterVersion:2,openAt:{toDate:()=>new Date(Date.now()-1000)}};
   editor.set({openAt:afternoon.openAt},afternoon);
-  assert.equal(browser.document.querySelector('#eventTimeIn').disabled,true);
-  assert.equal(browser.document.querySelector('#eventAfternoonTimeIn').disabled,true);
+  assert.equal(browser.document.querySelector('#eventTimeIn').disabled,false);
+  assert.equal(browser.document.querySelector('#eventAfternoonTimeIn').disabled,false);
+  assert.equal(browser.document.querySelector('#eventDate').disabled,true);
   assert.equal(browser.document.querySelector('#eventAttendanceMode').disabled,true);
   assert.equal(editor.read().times.join(','),'13:00,14:00,16:00,17:00');
+  editor.set({...afternoon,checkOutClosesAt:afternoon.openAt},{...afternoon,checkOutClosesAt:afternoon.openAt});
+  assert.equal(browser.document.querySelector('#eventTimeIn').disabled,true);
+  assert.equal(browser.document.querySelector('#eventAfternoonTimeIn').disabled,true);
   editor.set();
   assert.equal(editor.read().enabled,false); assert.equal(browser.document.querySelector('#eventTimeIn').disabled,false);
   browser.document.querySelector('#eventAttendanceMode').value='afternoon';
@@ -224,6 +234,43 @@ test('real admin save publishes both session events and geofences in one batch; 
   await AdminDashboard.prototype.handleEventFormSubmit.call(state,{preventDefault(){}});
   assert.equal(writes.length,2);assert.equal(writes.find(item=>item.reference.collection==='events').data.sessionPeriod,'afternoon');
   assert.equal(writes.some(item=>item.reference.id==='group_afternoon'),false,'afternoon-only must not create a second attendance requirement');
+});
+
+test('attendance line retains exact timestamps and duration while adding only recorded IN/OUT relative labels', async () => {
+  const names=fs.readFileSync(path.join(root,'assets/js/dashboard.js'),'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared=Object.fromEntries(names.map(name=>[name,()=> '']));
+  Object.assign(shared,{escapeHtml:String,formatAttendanceTimestamp:value=>value?.toDate?.().toISOString()||'Not recorded',attendanceDuration:()=> '25 min'});
+  const {AdminDashboard}=await isolatedModule('assets/js/admin/AdminDashboard.js',shared,fakeBrowser());
+  const now=Date.now(),checkedInAt={toDate:()=>new Date(now-1800000)},checkedOutAt={toDate:()=>new Date(now-300000)};
+  const record=Object.freeze({id:'a_event',studentUid:'a',eventId:'event',eventName:'Morning',checkedInAt,checkedOutAt,arrivalStatus:'late',status:'completed'});
+  const state={students:[{uid:'a',firstName:'Student',accountId:'123',section:'2A'}],events:[{id:'event'}],summaryService:{needsReview:()=>false},can:()=>false};
+  const html=AdminDashboard.prototype.attendanceLineMarkup.call(state,[record]);
+  assert.match(html,/Checked in 30 min ago/);assert.match(html,/Checked out 5 min ago/);assert.match(html,/25 min/);
+  assert.ok(html.includes(checkedInAt.toDate().toISOString()));assert.ok(html.includes(checkedOutAt.toDate().toISOString()));
+  assert.equal(AdminDashboard.prototype.attendanceLineMarkup.call(state,[{...record,status:'absent'}]).includes('data-attendance-time'),false);
+  const partial=AdminDashboard.prototype.attendanceLineMarkup.call(state,[{...record,checkedInAt:null,status:'checkout-only'}]);
+  assert.equal(partial.includes('Checked in 30 min ago'),false);assert.match(partial,/Checked out 5 min ago/);
+  const pending=AdminDashboard.prototype.attendanceLineMarkup.call(state,[{...record,checkedInAt:null,checkedOutAt:null,status:'pending',pending:true,displayOnly:true}]);
+  assert.match(pending,/Not yet checked in/);
+  assert.doesNotMatch(pending,/Absent|Checked in<|data-attendance-time|data-correct-attendance/);
+  const review=AdminDashboard.prototype.attendanceLineMarkup.call(state,[{...record,rosterUnverified:true,assignmentUnverified:true}]);
+  assert.match(review,/<p class="attendance-no-record">No attendance recorded<\/p>/);
+  assert.match(review,/Needs review — assigned after attendance opened/);
+  const css=fs.readFileSync(path.join(root,'assets/css/dashboard.css'),'utf8');
+  assert.match(css,/\.attendance-line-times > \.attendance-no-record\s*\{[^}]*grid-column: 1 \/ -1;[^}]*font-size: \.65rem/);
+});
+
+test('event metadata sync preserves saved check-in, checkout, arrival and completion fields', async () => {
+  const names=fs.readFileSync(path.join(root,'assets/js/dashboard.js'),'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared=Object.fromEntries(names.map(name=>[name,()=> '']));
+  Object.assign(shared,{getDocs:async()=>({docs:[{ref:'record'}],size:1})});
+  const {AdminDashboard}=await isolatedModule('assets/js/admin/AdminDashboard.js',shared,fakeBrowser());
+  const original={checkedInAt:'server-in',checkedOutAt:'server-out',attendedAt:'server-in',arrivalStatus:'late',status:'completed',eventId:'event'};
+  let saved;
+  const state={can:()=>false,writeInBatches:async(items,write)=>{for(const item of items)write({set:(_ref,update)=>{saved={...original,...update};}},item);}};
+  await AdminDashboard.prototype.syncEventRecords.call(state,'event',{name:'Edited',date:'2026-10-20',timeIn:'07:30',timeOut:'12:00'});
+  for(const key of ['checkedInAt','checkedOutAt','attendedAt','arrivalStatus','status','eventId'])assert.equal(saved[key],original[key]);
+  assert.equal(saved.timeIn,'07:30');assert.equal(saved.eventName,'Edited');
 });
 
 test('event update distinguishes a saved event from a linked record synchronization failure', () => {
@@ -517,6 +564,29 @@ test('concave polygon excludes a point in its bounding box but outside its shape
   ] });
   assert.equal(boundary.evaluate({ latitude: 14.001, longitude: 121.0018 }).inside, false);
   assert.equal(boundary.evaluate({ latitude: 14.001, longitude: 121.0005 }).inside, true);
+});
+
+test('circle supports 100 km but rejects larger radii, while polygon size limits stay unchanged', async () => {
+  const {GeofenceBoundary,MAX_CIRCLE_RADIUS_METERS}=await isolatedModule('assets/js/controllers/GeofenceBoundary.js');
+  assert.equal(MAX_CIRCLE_RADIUS_METERS,100000);
+  const boundary=GeofenceBoundary.create({type:'circle',latitude:10,longitude:124,radiusMeters:100000});
+  assert.equal(boundary.evaluate({latitude:10.8,longitude:124}).inside,true);
+  assert.equal(boundary.evaluate({latitude:11,longitude:124}).inside,false);
+  for(const radiusMeters of [100001,Infinity,NaN,0,-1])assert.throws(()=>GeofenceBoundary.create({latitude:10,longitude:124,radiusMeters}),/valid center/);
+  assert.throws(()=>GeofenceBoundary.create({type:'polygon',vertices:[{latitude:10,longitude:124},{latitude:10.5,longitude:124},{latitude:10.5,longitude:124.5}]}),/10 km/);
+});
+
+test('event and manager editors round-trip the full 100 km circle without silently reducing it', async () => {
+  for(const prefix of ['event','manager']){
+    const browser=fakeBrowser();const {GeofenceController}=await isolatedModule('assets/js/controllers/GeofenceController.js',{},browser);
+    const controller=new GeofenceController(prefix,{showToast(){}});
+    controller.enabled.checked=true;controller.type.value='circle';controller.latitude.value='10';controller.longitude.value='124';controller.radius.value='100000';
+    assert.equal(controller.radius.max,'100000');assert.equal(controller.currentRadius(),100000);assert.equal(controller.validate().radiusMeters,100000);
+    controller.radius.value='100001';assert.throws(()=>controller.validate(),/cannot exceed/);
+    controller.type.value='polygon';controller.vertices=polygonArea.vertices;controller.closed=true;
+    assert.equal(controller.validate().type,'polygon','a stale circle radius must not affect polygon validation');
+    controller.dispose();
+  }
 });
 
 test('student polygon verification uses capped accuracy and checks malformed boundaries before GPS', async () => {
@@ -1325,6 +1395,50 @@ test('attendance history filters late arrivals and redraws immediately while sea
   const sort = browser.document.querySelector('#attendanceSort');
   sort.value = 'name-desc'; await sort.emit('change');
   assert.equal(controller.sortForDisplay(rendered.at(-1)).map(record => record.id).join(','), 'present,late,absent');
+  controller.dispose();
+});
+
+test('attendance history sorts arrivals before pagination and redraws when sorting changes', async () => {
+  const browser = fakeBrowser();
+  const { AttendanceHistoryController } = await isolatedModule('assets/js/controllers/AttendanceHistoryController.js', {}, browser);
+  let shown;
+  const controller = new AttendanceHistoryController({ repository: {}, getStudents: () => [], getEvents: () => [],
+    summary: { needsReview: () => false }, render: records => { shown = records; }, notify() {}, pageSize: 2,
+    prepareRecords: records => controller.sortForDisplay(records) });
+  controller.initialize(); controller.more = false;
+  controller.records = [{ id: 'early', studentId: 'Z', checkedInAt: { seconds: 1 } },
+    { id: 'none', studentId: 'A' }, { id: 'latest', studentId: 'B', checkedInAt: { seconds: 3 } }];
+  controller.draw();
+  assert.deepEqual(Array.from(shown, r => r.id), ['latest', 'early']);
+  await controller.onNext(); assert.deepEqual(Array.from(shown, r => r.id), ['none']);
+  const sort = browser.document.querySelector('#attendanceSort');
+  sort.value = 'check-in-asc'; await sort.emit('change');
+  assert.equal(controller.page, 0); assert.deepEqual(Array.from(shown, r => r.id), ['early', 'latest']);
+  sort.value = 'no-check-in'; await sort.emit('change');
+  assert.deepEqual(Array.from(shown, r => r.id), ['none', 'latest']);
+  controller.records.push({ id: 'new', studentId: 'C', checkedInAt: { seconds: 4 } });
+  sort.value = 'check-in-desc'; await sort.emit('change');
+  assert.deepEqual(Array.from(shown, r => r.id), ['new', 'latest']);
+  controller.records[0].checkedOutAt = { seconds: 999 };
+  controller.draw(); assert.deepEqual(Array.from(shown, r => r.id), ['new', 'latest']);
+  controller.dispose();
+});
+
+test('course dropdown filters immediately, recognizes legacy spelling and keeps sorting independent', async () => {
+  const browser = fakeBrowser();
+  const { AttendanceHistoryController } = await isolatedModule('assets/js/controllers/AttendanceHistoryController.js', {}, browser);
+  let shown;
+  const controller = new AttendanceHistoryController({ repository: {}, getStudents: () => [
+    { uid: 'a', course: 'BSInfo Tech' }, { uid: 'b', course: 'BSA' }], getEvents: () => [],
+    summary: { needsReview: () => false }, render: rows => { shown = rows; }, notify() {} });
+  controller.initialize(); controller.more = false;
+  controller.records = [{ id: 'a', studentUid: 'a' }, { id: 'b', studentUid: 'b' }, { id: 'deleted', studentUid: 'missing', studentCourse: 'BS Info Tech' }];
+  const course = browser.document.querySelector('#attendanceCourse');
+  course.value = 'BS Info Tech'; await course.emit('change');
+  assert.deepEqual(Array.from(shown, r => r.id), ['a', 'deleted']);
+  assert.equal(controller.filters().sort, '');
+  course.value = 'BSFI'; await course.emit('change'); assert.equal(shown.length, 0);
+  course.value = ''; await course.emit('change'); assert.equal(shown.length, 3);
   controller.dispose();
 });
 

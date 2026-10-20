@@ -16,6 +16,7 @@ export class AttendancePdfExporter {
       ? new Date(`${report.event.date}T00:00:00+08:00`).toLocaleDateString('en-PH', { dateStyle: 'medium', timeZone: 'Asia/Manila' }) : report.event.date;
     const statuses = { 'checked-in': 'Checked in', completed: 'Completed', late: 'Late', review: 'Needs review', absent: 'Absent', pending: 'Pending' };
     const filters = [report.filters.section !== 'All sections' && `Section: ${report.filters.section}`,
+      report.filters.course && report.filters.course !== 'All courses' && `Course: ${report.filters.course}`,
       report.filters.status !== 'All statuses' && `Status: ${statuses[report.filters.status] || report.filters.status}`,
       report.filters.search && `Search: ${report.filters.search}`].filter(Boolean).join(' | ');
     const totals = report.totals;

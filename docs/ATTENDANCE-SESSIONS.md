@@ -16,9 +16,12 @@ They are saved atomically: an invalid afternoon cannot leave only morning
 published. The Geofence Locations manager updates both session areas together.
 Students receive a separate afternoon notification, even if morning has ended.
 
-Editing either session opens the same event-group form. Each schedule locks
-when its check-in opens (a deliberately stronger safeguard than waiting for
-the first attendance submission). An unused afternoon can still be added while
+Editing either session opens the same event-group form. Authorized admins may
+edit time windows while a session is ongoing, after explicit confirmation.
+New attendance actions use the new schedule. Previously saved check-in/out
+timestamps, arrival labels and completion statuses are preserved. The event
+date and attendance mode stay locked after opening; closed-session schedules
+remain locked. An unused afternoon can still be added while
 morning is ongoing, provided afternoon check-in is in the future. Published
 two-session events cannot be switched to single-session mode in this form; they retain their
 attendance and history. Closed-session participant groups cannot change.

@@ -113,7 +113,7 @@ export class AttendanceReportController {
     const report = this.report;
     find('[data-report-event]').textContent = report?.event.name || this.event?.name || 'Verifying event...';
     find('[data-report-meta]').textContent = report ? `${report.event.date} | ${report.event.time} | ${report.event.location} | ${report.event.audience}` : '';
-    find('[data-report-filters]').textContent = report ? `Section: ${report.filters.section} | Status: ${report.filters.status} | Search: ${report.filters.search || 'None'}` : '';
+    find('[data-report-filters]').textContent = report ? `Course: ${report.filters.course || 'All courses'} | Section: ${report.filters.section} | Status: ${report.filters.status} | Search: ${report.filters.search || 'None'}` : '';
     find('[data-report-time]').textContent = report ? `Attendance times: Asia/Manila. Snapshot prepared: ${AttendanceReportService.time(new Date(report.generatedAt))}.` : '';
     find('[data-report-note]').textContent = report?.note || '';
     const totals = find('[data-report-totals]'); totals.replaceChildren();

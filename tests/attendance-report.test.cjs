@@ -17,6 +17,28 @@ async function serviceAt(time = '2026-10-17T04:00:00Z') {
 const snapshot = (service, records = [], options = {}) => service.snapshot({ event, students, records, verifiedAt: new Date('2026-10-17T04:00:00Z'), ...options });
 const checkIn = { id: 'r1', studentUid: 'a', eventId: event.id, checkedInAt: stamp('2026-10-17T00:01:00Z'), arrivalStatus: 'late', gps: 'SECRET-GPS' };
 
+test('report follows arrival sort and puts missing check-ins first only when requested', async () => {
+  const service = await serviceAt();
+  const records = [checkIn, { id: 'r2', studentUid: 'b', eventId: event.id, checkedInAt: stamp('2026-10-17T00:02:00Z') }];
+  assert.deepEqual(snapshot(service, records).rows.map(r => r.studentId), ['2026-1', '2026-0', '2026-2']);
+  assert.deepEqual(snapshot(service, records, { filters: { sort: 'check-in-asc' } }).rows.map(r => r.studentId), ['2026-0', '2026-1', '2026-2']);
+  const missing = snapshot(service, records, { filters: { sort: 'no-check-in' } });
+  assert.deepEqual(missing.rows.map(r => r.studentId), ['2026-2', '2026-1', '2026-0']);
+  assert.equal(missing.rows[0].status, 'pending');
+  assert.equal('checkInMilliseconds' in missing.rows[0], false);
+});
+
+test('report filters the selected course including legacy course names and pending roster members', async () => {
+  const service = await serviceAt();
+  const mixed = students.map((student, i) => ({ ...student, course: ['BSInfo Tech', 'BSA', 'BSMB'][i] }));
+  const report = snapshot(service, [], { students: mixed, filters: { course: 'BS Info Tech' } });
+  assert.deepEqual(report.rows.map(row => row.studentId), ['2026-0']);
+  assert.equal(report.totals.pending, 1); assert.equal(report.filters.course, 'BS Info Tech');
+  assert.equal(report.filtered, true);
+  assert.equal(snapshot(service, [], { students: mixed, filters: { course: 'BSFI' } }).rows.length, 0);
+  assert.equal(snapshot(service, [], { students: mixed }).rows.length, 3);
+});
+
 test('live report moves pending to check-in to completed without premature absences', async () => {
   const service = await serviceAt();
   assert.deepEqual(snapshot(service).totals, { rows: 3, present: 0, late: 0, completed: 0, review: 0, absent: 0, pending: 3 });
@@ -24,6 +46,7 @@ test('live report moves pending to check-in to completed without premature absen
   assert.equal(checked.totals.present, 1); assert.equal(checked.totals.late, 1); assert.equal(checked.totals.pending, 2);
   const completed = snapshot(service, [{ ...checkIn, checkedOutAt: stamp('2026-10-17T08:00:00Z') }]);
   assert.equal(completed.totals.completed, 1); assert.equal(completed.rows.find(row => row.studentId === '2026-0').section, '2A');
+  assert.equal(completed.rows.find(row => row.studentId === '2026-0').course, 'BS Info Tech');
   assert.match(completed.rows[0].checkIn, /2026/);
   assert.doesNotMatch(JSON.stringify(completed), /SECRET-|birthday|password|gps/i);
 });
@@ -68,6 +91,23 @@ test('projection preserves missing-profile roster entries under review and exclu
   const saved = { studentUid: 'c', eventId: event.id, checkedInAt: stamp('2026-10-17T00:00:00Z') };
   assert.equal(projection.project([saved]).filter(record => record.studentUid === 'c').length, 1);
 });
+test('no-check-in view can include pending roster rows without inventing absences or duplicating arrivals', async () => {
+  const { AttendanceRecordProjectionService } = await import('../assets/js/controllers/AttendanceRecordProjectionService.js');
+  const projection = new AttendanceRecordProjectionService({ getEvents: () => [event], getStudents: () => students,
+    checkoutCloseDate: () => new Date('2026-10-17T09:00:00Z'), now: () => new Date('2026-10-17T04:00:00Z') });
+  assert.equal(projection.project([checkIn]).length, 1);
+  const rows = projection.project([checkIn], { includePending: true });
+  assert.equal(rows.length, 3);
+  for (const row of rows.filter(r => r.displayOnly)) {
+    assert.equal(row.pending, true); assert.equal(row.status, 'pending'); assert.equal(row.checkedInAt, undefined);
+  }
+  assert.equal(projection.project([checkIn], { includePending: true, status: 'absent' }).length, 1);
+  assert.equal(projection.project([], { includePending: true, section: '2B' }).length, 1);
+  assert.equal(projection.project([], { includePending: true, search: 'nobody' }).length, 0);
+  assert.equal(projection.project([], { includePending: true, course: 'BS Info Tech' }).length, 3);
+  assert.equal(projection.project([], { includePending: true, course: 'BSA' }).length, 0);
+});
+
 test('report consolidates duplicate schedules and respects correction, section, status and name sorting', async () => {
   const service = await serviceAt();
   assert.deepEqual(service.eventIds(event, [event, { ...event, id: 'old-event' }, { ...event, id: 'other', date: '2026-10-18' }]), ['event-1', 'old-event']);

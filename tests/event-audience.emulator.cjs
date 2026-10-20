@@ -20,6 +20,12 @@ async function write(path, data, auth = 'owner', success = true) {
   const body = await result.json(); assert.equal(result.ok, success, `${path}: ${JSON.stringify(body)}`); return body;
 }
 async function read(path, auth) { const response = await fetch(`${base}/${path}`, { headers: { Authorization: `Bearer ${auth}` } }); assert.equal(response.ok, true, await response.text()); }
+async function raw(path) { return fetch(`${base}/${path}`,{headers:{Authorization:'Bearer owner'}}).then(response=>response.json()); }
+async function checkout(uid,eventId,success=true){
+  const saved=await raw(`attendance/${uid}_${eventId}`);
+  const response=await fetch(`${base}:commit`,{method:'POST',headers:{Authorization:`Bearer ${token(uid)}`,'Content-Type':'application/json'},body:JSON.stringify({writes:[{update:{name:saved.name,fields:{...saved.fields,status:{stringValue:'completed'}}},updateTransforms:[{fieldPath:'checkedOutAt',setToServerValue:'REQUEST_TIME'}]}]})});
+  assert.equal(response.ok,success,await response.text());
+}
 async function batchSave(id, event, geofence, auth, mask, success = true) {
   const writes = [[`events/${id}`, event], [`eventGeofences/${id}`, geofence]].map(([path, data], index) => {
     const transforms = [], fields = value(data, transforms).mapValue.fields;
@@ -93,7 +99,7 @@ const attendance = (uid, event) => ({ studentUid: uid, studentId: uid.toUpperCas
   const polygon10={...polygon,vertices:[...polygon.vertices,{latitude:10.0001,longitude:124},{latitude:10.0002,longitude:124},{latitude:10.0003,longitude:124},{latitude:10.0004,longitude:124},{latitude:10.0005,longitude:124}]};
   await sessionPair('sessions',{...morning,rosterVersion:2},{...afternoon,rosterVersion:2},polygon10,superAdmin);
   await read('events/sessions_afternoon',token('a'));
-  await write('events/sessions',{...morning,rosterVersion:3,timeIn:'06:00',openAt:date(-7200000)},superAdmin,false);
+  await write('events/sessions',{...morning,rosterVersion:3,date:'2026-10-21'},superAdmin,false);
   await write('events/sessions',{...morning,rosterVersion:3,sessionGroupId:'changed'},superAdmin,false);
   await write('events/sessions_afternoon',{...afternoon,rosterVersion:3,date:'2026-10-21'},superAdmin,false);
   await write('events/sessions_afternoon',{...afternoon,rosterVersion:3,openAt:date(1000)},superAdmin,false);
@@ -122,6 +128,38 @@ const attendance = (uid, event) => ({ studentUid: uid, studentId: uid.toUpperCas
   await write('events/switch',{...futureMorning,sessionPeriod:'afternoon',rosterVersion:2},token('manager'));
   await write('events/solo',{...solo,...afternoonOpen,sessionGroupId:'solo',rosterVersion:2});
   await write('events/solo',{...solo,...afternoonOpen,sessionGroupId:'solo',sessionPeriod:'morning',rosterVersion:3},token('manager'),false);
+  const live={...all,sessionPeriod:'afternoon',sessionGroupId:'live',sessionBaseName:'Live editing',rosterVersion:1,requiresGeofence:false};
+  await write('events/live',live,token('manager'));
+  await write('attendance/a_live',{...attendance('a',live),eventId:'live'},token('a'));
+  const beforeEdit=await raw('attendance/a_live');
+  const extended={...live,checkInCutoff:'15:00',timeOut:'16:00',checkOutCutoff:'18:00',checkInClosesAt:date(1800000),closeAt:date(3600000),checkOutClosesAt:date(7200000),rosterVersion:2};
+  await write('events/live',extended,token('manager'));
+  assert.deepEqual((await raw('attendance/a_live')).fields,beforeEdit.fields,'schedule edit must preserve existing timestamps, arrival and lifecycle status');
+  await write('attendance/b_live',{...attendance('b',extended),eventId:'live',arrivalStatus:'present'},token('b'));
+  await checkout('a','live',false);
+  await write('events/live',{...extended,rosterVersion:3},token('a'),false);
+  await write('students/inactiveManager',{role:'attendance_admin',active:false});
+  await write('students/studentManager',{role:'student_manager',active:true});
+  for(const uid of ['inactiveManager','studentManager','noProfile']) await write('events/live',{...extended,rosterVersion:3},token(uid),false);
+  await write('events/live',{...extended,rosterVersion:3,date:'2026-10-21'},token('manager'),false);
+  const shortened={...extended,checkInClosesAt:date(-1800000),closeAt:date(-300000),rosterVersion:3};
+  await write('events/live',shortened,token('head'));
+  await checkout('a','live');
+  const aAfter=await raw('attendance/a_live'),bAfter=await raw('attendance/b_live');
+  assert.deepEqual(aAfter.fields.checkedInAt,beforeEdit.fields.checkedInAt);
+  assert.equal(aAfter.fields.arrivalStatus.stringValue,'late');assert.equal(aAfter.fields.status.stringValue,'completed');
+  assert.equal(bAfter.fields.arrivalStatus.stringValue,'present','a newer cutoff edit must not reclassify a previously on-time student');
+  const closedSchedule={...original,openAt:date(-7200000),checkInClosesAt:date(-5400000),closeAt:date(-3600000),checkOutClosesAt:date(-1800000)};
+  await write('events/closed',{...closedSchedule,timeIn:'06:00',openAt:date(-9000000)},token('head'),false);
+  await write('events/closed',{...closedSchedule,description:'Metadata still editable'},token('head'));
+  const wideCircle={enabled:true,type:'circle',latitude:10,longitude:124,radiusMeters:100000,address:'Wide circle test'};
+  await write('eventGeofences/large_circle',wideCircle,token('manager'));
+  assert.equal((await raw('eventGeofences/large_circle')).fields.radiusMeters.integerValue,'100000');
+  await write('eventGeofences/large_circle',{...wideCircle,radiusMeters:100001},token('manager'),false);
+  await write('eventGeofences/large_circle',{...wideCircle,radiusMeters:0},superAdmin,false);
+  await write('eventGeofences/large_circle',wideCircle,token('a'),false);
+  console.log('Circle rules passed: 100,000 m accepted for attendance admins; larger/zero radii and student edits denied.');
+  console.log('Live schedule rules passed: authorized ongoing edits accepted, future actions use new cutoffs, recorded timestamps/statuses preserved, closed dates/schedules and student edits denied.');
   console.log('Afternoon-only rules passed: standalone creation, no extra session, early submission denied, mode changes limited to unopened root sessions.');
   console.log('Session rules passed: atomic morning/afternoon polygon bundle, independent attendance, early check-in denied, opened schedules/identity/overlap protected, Attendance Admin authorized.');
   console.log('Firestore emulator passed: legacy mismatch denied, live multi-section update accepted, view-only read allowed/write denied, assigned check-ins accepted, removed participant checkout accepted, stale revisions/invalid sections/student edits/closed roster edits denied.');

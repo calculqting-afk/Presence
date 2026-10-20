@@ -1,5 +1,6 @@
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import { doc, getDoc, serverTimestamp, setDoc, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+import { CoursePolicy } from '../core/CoursePolicy.js';
 
 export class RegistrationController {
   constructor({ document = globalThis.document, db, provisioningAuth, provisioningDb, studentIdToEmail, onSuccess = () => {} } = {}) {
@@ -101,7 +102,7 @@ export class RegistrationController {
           }
           await updateDoc(doc(this.provisioningDb, 'registrationRequests', accountIdKey), {
             birthday: values.birthday, firstName: values.firstName.trim(), lastName: values.lastName.trim(),
-            course: values.course.trim(), section: values.section, status: 'pending', updatedAt: serverTimestamp()
+            course: CoursePolicy.normalize(values.course), section: values.section, status: 'pending', updatedAt: serverTimestamp()
           });
           form.reset(); this.close(this.registrationDialog);
           this.onSuccess('Registration resubmitted', 'Your request is pending administrator approval again.');
@@ -112,7 +113,7 @@ export class RegistrationController {
         await setDoc(doc(this.provisioningDb, 'registrationRequests', accountIdKey), {
           uid: credential.user.uid, accountId: values.accountId.trim(), accountIdKey,
           birthday: values.birthday, firstName: values.firstName.trim(), lastName: values.lastName.trim(),
-          course: values.course.trim(), section: values.section, status: 'pending',
+          course: CoursePolicy.normalize(values.course), section: values.section, status: 'pending',
           requestedAt: serverTimestamp(), updatedAt: serverTimestamp()
         });
       } finally { await signOut(this.provisioningAuth); }
@@ -161,7 +162,7 @@ export class RegistrationController {
     batch.set(doc(this.db, 'students', user.uid), {
       uid: user.uid, accountId: data.accountId, accountIdKey, authEmail: this.studentIdToEmail(data.accountId),
       birthday: data.birthday, firstName: data.firstName, lastName: data.lastName, middleName: '',
-      course: data.course, section: data.section, role: 'student', active: true,
+      course: CoursePolicy.normalize(data.course), section: data.section, role: 'student', active: true,
       createdAt: serverTimestamp(), updatedAt: serverTimestamp()
     });
     batch.set(doc(this.db, 'studentIds', accountIdKey), { studentId: data.accountId, uid: user.uid, createdAt: serverTimestamp() });

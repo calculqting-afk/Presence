@@ -1,5 +1,7 @@
 import { collection, query, where, orderBy, limit, startAfter, getDocsFromServer, onSnapshot } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { AttendanceToolbarController } from './AttendanceToolbarController.js';
+import { AttendanceSort } from './AttendanceSort.js';
+import { CoursePolicy } from '../core/CoursePolicy.js';
 
 export class AttendanceRepository {
   constructor(db, fetch = getDocsFromServer) { this.db = db; this.fetch = fetch; }
@@ -64,6 +66,7 @@ export class AttendanceHistoryController {
     this.localFilterControls = [
       { control: document.querySelector('#attendanceStudentSearch'), event: 'input' },
       { control: document.querySelector('#attendanceSection'), event: 'change' },
+      { control: document.querySelector('#attendanceCourse'), event: 'change' },
       { control: document.querySelector('#attendanceStatus'), event: 'change' },
       { control: document.querySelector('#attendanceSort'), event: 'change' }
     ];
@@ -91,6 +94,7 @@ export class AttendanceHistoryController {
     const value = id => document.querySelector(id).value;
     return { from: value('#attendanceFromDate'), to: value('#attendanceToDate'),
       search: value('#attendanceStudentSearch').trim().toLowerCase(), section: value('#attendanceSection'),
+      course: value('#attendanceCourse'),
       event: value('#adminAttendanceEventFilter'), status: value('#attendanceStatus'), sort: value('#attendanceSort') };
   }
   filtered() {
@@ -104,6 +108,7 @@ export class AttendanceHistoryController {
       const text = [student?.firstName, student?.middleName, student?.lastName, student?.accountId, student?.email, record.studentId].join(' ').toLowerCase();
       const review = !student || record.rosterUnverified || this.summary.needsReview(record, event);
       return (!filters.search || text.includes(filters.search)) && (!filters.section || section === filters.section)
+        && (!filters.course || CoursePolicy.normalize(record.studentCourse || student?.course) === filters.course)
         && (!filters.event || filters.event === 'all' || filters.event === record.eventId)
         && (!filters.status || (filters.status === 'absent' ? record.status === 'absent' && !review
           : filters.status === 'late' ? record.arrivalStatus === 'late'
@@ -112,8 +117,7 @@ export class AttendanceHistoryController {
     });
   }
   sortForDisplay(records) {
-    const sort = (this.applied || this.filters()).sort || 'name-asc';
-    const direction = sort.endsWith('-desc') ? -1 : 1;
+    const sort = (this.applied || this.filters()).sort || 'check-in-desc';
     const byLastName = sort.startsWith('last-name-');
     const students = new Map(this.getStudents().map(student => [student.uid, student]));
     const nameFor = record => {
@@ -124,7 +128,10 @@ export class AttendanceHistoryController {
       return [...names, record.studentId]
         .filter(Boolean).join(' ').toLocaleLowerCase();
     };
-    return [...records].sort((first, second) => direction * nameFor(first).localeCompare(nameFor(second)));
+    return [...records].sort((first, second) => AttendanceSort.compare(first, second, {
+      sort, name: nameFor,
+      key: record => String(record.id || `${record.eventId}:${record.studentUid}`)
+    }));
   }
   async reload() {
     const filters = this.filters();

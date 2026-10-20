@@ -1,4 +1,5 @@
 // Display-only identity handoff. Never use this cache for permissions or writes.
+import { CoursePolicy } from '../core/CoursePolicy.js';
 export class StudentIdentityController {
   constructor({ document = globalThis.document, storage = globalThis.sessionStorage, now = Date.now } = {}) {
     Object.assign(this, { document, storage, now });
@@ -28,7 +29,7 @@ export class StudentIdentityController {
     const initials = [identity.firstName, identity.lastName].map(value => typeof value === 'string' ? value.trim().charAt(0) : '').join('').toUpperCase() || 'ST';
     const photo = typeof identity.photoDataUrl === 'string' && /^(data:image\/(png|jpeg|webp);base64,|https:\/\/)/i.test(identity.photoDataUrl) ? identity.photoDataUrl : '';
     this.document.querySelectorAll('[data-student-name]').forEach(node => { node.textContent = name; });
-    this.document.querySelectorAll('[data-student-meta]').forEach(node => { node.textContent = `${identity.course || 'Course pending'} · Section ${identity.section || 'pending'}`; });
+    this.document.querySelectorAll('[data-student-meta]').forEach(node => { node.textContent = `${CoursePolicy.normalize(identity.course) || 'Course pending'} · Section ${identity.section || 'pending'}`; });
     this.document.querySelectorAll('[data-student-first-name]').forEach(node => { node.textContent = identity.firstName || 'Student'; });
     this.document.querySelectorAll('[data-student-initials]').forEach(node => { node.textContent = initials; node.hidden = Boolean(photo); });
     this.document.querySelectorAll('[data-student-photo]').forEach(node => { if (photo) node.src = photo; else node.removeAttribute('src'); node.hidden = !photo; });

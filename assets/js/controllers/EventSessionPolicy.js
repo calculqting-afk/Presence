@@ -3,7 +3,12 @@ import { EventAudiencePolicy } from './EventAudiencePolicy.js';
 // Sessions use distinct event IDs, so the existing uid_event attendance key,
 // timing rules, reports and corrections remain isolated for each session.
 export class EventSessionPolicy {
-  static scheduleFields = ['date', 'timeIn', 'checkInCutoff', 'timeOut', 'checkOutCutoff', 'openAt', 'checkInClosesAt', 'closeAt', 'checkOutClosesAt'];
+  static scheduleFields = ['date', 'timeIn', 'checkInCutoff', 'timeOut', 'checkOutCutoff', 'openAt', 'checkInClosesAt', 'closeAt', 'checkOutClosesAt', 'lateAfterAt', 'checkInClose'];
+  static normalizeAliases(record, previous) {
+    if ('lateAfterAt' in record || previous?.lateAfterAt) record.lateAfterAt = record.checkInClosesAt;
+    if ('checkInClose' in record || previous?.checkInClose) record.checkInClose = record.checkInCutoff;
+    return record;
+  }
   static afternoonId(id) { return `${id}_afternoon`; }
   static period(event) { return event.sessionPeriod || (event.timeIn >= '12:00' ? 'afternoon' : 'morning'); }
   static related(event, events = []) {
@@ -17,14 +22,23 @@ export class EventSessionPolicy {
   }
   static opened(event, now = new Date()) { const date = EventAudiencePolicy.date(event?.openAt); return Boolean(date && date <= now); }
   static assertSchedule(record, previous, now = new Date()) {
-    if (!previous || !this.opened(previous, now)) return;
-    if (this.scheduleFields.some(key => {
+    if (!previous) return;
+    if (this.opened(previous, now) && record.date !== previous.date) throw new Error('Keep the event date unchanged after attendance opens. You can still edit its time windows.');
+    const end = EventAudiencePolicy.date(previous.checkOutClosesAt);
+    if (end && end <= now && this.scheduleChanged(record, previous)) throw new Error('Closed-session schedules cannot be changed. Create a new event instead.');
+  }
+  static scheduleChanged(record, previous) {
+    return Boolean(previous) && this.scheduleFields.some(key => {
       const before = EventAudiencePolicy.date(previous[key]) || previous[key];
       const after = EventAudiencePolicy.date(record[key]) || record[key];
       return String(before) !== String(after);
-    })) throw new Error('This session has opened. Its attendance schedule is locked; create another event for a different schedule.');
+    });
+  }
+  static needsScheduleConfirmation(record, previous, now = new Date()) {
+    return this.opened(previous, now) && this.scheduleChanged(record, previous);
   }
   static prepare({ id, record, previous, afternoon, enabled, mode = enabled ? 'both' : previous?.sessionPeriod || 'morning', times, students, sections, timestamp, fromDate, now = new Date() }) {
+    record = this.normalizeAliases({...record}, previous);
     if (!['morning','afternoon','both'].includes(mode)) throw new Error('Choose Morning only, Afternoon only, or Both.');
     enabled = mode === 'both';
     if (afternoon && !enabled) throw new Error('A published afternoon session cannot be disabled here. Its attendance and history must be preserved.');
@@ -51,6 +65,7 @@ export class EventSessionPolicy {
       timeIn, checkInCutoff, timeOut, checkOutCutoff,
       openAt: fromDate(new Date(`${record.date}T${timeIn}`)), checkInClosesAt: fromDate(new Date(`${record.date}T${checkInCutoff}`)),
       closeAt: fromDate(new Date(`${record.date}T${timeOut}`)), checkOutClosesAt: fromDate(new Date(`${record.date}T${checkOutCutoff}`)) };
+    this.normalizeAliases(secondary, afternoon);
     this.assertSchedule(secondary, afternoon, now);
     if (!afternoon && EventAudiencePolicy.date(secondary.openAt) <= now) throw new Error('Add the afternoon session before its check-in opens.');
     if (afternoon && EventAudiencePolicy.date(afternoon.checkOutClosesAt) <= now) {

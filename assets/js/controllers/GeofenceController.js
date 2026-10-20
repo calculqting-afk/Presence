@@ -1,4 +1,4 @@
-import { GeofenceBoundary } from './GeofenceBoundary.js';
+import { GeofenceBoundary, MAX_CIRCLE_RADIUS_METERS } from './GeofenceBoundary.js';
 let leafletPromise;
 function loadAsset(type, url) {
   return new Promise((resolve, reject) => {
@@ -31,6 +31,8 @@ export class GeofenceController {
       this[name[0].toLowerCase() + name.slice(1)] = document.querySelector(`#${prefix}Geofence${name}`);
     }
     this.revision = 0;
+    this.radius.max = String(MAX_CIRCLE_RADIUS_METERS);
+    this.radius.insertAdjacentHTML('afterend', '<small>Maximum: 100,000 meters (100 km). Large circles permit off-campus attendance.</small>');
     this.vertices = [];
     this.closed = false;
     this.disposed = false;
@@ -85,7 +87,7 @@ export class GeofenceController {
     } else if (this.latitude.value !== '' && this.longitude.value !== '') void this.place(this.latitude.value, this.longitude.value);
   }
 
-  currentRadius() { return Math.max(25, Math.min(5000, Number(this.radius.value) || 100)); }
+  currentRadius() { return Math.max(25, Math.min(MAX_CIRCLE_RADIUS_METERS, Number(this.radius.value) || 100)); }
 
   async ensureMap() {
     if (this.mapInstance) return this.mapInstance;
@@ -186,6 +188,7 @@ export class GeofenceController {
   validate() {
     const area = this.value();
     if (area.enabled) {
+      if (this.type.value !== 'polygon' && Number(this.radius.value) > MAX_CIRCLE_RADIUS_METERS) throw new Error('The circle radius cannot exceed 100,000 meters (100 km).');
       if (this.type.value === 'polygon' && !this.closed) throw new Error('Close the polygon boundary before saving.');
       GeofenceBoundary.create(area);
     }
