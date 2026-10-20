@@ -38,7 +38,7 @@ export class AccountApprovalController {
       uid: request.uid, accountId: request.accountId, accountIdKey,
       authEmail: this.studentIdToEmail(request.accountId), birthday: request.birthday,
       firstName: request.firstName, middleName: '', lastName: request.lastName,
-      course: CoursePolicy.normalize(request.course), section: request.section, active: true,
+      course: CoursePolicy.normalize(request.course), section: request.section, active: true, role: 'student',
       createdAt: serverTimestamp(), updatedAt: serverTimestamp()
     };
   }

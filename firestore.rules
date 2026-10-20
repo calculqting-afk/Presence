@@ -49,7 +49,8 @@ service cloud.firestore {
     }
     function hasAttendanceManagementRole() {
       let profile = get(/databases/$(database)/documents/students/$(request.auth.uid)).data;
-      return profile.active == true && profile.role in ["head_admin", "attendance_admin"];
+      return profile.active == true
+        && profile.get("role", "student") in ["head_admin", "attendance_admin"];
     }
 
     function canViewAttendanceReports() {

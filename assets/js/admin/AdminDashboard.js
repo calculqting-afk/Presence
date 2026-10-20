@@ -2264,6 +2264,7 @@ export class AdminDashboard {
             uid: credential.user.uid,
             authEmail,
             active: true,
+            role: "student",
             mustChangePassword: true,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp()

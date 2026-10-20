@@ -93,7 +93,7 @@ export class StudentAttendanceController {
   submissionErrorMessage(error, action = 'check-in') {
     if (error.code !== 'permission-denied') return error.message || 'Attendance could not be recorded. Please try again.';
     if (error.attendanceStage === 'preflight') return 'Firestore blocked the attendance-record check before saving. Publish the latest attendance read rules and confirm your student account is active.';
-    if (action === 'checkout') return 'Firestore rejected checkout. Publish the latest checkout rules and verify the saved check-in status, server checkout window, and required location. Your check-in has not been changed.';
+    if (action === 'checkout') return 'The server could not authorize checkout. Refresh and try again. If this continues, ask an Attendance Manager to review your account, saved check-in, event checkout window, and location requirements. Your check-in has not been changed.';
     return 'Firestore rejected the attendance save. Confirm the server attendance window, your participant-roster access, face registration, and deployed rules.';
   }
 

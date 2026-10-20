@@ -52,7 +52,7 @@ const original = {
 const attendance = (uid, event) => ({ studentUid: uid, studentId: uid.toUpperCase(), eventId: 'event', eventName: event.name, eventType: event.type, eventDescription: event.description, eventDate: event.date, timeIn: event.timeIn, timeOut: event.timeOut, location: event.location, audience: event.audience, status: 'checked-in', arrivalStatus: 'late', checkedInAt: SERVER, attendedAt: SERVER });
 (async () => {
   for (const [uid, section, role] of [['a','2A','student'],['b','2B','student'],['c','1A','student'],['head','2A','head_admin'],['manager','2A','attendance_admin']]) {
-    await write(`students/${uid}`, { accountId: uid.toUpperCase(), section, active: true, role, createdAt: date(-864000000) });
+    await write(`students/${uid}`, { accountId: uid.toUpperCase(), section, active: true, ...(uid === 'a' ? {} : { role }), createdAt: date(-864000000) });
     await write(`faceRegistrations/${uid}`, { registered: true });
   }
   await write('events/event', original);
