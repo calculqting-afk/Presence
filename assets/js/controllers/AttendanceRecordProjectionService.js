@@ -1,6 +1,7 @@
 // Builds display-only records. Absences are intentionally not written to
 // Firestore: a missing check-in and checkout becomes an absence only after the
 // entire attendance period ends, and an administrator can still correct it later.
+import { EventAudiencePolicy } from './EventAudiencePolicy.js';
 export class AttendanceRecordProjectionService {
   constructor({ getEvents, getStudents = () => [], checkoutCloseDate, now = () => new Date() }) {
     Object.assign(this, { getEvents, getStudents, checkoutCloseDate, now });
@@ -27,20 +28,24 @@ export class AttendanceRecordProjectionService {
         || currentTime <= this.checkoutCloseDate(event)) return [];
       const students = new Map(this.getStudents().map(student => [student.uid, student]));
       const roster = { ...(event.attendanceRoster || {}) };
+      if (Array.isArray(event.audienceSections)) for (const [uid, section] of Object.entries(roster)) if (!EventAudiencePolicy.selected(event).includes(section)) delete roster[uid];
       const unverified = new Set();
       for (const student of students.values()) {
         if (Object.hasOwn(roster, student.uid) || student.active === false) continue;
-        if (event.audience && event.audience !== 'All students' && event.audience !== `Section ${student.section}`) continue;
+        if (!EventAudiencePolicy.matches(student, event)) continue;
+        if (Array.isArray(event.audienceSections) && !EventAudiencePolicy.canAttend(student, event)) continue;
         const joined = student.createdAt?.toDate?.();
         if (joined && joined > this.checkoutCloseDate(event)) continue;
         roster[student.uid] = student.section || '';
         if (!joined || !Number.isFinite(joined.getTime())) unverified.add(student.uid);
       }
       return Object.entries(roster).flatMap(([studentUid, rosterSection]) => {
+        const assignmentUnverified = EventAudiencePolicy.addedAfterOpening({ ...students.get(studentUid), uid: studentUid, section: rosterSection }, event);
+        if (assignmentUnverified) unverified.add(studentUid);
         if (section && rosterSection !== section) return [];
         const student = students.get(studentUid);
         const profileMissing = !student;
-        if ((status === 'absent' && profileMissing)
+        if ((status === 'absent' && (profileMissing || (Array.isArray(event.audienceSections) && unverified.has(studentUid))))
           || (status === 'review' && !profileMissing && !unverified.has(studentUid))) return [];
         const text = [student?.firstName, student?.middleName, student?.lastName, student?.accountId, student?.email].join(' ').toLowerCase();
         if (search && !text.includes(search.toLowerCase())) return [];
@@ -50,6 +55,7 @@ export class AttendanceRecordProjectionService {
           id: `absent:${studentUid}:${event.id}`,
           displayOnly: true,
           rosterUnverified: unverified.has(studentUid),
+          assignmentUnverified,
           profileMissing,
           rosterSection,
           studentUid,
@@ -61,8 +67,8 @@ export class AttendanceRecordProjectionService {
           timeOut: event.timeOut,
           location: event.location,
           audience: event.audience,
-          status: profileMissing ? 'review' : 'absent',
-          arrivalStatus: profileMissing ? 'unknown' : 'absent'
+          status: profileMissing || (Array.isArray(event.audienceSections) && unverified.has(studentUid)) ? 'review' : 'absent',
+          arrivalStatus: profileMissing || (Array.isArray(event.audienceSections) && unverified.has(studentUid)) ? 'unknown' : 'absent'
         }];
       });
     });

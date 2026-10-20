@@ -1,5 +1,6 @@
 // Shared policy: a check-in is participation; a missed checkout needs review,
 // not an automatic absence or fine. Legacy eligibility is never invented.
+import { EventAudiencePolicy } from './EventAudiencePolicy.js';
 export class AttendanceSummaryService {
   constructor({ closeDate, checkoutCloseDate, now = () => new Date() }) {
     Object.assign(this, { closeDate, checkoutCloseDate, now });
@@ -11,10 +12,15 @@ export class AttendanceSummaryService {
   }
 
   matchesAudience(student, event) {
-    return !event.audience || event.audience === 'All students' || event.audience === `Section ${student.section}`;
+    return EventAudiencePolicy.matches(student, event);
   }
 
   eligibility(student, event) {
+    if (Array.isArray(event.audienceSections)) {
+      if (!EventAudiencePolicy.canAttend(student, event)) return 'excluded';
+      if (EventAudiencePolicy.addedAfterOpening(student, event) || !Object.hasOwn(event.attendanceRoster || {}, student.uid)) return 'provisional';
+      return 'eligible';
+    }
     if (event.attendanceRoster) {
       if (Object.hasOwn(event.attendanceRoster, student.uid)) return 'eligible';
       // A profile approved after a roster was captured could not have been in
@@ -58,7 +64,7 @@ export class AttendanceSummaryService {
       for (const event of scheduled) {
         const eligibility = this.eligibility(student, event);
         if (eligibility === 'eligible') expected.add(student.uid);
-        else if (eligibility === 'unknown') unverified.add(student.uid);
+        else if (eligibility === 'unknown' || eligibility === 'provisional') unverified.add(student.uid);
       }
     }
     const present = new Set(records.filter(record => record.eventDate === date

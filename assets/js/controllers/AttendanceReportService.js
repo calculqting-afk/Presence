@@ -1,9 +1,10 @@
 import { AttendanceRecordProjectionService } from './AttendanceRecordProjectionService.js';
+import { EventAudiencePolicy } from './EventAudiencePolicy.js';
 
 export class AttendanceReportService {
   constructor({ summary, checkoutCloseDate, now = () => new Date() }) { Object.assign(this, { summary, checkoutCloseDate, now }); }
   scheduleKey(event) {
-    return [event.date || event.eventDate, event.name || event.eventName, event.timeIn, event.timeOut, event.audience]
+    return [event.date || event.eventDate, event.name || event.eventName, event.timeIn, event.timeOut, EventAudiencePolicy.selected(event).join(',')]
       .map(value => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()).join('\u001f');
   }
   eventIds(event, events) {
@@ -57,7 +58,7 @@ export class AttendanceReportService {
     if (!closed) {
       const roster = event.attendanceRoster || Object.fromEntries(students.filter(student => student.active !== false && this.summary.matchesAudience(student, event)
         && !(AttendanceReportService.date(student.createdAt) > this.checkoutCloseDate(event))).map(student => [student.uid, student.section]));
-      for (const [uid, section] of Object.entries(roster)) if (!unique.has(uid)) projected.push({ studentUid: uid, eventId: event.id, pending: true, rosterSection: section });
+      for (const [uid, section] of Object.entries(roster)) if (!unique.has(uid) && (!Array.isArray(event.audienceSections) || EventAudiencePolicy.selected(event).includes(section))) projected.push({ studentUid: uid, eventId: event.id, pending: true, rosterSection: section });
     }
     const search = String(filters.search || '').toLocaleLowerCase();
     let rows = projected.filter(record => {
@@ -95,7 +96,7 @@ export class AttendanceReportService {
     }
     const safe = AttendanceReportService.clean;
     return { title: 'Live attendance report', school: 'Southern Leyte State University - Bontoc Campus',
-      event: { id: event.id, name: safe(event.name), date: safe(event.date), location: safe(event.location), audience: safe(event.audience || 'All students'), time: safe([event.timeIn, event.timeOut].filter(Boolean).join(' - ')), schedule: this.schedule(event) },
+      event: { id: event.id, name: safe(event.name), date: safe(event.date), location: safe(event.location), audience: safe(EventAudiencePolicy.label(event)), time: safe([event.timeIn, event.timeOut].filter(Boolean).join(' - ')), schedule: this.schedule(event) },
       filters: { section: safe(filters.section || 'All sections'), status: safe(filters.status || 'All statuses'), search: safe(filters.search || ''), sort: safe(filters.sort || 'name-asc') },
       rows, totals, generatedAt: now.toISOString(), verifiedAt: verifiedAt.toISOString(), timezone: 'Asia/Manila', closed, duplicateCount: records.length - unique.size,
       note: `${closed ? 'Event closed.' : 'Event not final. Pending students are not automatically absent.'} ${records.length - unique.size} duplicate attendance record(s) consolidated. Late and completed counts may overlap with present. Names/course use the current profile; section uses the event roster when available.`,

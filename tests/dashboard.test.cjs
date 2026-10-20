@@ -130,6 +130,46 @@ test('student dashboard exposes a current-events card that opens the events view
   assert.match(source, /#currentEventsMeta/);
 });
 
+test('all students see events, only selected sections can act, and removed check-ins can finish checkout', async () => {
+  const names = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const user = { uid: 'c' }, shared = Object.fromEntries(names.map(name => [name, () => '']));
+  Object.assign(shared, { currentUser: user, escapeHtml: String, isEventFinished: () => false, isCheckoutAvailable: () => true, getEventStatus: () => 'open' });
+  const browser = fakeBrowser(), { StudentDashboard } = await isolatedModule('assets/js/student/StudentDashboard.js', shared, browser);
+  const event = { id:'event', name:'Multi-section assembly', audience:'Selected sections', audienceSections:['2A','2B'], attendanceRoster:{a:'2A',b:'2B'} };
+  const state = { view:'events', studentProfile:{section:'1A',active:true}, events:[event], attendance:[], document:browser.document,
+    currentEventsForStudent() { return StudentDashboard.prototype.currentEventsForStudent.call(this); },
+    attendanceCheckInController:{policy:{evaluateCheckIn:()=>({available:true,arrivalStatus:'present'})}},
+    attendanceController:{syncLoadingButtons(){}},schedulePresenter:{render:()=>''},updateMarkup:(node,html)=>{node.innerHTML=html;},renderAttendanceSummary(){} };
+  StudentDashboard.prototype.renderEvents.call(state);
+  let html = browser.document.querySelector('#studentEventGrid').innerHTML;
+  assert.ok(html.includes('Multi-section assembly')); assert.ok(html.includes('View only')); assert.ok(!html.includes('data-attend-event=')); assert.ok(!html.includes('data-check-out-event='));
+  user.uid='b';state.studentProfile.section='2B';StudentDashboard.prototype.renderEvents.call(state);
+  html=browser.document.querySelector('#studentEventGrid').innerHTML; assert.ok(html.includes('data-attend-event='));
+  event.audienceSections=['2A'];event.attendanceRoster={a:'2A'};state.attendance=[{eventId:'event',checkedInAt:true}];
+  StudentDashboard.prototype.renderEvents.call(state); html=browser.document.querySelector('#studentEventGrid').innerHTML;
+  assert.ok(html.includes('data-check-out-event=')); assert.ok(!html.includes('data-attend-event='));
+});
+
+test('saving an ongoing event refreshes section assignment, targets matching notifications, and rejects a stale editor', async () => {
+  const names=fs.readFileSync(path.join(root,'assets/js/dashboard.js'),'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared=Object.fromEntries(names.map(name=>[name,()=> ''])), browser=fakeBrowser(), writes=[], recipients=[], messages=[];
+  const previous={id:'event',audience:'All students',attendanceRoster:{a:'2A'},rosterCapturedAt:{toDate:()=>new Date(Date.now()-86400000)},openAt:{toDate:()=>new Date(Date.now()-3600000)},checkOutClosesAt:{toDate:()=>new Date(Date.now()+3600000)}};
+  Object.assign(shared,{currentUser:{uid:'head'},Timestamp:{fromDate:date=>({toDate:()=>date})},serverTimestamp:()=>({server:true}),isEventFinished:()=>false,
+    getDocFromServer:async()=>({exists:()=>true,data:()=>previous}),doc:(_db,collection,id)=>({collection,id}),
+    writeBatch:()=>({set:(reference,data,options)=>writes.push({reference,data,options}),commit:async()=>{}}),createNotification:async data=>recipients.push(data.recipientUid),showDashboardToast:(...args)=>messages.push(args)});
+  const {AdminDashboard}=await isolatedModule('assets/js/admin/AdminDashboard.js',shared,browser);
+  for(const [id,value] of Object.entries({editingEventId:'event',eventName:'Assembly',eventDate:'2026-10-20',eventTimeIn:'07:00',eventCheckInCutoff:'09:00',eventTimeOut:'11:00',eventCheckOutCutoff:'12:10',eventType:'Assembly',eventLocation:'Hall',eventAudience:'Selected sections',eventNotes:''}))browser.document.querySelector('#'+id).value=value;
+  const state={document:browser.document,can:()=>true,studentsLoaded:true,students:[{uid:'a',active:true,section:'2A'},{uid:'b',active:true,section:'2B'},{uid:'c',active:true,section:'1A'}],events:[previous],eventForm:{dataset:{rosterVersion:'0'}},eventAudienceEditor:{read:()=>['2A','2B']},eventGeofenceEditor:{validate:()=>({enabled:false})},duplicateEventSignature:AdminDashboard.prototype.duplicateEventSignature,syncEventRecordsAfterSave:async()=>({synced:true}),notifyRoles:async()=>{},resetEventForm(){}};
+  await AdminDashboard.prototype.handleEventFormSubmit.call(state,{preventDefault(){}});
+  const saved=writes.find(write=>write.reference.collection==='events').data;
+  assert.equal(JSON.stringify(writes.find(write=>write.reference.collection==='events').options.mergeFields),JSON.stringify(Object.keys(saved)));
+  assert.deepEqual(Object.keys(saved.attendanceRoster),['a','b']); assert.equal(saved.rosterVersion,1); assert.equal(saved.audience,'Selected sections');
+  assert.equal(recipients.join(','),'a,b'); assert.equal(previous.attendanceRoster.b,undefined);
+  writes.length=0;previous.rosterVersion=1;
+  await AdminDashboard.prototype.handleEventFormSubmit.call(state,{preventDefault(){}});
+  assert.equal(writes.length,0);assert.match(messages.at(-1)[1],/Participants changed/);
+});
+
 test('event update distinguishes a saved event from a linked record synchronization failure', () => {
   const source = fs.readFileSync(path.join(root, 'assets/js/admin/AdminDashboard.js'), 'utf8');
   assert.match(source, /async syncEventRecordsAfterSave\(eventId, event\)/);

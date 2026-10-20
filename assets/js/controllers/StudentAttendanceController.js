@@ -4,6 +4,7 @@ import { AttendanceSubmissionService } from './AttendanceSubmissionService.js?v=
 import { GeofenceBoundary } from './GeofenceBoundary.js';
 import { ButtonLoadingController } from './ButtonLoadingController.js';
 import { deviceLocation } from './DeviceLocationService.js';
+import { EventAudiencePolicy } from './EventAudiencePolicy.js';
 
 export class StudentAttendanceController {
   constructor({ getState, setFaceRegistration, showError, bridge, checkIn }) {
@@ -121,6 +122,9 @@ export class StudentAttendanceController {
   }
 
   async checkOutAttendance(record, event, button) {
+    if (!record && Array.isArray(event?.audienceSections) && !EventAudiencePolicy.canAttend({ ...currentUserProfile, uid: currentUser.uid }, event)) {
+      showDashboardToast('View-only event', 'Your section is not assigned to take attendance.'); return;
+    }
     const eventId = event?.id || record?.eventId;
     if (this.checkoutBusy.has(eventId)) return;
     if (!event || !isCheckoutAvailable(event)) {
@@ -219,6 +223,9 @@ export class StudentAttendanceController {
   }
 
   async performCheckIn(selectedEvent, button, loadingKey) {
+    if (Array.isArray(selectedEvent.audienceSections) && !EventAudiencePolicy.canAttend({ ...currentUserProfile, uid: currentUser.uid }, selectedEvent)) {
+      showDashboardToast('View-only event', 'Your section is not assigned to take attendance.'); return;
+    }
     let faceRegistration;
     try {
       faceRegistration = await getDocFromServer(doc(db, "faceRegistrations", currentUser.uid));

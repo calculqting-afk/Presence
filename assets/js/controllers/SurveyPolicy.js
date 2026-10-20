@@ -1,8 +1,10 @@
+import { EventAudiencePolicy } from './EventAudiencePolicy.js';
 export class SurveyPolicy {
   constructor({ now = () => Date.now() } = {}) { this.now = now; }
   time(value) { return value?.toMillis?.() ?? value?.toDate?.().getTime() ?? new Date(value).getTime(); }
   eligible(profile, event) {
     if (!profile || profile.active !== true) return false;
+    if (Array.isArray(event.audienceSections)) return EventAudiencePolicy.canAttend(profile, event);
     if (!event.attendanceRoster) return event.audience === 'All students' || event.audience === `Section ${profile.section}`;
     if (Object.hasOwn(event.attendanceRoster, profile.uid)) return true;
     const joined = profile.createdAt?.toDate?.();

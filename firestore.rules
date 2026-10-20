@@ -112,17 +112,63 @@ service cloud.firestore {
         )));
     }
 
+    function eventSections(event) {
+      return ("audienceSections" in event)
+        ? (event.audienceSections.size() == 0 ? ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"] : event.audienceSections)
+        : (event.audience == "All students" ? ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"]
+          : event.audience == "Section 1A" ? ["1A"] : event.audience == "Section 1B" ? ["1B"]
+          : event.audience == "Section 2A" ? ["2A"] : event.audience == "Section 2B" ? ["2B"]
+          : event.audience == "Section 3A" ? ["3A"] : event.audience == "Section 3B" ? ["3B"]
+          : event.audience == "Section 4A" ? ["4A"] : ["4B"]);
+    }
+    function validSectionTimes(times) {
+      let a = times.get("1A", request.time);
+      let b = times.get("1B", request.time);
+      let c = times.get("2A", request.time);
+      let d = times.get("2B", request.time);
+      let e = times.get("3A", request.time);
+      let f = times.get("3B", request.time);
+      let g = times.get("4A", request.time);
+      let h = times.get("4B", request.time);
+      return a is timestamp && a <= request.time && b is timestamp && b <= request.time
+        && c is timestamp && c <= request.time && d is timestamp && d <= request.time
+        && e is timestamp && e <= request.time && f is timestamp && f <= request.time
+        && g is timestamp && g <= request.time && h is timestamp && h <= request.time;
+    }
+    function validEventAudience(data) {
+      let sections = eventSections(data);
+      return !data.keys().hasAny(["audienceSections", "sectionAssignedAt", "rosterVersion"])
+        ? data.audience != "Selected sections"
+        : (data.keys().hasAll(["audienceSections", "sectionAssignedAt", "rosterVersion", "attendanceRoster", "rosterCapturedAt"])
+          && data.audienceSections is list && data.audienceSections.size() <= 8
+          && data.audienceSections.hasOnly(["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"])
+          && data.audienceSections.toSet().size() == data.audienceSections.size()
+          && ((data.audienceSections.size() == 0 && data.audience == "All students")
+            || (data.audienceSections.size() == 1 && data.audience == "Section " + data.audienceSections[0])
+            || (data.audienceSections.size() > 1 && data.audience == "Selected sections"))
+          && data.sectionAssignedAt is map && data.sectionAssignedAt.keys().hasOnly(sections)
+          && data.sectionAssignedAt.keys().hasAll(sections) && validSectionTimes(data.sectionAssignedAt)
+          && data.rosterVersion is int && data.rosterVersion > 0);
+    }
+    function validRosterUpdate(data, before) {
+      return !data.diff(before).affectedKeys().hasAny(["audience", "audienceSections", "sectionAssignedAt", "rosterVersion", "attendanceRoster", "rosterCapturedAt"])
+        || (("audienceSections" in data)
+          ? (before.checkOutClosesAt > request.time && data.rosterCapturedAt == request.time
+            && data.rosterVersion == (("rosterVersion" in before) ? before.rosterVersion + 1 : 1))
+          : (before.openAt > request.time && data.keys().hasAll(["attendanceRoster", "rosterCapturedAt"]) && data.rosterCapturedAt == request.time));
+    }
     function validEvent(data) {
       return data.keys().hasOnly([
           "name", "type", "date", "location", "timeIn", "checkInCutoff", "checkInClose", "timeOut", "checkOutCutoff",
           "audience", "description", "notes", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt",
-          "lateAfterAt", "checkOutClosesAt", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt", "hasSurvey", "surveyArchived"
+          "lateAfterAt", "checkOutClosesAt", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt", "hasSurvey", "surveyArchived", "audienceSections", "sectionAssignedAt", "rosterVersion"
         ])
         && data.keys().hasAll(["name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "audience", "description", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt"])
         && shortText(data.name, 160) && shortText(data.type, 60) && shortText(data.date, 10)
         && shortText(data.location, 240) && shortText(data.timeIn, 5) && shortText(data.checkInCutoff, 5) && optionalShortText(data, "checkInClose", 5)
         && shortText(data.timeOut, 5) && shortText(data.checkOutCutoff, 5)
-        && data.audience in ["All students", "Section 1A", "Section 1B", "Section 2A", "Section 2B", "Section 3A", "Section 3B", "Section 4A", "Section 4B"]
+        && data.audience in ["All students", "Selected sections", "Section 1A", "Section 1B", "Section 2A", "Section 2B", "Section 3A", "Section 3B", "Section 4A", "Section 4B"]
+        && validEventAudience(data)
         && shortText(data.description, 4000) && optionalShortText(data, "notes", 4000)
         && data.requiresGeofence is bool
         && (!("hasSurvey" in data) || data.hasSurvey is bool)
@@ -292,20 +338,23 @@ service cloud.firestore {
     function studentCanReadEventGeofence(eventId) {
       return isStudent()
         && exists(/databases/$(database)/documents/events/$(eventId))
-        && eligibleForAttendance(get(/databases/$(database)/documents/events/$(eventId)).data,
-          get(/databases/$(database)/documents/students/$(request.auth.uid)).data, request.auth.uid);
+        && (eligibleForAttendance(get(/databases/$(database)/documents/events/$(eventId)).data,
+          get(/databases/$(database)/documents/students/$(request.auth.uid)).data, request.auth.uid)
+          || (exists(/databases/$(database)/documents/attendance/$(request.auth.uid + "_" + eventId))
+            && get(/databases/$(database)/documents/attendance/$(request.auth.uid + "_" + eventId)).data.studentUid == request.auth.uid
+            && get(/databases/$(database)/documents/attendance/$(request.auth.uid + "_" + eventId)).data.status == "checked-in"));
     }
 
     function eligibleForAttendance(event, student, uid) {
       return ("attendanceRoster" in event)
-        ? (uid in event.attendanceRoster || (
+        ? ((uid in event.attendanceRoster && (!("audienceSections" in event) || event.attendanceRoster[uid] in eventSections(event))) || (
           student.active == true
           && student.createdAt is timestamp
           && event.rosterCapturedAt is timestamp
           && student.createdAt >= event.rosterCapturedAt
-          && (event.audience == "All students" || event.audience == "Section " + student.section)
+          && student.section in eventSections(event)
         ))
-        : (event.audience == "All students" || event.audience == "Section " + student.section);
+        : student.section in eventSections(event);
     }
 
     function studentCanCheckIn(attendanceId, data) {
@@ -481,10 +530,7 @@ service cloud.firestore {
         && (!exists(/databases/$(database)/documents/events/$(eventId))
           ? (request.resource.data.keys().hasAll(["attendanceRoster", "rosterCapturedAt"])
             && request.resource.data.rosterCapturedAt == request.time)
-          : (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["attendanceRoster", "rosterCapturedAt"])
-            || (resource.data.openAt > request.time
-              && request.resource.data.keys().hasAll(["attendanceRoster", "rosterCapturedAt"])
-              && request.resource.data.rosterCapturedAt == request.time)));
+          : validRosterUpdate(request.resource.data, resource.data));
       // Deletion is deliberately stricter than event editing. This protects
       // the operational-data reset from being triggered by other admin roles.
       allow delete: if isSuperAdmin();
@@ -496,7 +542,10 @@ service cloud.firestore {
       return isSuperAdmin() || isHeadAdmin() || isAttendanceAdmin();
     }
     function canReadSurvey(eventId) {
-      return canManageSurveys() || (isSurveyStudent() && studentCanReadEventGeofence(eventId));
+      return canManageSurveys() || (isSurveyStudent()
+        && exists(/databases/$(database)/documents/events/$(eventId))
+        && eligibleForAttendance(get(/databases/$(database)/documents/events/$(eventId)).data,
+          get(/databases/$(database)/documents/students/$(request.auth.uid)).data, request.auth.uid));
     }
     function isSurveyStudent() {
       let profile = get(/databases/$(database)/documents/students/$(request.auth.uid)).data;

@@ -1,4 +1,5 @@
 import { DailyAttendanceClock } from './DailyAttendanceClock.js';
+import { EventAudiencePolicy } from './EventAudiencePolicy.js';
 
 export class AttendanceAnalyticsController {
   constructor({ document, repository, getEvents, getStudents, closeDate, escapeHtml, now = () => new Date() }) {
@@ -71,7 +72,8 @@ export class AttendanceAnalyticsController {
       const own = (this.records || []).filter(record => record.eventId === event.id);
       const roster = { ...(event.attendanceRoster || {}) };
       for (const student of students.values()) {
-        if (student.active === false || (event.audience && event.audience !== 'All students' && event.audience !== `Section ${student.section}`)) continue;
+        if (student.active === false || !EventAudiencePolicy.matches(student, event)) continue;
+        if (Array.isArray(event.audienceSections) && !EventAudiencePolicy.canAttend(student, event)) continue;
         if (student.createdAt?.toDate?.() > this.closeDate(event)) continue;
         if (!Object.hasOwn(roster, student.uid)) roster[student.uid] = student.section || '';
       }
@@ -82,7 +84,8 @@ export class AttendanceAnalyticsController {
         const record = own.find(record => record.studentUid === uid);
         const hasIn = Boolean(record?.checkedInAt || record?.attendedAt), hasOut = Boolean(record?.checkedOutAt);
         const ended = this.now() > this.closeDate(event);
-        const verified = Object.hasOwn(event.attendanceRoster || {}, uid) || Boolean(student?.createdAt?.toDate?.());
+        const verified = (Object.hasOwn(event.attendanceRoster || {}, uid) || Boolean(student?.createdAt?.toDate?.()))
+          && !EventAudiencePolicy.addedAfterOpening({ ...student, uid, section: rosterSection }, event);
         rows.push({ student, uid, event, section: rosterSection, present: hasIn, late: hasIn && record?.arrivalStatus === 'late',
           completed: hasIn && hasOut, missed: hasIn && !hasOut && ended, checkout: !hasIn && hasOut,
           absent: !hasIn && !hasOut && ended && verified, review: !hasIn && !hasOut && ended && !verified });

@@ -1,4 +1,6 @@
 import { ControllerScope } from '../core/ControllerScope.js';
+import { EventAudiencePolicy } from '../controllers/EventAudiencePolicy.js';
+import { EventAudienceController } from '../controllers/EventAudienceController.js';
 import { AttendanceReportController } from '../controllers/AttendanceReportController.js';
 import { StudentPasswordPolicy } from '../core/StudentPasswordPolicy.js';
 import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261011-optimized';
@@ -404,7 +406,11 @@ export class AdminDashboard {
     dashboard.document.querySelectorAll("[data-close-role-change]").forEach(button => dashboard.scope.listen(button, "click", dashboard.closeRoleChangeModal));
     dashboard.scope.listen(dashboard.roleChangeModal, "click", dashboard.handleRoleChangeModalClick);
     dashboard.eventSyncNotice = dashboard.document.querySelector(".notice");
-    if (dashboard.eventSyncNotice) dashboard.eventSyncNotice.textContent = "Events sync online. Publishing saves the active participant roster. Re-save upcoming events after adding students or changing sections; the roster is locked once attendance opens. Older events without a roster have unverified absence eligibility.";
+    if (dashboard.eventSyncNotice) dashboard.eventSyncNotice.textContent = "All students can view events. Only assigned sections can take attendance. Save group changes to update participants while the event is upcoming or ongoing; closed-event groups stay locked. Late-added groups are reviewed, not automatically marked absent.";
+    dashboard.document.querySelector('#eventAudience').innerHTML = '<option>All students</option><option>Selected sections</option>';
+    dashboard.document.querySelector('label[for="eventAudience"]').textContent = 'Attendance participants';
+    dashboard.scope.mount(dashboard.document.querySelector('#eventAudience').closest('.field'), 'afterend', `<fieldset id="eventSectionChoices" class="field full" hidden><legend>Sections allowed to take attendance</legend><div class="event-section-choices">${EventAudiencePolicy.sections.map(section => `<label><input type="checkbox" data-event-section value="${section}"> Section ${section}</label>`).join('')}</div><small>Other sections can view the event, but cannot check in or check out without an existing check-in.</small></fieldset>`);
+    dashboard.eventAudienceEditor = new EventAudienceController({ document: dashboard.document, scope: dashboard.scope });
     dashboard.studentTableBody.closest("table").querySelectorAll("th")[1].textContent = "Course / Section";
     dashboard.studentTableBody.closest("table").querySelectorAll("th")[2].textContent = "Face / live status";
     dashboard.document.querySelector('label[for="eventNotes"]').textContent = "Description";
@@ -930,7 +936,7 @@ export class AdminDashboard {
         const section = dashboard.events.find(event => event.id === record.eventId)?.attendanceRoster?.[record.studentUid] ?? record.rosterSection ?? record.section;
         return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>Deleted/missing student profile</strong><small>${escapeHtml(record.studentId || 'Student ID unavailable')}${section ? ` · ${escapeHtml(section)}` : ''}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || 'Attendance event')}</strong><small>${escapeHtml(record.eventDate || 'Date unavailable')}</small></div><div class="attendance-line-times"><div><span>IN</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedInAt || record.attendedAt))}</strong></div><div><span>OUT</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div></div><div class="attendance-line-status"><span class="badge orange">Needs review — profile missing</span></div></article>`;
       }
-      if (record.rosterUnverified) return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || '')} · ${escapeHtml(student?.section || '')}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName)}</strong><small>${escapeHtml(record.eventDate)}</small></div><div class="attendance-line-times">No attendance recorded</div><div class="attendance-line-status"><span class="badge orange">Needs review — registration date unknown</span></div></article>`;
+      if (record.rosterUnverified) return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || '')} · ${escapeHtml(record.rosterSection || student?.section || '')}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName)}</strong><small>${escapeHtml(record.eventDate)}</small></div><div class="attendance-line-times">No attendance recorded</div><div class="attendance-line-status"><span class="badge orange">${record.assignmentUnverified ? 'Needs review — assigned after attendance opened' : 'Needs review — registration date unknown'}</span></div></article>`;
       const checkedInAt = record.checkedInAt || record.attendedAt;
       const completed = Boolean(record.checkedOutAt);
       const absent = record.status === 'absent';
@@ -1351,6 +1357,8 @@ export class AdminDashboard {
   resetEventForm() {
     const dashboard = this;
     dashboard.eventForm.reset();
+    delete dashboard.eventForm.dataset.rosterVersion;
+    dashboard.eventAudienceEditor?.set();
     dashboard.eventGeofenceEditor.clear();
     dashboard.document.querySelector("#editingEventId").value = "";
     dashboard.document.querySelector("#eventFormTitle").textContent = "Event details";
@@ -1360,7 +1368,7 @@ export class AdminDashboard {
   duplicateEventSignature(event) {
     const dashboard = this;
     const normalized = value => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
-    return [event.name, event.date, event.location, event.audience, event.timeIn, event.checkInCutoff, event.timeOut, event.checkOutCutoff].map(normalized).join("\u001f");
+    return [event.name, event.date, event.location, EventAudiencePolicy.selected(event).join(','), event.timeIn, event.checkInCutoff, event.timeOut, event.checkOutCutoff].map(normalized).join("\u001f");
   }
   async editEvent(id) {
     const dashboard = this;
@@ -1385,7 +1393,8 @@ export class AdminDashboard {
     dashboard.document.querySelector("#eventTimeOut").value = event.timeOut;
     dashboard.document.querySelector("#eventCheckInCutoff").value = event.checkInCutoff || timePlusMinutes(event.timeIn) || event.timeOut;
     dashboard.document.querySelector("#eventCheckOutCutoff").value = event.checkOutCutoff || timePlusMinutes(event.timeOut);
-    dashboard.document.querySelector("#eventAudience").value = event.audience;
+    dashboard.eventAudienceEditor.set(event);
+    dashboard.eventForm.dataset.rosterVersion = String(event.rosterVersion || 0);
     dashboard.document.querySelector("#eventNotes").value = event.description || event.notes || "";
     dashboard.eventGeofenceEditor.set(event.geofence || {});
     dashboard.document.querySelector("#eventFormTitle").textContent = "Modify event";
@@ -1967,13 +1976,21 @@ export class AdminDashboard {
       checkOutClosesAt: Timestamp.fromDate(new Date(`${date}T${checkOutCutoff}`)),
       updatedAt: serverTimestamp()
     };
+    try {
+      let previousEvent;
+      if (id) {
+        const saved = await getDocFromServer(doc(db, 'events', id));
+        if (!saved.exists()) throw new Error('This event is unavailable. Refresh the event list.');
+        previousEvent = { ...saved.data(), id };
+        if (dashboard.eventForm.dataset.rosterVersion !== undefined && Number(dashboard.eventForm.dataset.rosterVersion) !== (previousEvent.rosterVersion || 0)) throw new Error('Participants changed while this editor was open. Reopen the event, review its groups and save again.');
+      }
+      const sections = dashboard.eventAudienceEditor.read();
+      if (previousEvent && isEventFinished(previousEvent)) {
+        if (JSON.stringify([...sections].sort()) !== JSON.stringify([...EventAudiencePolicy.selected(previousEvent)].sort())) throw new Error('Closed-event groups cannot be changed. Create a new event for additional sections.');
+        record.audience = previousEvent.audience;
+      } else Object.assign(record, EventAudiencePolicy.assignment(dashboard.students, sections, previousEvent, { timestamp: serverTimestamp }));
+    } catch (error) { return showDashboardToast('Unable to update participants', error.message || 'Refresh and try again.'); }
     const duplicate = dashboard.events.find(event => event.id !== id && dashboard.duplicateEventSignature(event) === dashboard.duplicateEventSignature(record));
-    const previousEvent = dashboard.events.find(event => event.id === id);
-    if (!previousEvent || new Date() < eventOpenDate(previousEvent)) {
-      record.attendanceRoster = dashboard.summaryService.captureRoster(dashboard.students, record);
-      if (Object.keys(record.attendanceRoster).length > 5000) return showDashboardToast('Participant roster too large', 'This event supports up to 5,000 participants. Select a smaller audience.');
-      record.rosterCapturedAt = serverTimestamp();
-    }
     if (duplicate) {
       return showDashboardToast("Duplicate event", `An event named ${record.name} already uses this date, location, audience, and attendance schedule. Change one of those details before saving.`);
     }
@@ -1982,13 +1999,14 @@ export class AdminDashboard {
       if (id) {
         const batch = writeBatch(db);
         batch.set(doc(db, "events", id), record, {
-          merge: true
+          // Replace assignment maps, including removed sections and students.
+          mergeFields: Object.keys(record)
         });
         batch.set(doc(db, "eventGeofences", id), geofence);
         await batch.commit();
         linkedRecordsSynced = (await dashboard.syncEventRecordsAfterSave(id, record)).synced;
         if (!isEventFinished(record)) {
-          const recipients = dashboard.students.filter(student => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
+          const recipients = dashboard.students.filter(student => EventAudiencePolicy.canAttend(student, record));
           Promise.allSettled(recipients.map(student => createNotification({
             recipientUid: student.uid,
             recipientRole: "student",
@@ -2020,7 +2038,7 @@ export class AdminDashboard {
         batch.set(doc(db, "eventGeofences", eventReference.id), geofence);
         await batch.commit();
         if (!isEventFinished(record)) {
-          const recipients = dashboard.students.filter(student => student.active !== false && (record.audience === "All students" || record.audience === `Section ${student.section}`));
+          const recipients = dashboard.students.filter(student => EventAudiencePolicy.canAttend(student, record));
           Promise.allSettled(recipients.map(student => createNotification({
             recipientUid: student.uid,
             recipientRole: "student",
@@ -2052,7 +2070,7 @@ export class AdminDashboard {
         : "The event and attendance window were saved and synced.";
       showDashboardToast(id ? "Event updated" : "Event created", message);
     } catch (error) {
-      const message = firebaseErrorCode(error) === "permission-denied" ? "Your account is not allowed to create events. Confirm you are signed in as a Head Admin or Attendance Admin and that the latest Firestore Rules are deployed." : error.message || "The event could not be saved. Please try again.";
+      const message = firebaseErrorCode(error) === "permission-denied" ? "Firestore rejected the event or its location settings. Refresh, sign in again, and reopen the event. If it still fails, confirm the published rules match this app version and your account has event-management access." : error.message || "The event could not be saved. Please try again.";
       showDashboardToast("Unable to save event", message);
     }
   }

@@ -13,3 +13,6 @@ android/**/build/
 android/app/src/main/assets/public/
 *.jks
 *.keystore
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*

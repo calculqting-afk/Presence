@@ -1,4 +1,5 @@
 import { ControllerScope } from '../core/ControllerScope.js';
+import { EventAudiencePolicy } from '../controllers/EventAudiencePolicy.js';
 import { StudentPasswordPolicy } from '../core/StudentPasswordPolicy.js';
 import { SurveyConfirmationController } from '../controllers/SurveyConfirmationController.js';
 import { StudentIdentityController } from '../controllers/StudentIdentityController.js';
@@ -432,13 +433,7 @@ export class StudentDashboard {
   }
   currentEventsForStudent() {
     const dashboard = this;
-    const attendedEventIds = new Set(dashboard.attendance.map(record => record.eventId));
-    const student = {
-      ...dashboard.studentProfile,
-      uid: currentUser.uid
-    };
-    return dashboard.events.filter(event => !isEventFinished(event)
-      && (attendedEventIds.has(event.id) || dashboard.summaryService.eligibility(student, event) !== 'excluded'));
+    return dashboard.events.filter(event => !isEventFinished(event));
   }
   renderEvents() {
     const dashboard = this;
@@ -456,19 +451,21 @@ export class StudentDashboard {
         const status = getEventStatus(event);
         const checkInResult = dashboard.attendanceCheckInController.policy.evaluateCheckIn(event);
         const attendanceRecord = attendanceByEventId.get(event.id);
+        const eligible = EventAudiencePolicy.canAttend({ ...dashboard.studentProfile, uid: currentUser.uid }, event);
         const attended = Boolean(attendanceRecord);
         const completed = attendanceRecord?.status === "completed" || Boolean(attendanceRecord?.checkedOutAt);
-        const checkoutOpen = !completed && isCheckoutAvailable(event);
-        const checkInAvailable = !attended && checkInResult.available;
+        const checkoutOpen = !completed && isCheckoutAvailable(event) && (eligible || Boolean(attendanceRecord?.checkedInAt || attendanceRecord?.attendedAt));
+        const checkInAvailable = eligible && !attended && checkInResult.available;
         const attendanceBadge = completed ? '<span class="badge green">Completed</span>' : attended ? `<span class="badge green">${checkoutOpen ? "Checkout available" : "Checked in"}</span>` : checkInAvailable && checkInResult.arrivalStatus === "late" ? '<span class="badge orange">Late check-in available</span>' : checkoutOpen ? '<span class="badge blue">Checkout available</span>' : eventStatusBadge(status);
         const description = event.description || event.notes || `Attendance event for ${event.audience}.`;
         const actionNotice = !attended && checkoutOpen ? '<p class="event-card-notice">Check-in remains available as Late until checkout closes. You may also check out without checking in; that records partial attendance.</p>' : checkInAvailable && checkInResult.arrivalStatus === "late" ? `<p class="event-card-notice">Check-in is late after ${escapeHtml(formatEventTime(event.checkInCutoff || event.timeOut))}. It remains available until checkout closes.</p>` : "";
-        const actionButtons = completed
+        let actionButtons = completed
           ? '<button class="outline-button attendance-action-button" type="button" disabled>✓ Attendance completed</button>'
           : attended
             ? `<button class="${checkoutOpen ? "primary-button" : "outline-button"} attendance-action-button" type="button" data-check-out-event="${escapeHtml(event.id)}" ${checkoutOpen ? "" : "disabled"}>${checkoutOpen ? "Check out" : "✓ Checked in"}</button>`
             : `${checkInAvailable ? `<button class="primary-button attendance-action-button" type="button" data-attend-event="${escapeHtml(event.id)}">${checkInResult.arrivalStatus === "late" ? "Check in late" : "Check in"}</button>` : ""}${checkoutOpen ? `<button class="outline-button attendance-action-button" type="button" data-check-out-event="${escapeHtml(event.id)}">Check out</button>` : ""}${!checkInAvailable && !checkoutOpen ? `<button class="outline-button attendance-action-button" type="button" disabled>${status === "closed" ? "Attendance unavailable" : "Not open yet"}</button>` : ""}`;
-        return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div>${dashboard.schedulePresenter.render(event)}${actionNotice}${event.hasSurvey && !event.surveyArchived ? `<div class="survey-student-tools"><button class="outline-button" type="button" data-survey-event="${escapeHtml(event.id)}">Open / resume survey</button></div>` : ""}<div class="event-card-actions">${attendanceBadge}<div class="event-card-attendance-actions">${actionButtons}</div></div></div></article>`;
+        if (!eligible && !attended) actionButtons = `<button class="outline-button attendance-action-button" type="button" disabled>View only - attendance for ${escapeHtml(EventAudiencePolicy.label(event))}</button>`;
+        return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div>${dashboard.schedulePresenter.render(event)}<p class="event-card-notice">Attendance: ${escapeHtml(EventAudiencePolicy.label(event))}</p>${actionNotice}${eligible && event.hasSurvey && !event.surveyArchived ? `<div class="survey-student-tools"><button class="outline-button" type="button" data-survey-event="${escapeHtml(event.id)}">Open / resume survey</button></div>` : ""}<div class="event-card-actions">${!eligible && !attended ? '<span class="badge blue">View only</span>' : attendanceBadge}<div class="event-card-attendance-actions">${actionButtons}</div></div></div></article>`;
       }).join(""));
       if (dashboard.view === 'dashboard') dashboard.updateMarkup(timeline, `<div class="timeline">${activeEvents.slice(0, 4).map(event => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${attendanceByEventId.has(event.id) ? '<span class="badge green">Attended</span>' : eventStatusBadge(getEventStatus(event))}</div>`).join("")}</div>`);
     }

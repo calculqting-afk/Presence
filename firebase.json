@@ -6,6 +6,7 @@
     "public": ".",
     "ignore": [
       "firebase.json",
+      "firebase.audience-test.json",
       "AGENTS.md",
       "firestore.rules",
       "docs/**",
