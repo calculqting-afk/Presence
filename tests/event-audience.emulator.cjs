@@ -112,6 +112,17 @@ const attendance = (uid, event) => ({ studentUid: uid, studentId: uid.toUpperCas
   await sessionPair('invalid_sessions',{...morning,sessionGroupId:'invalid_sessions'},{...afternoon,sessionGroupId:'invalid_sessions',openAt:date(1000)},polygon,superAdmin,false);
   const absentPair=await fetch(`${base}/events/invalid_sessions`,{headers:{Authorization:'Bearer owner'}});
   assert.equal(absentPair.status,404,'an invalid afternoon must not publish the morning either');
+  const solo={...afternoon,sessionGroupId:'solo',rosterVersion:1,requiresGeofence:false};
+  await write('events/solo',solo,token('manager'));
+  await write('attendance/a_solo',{...attendance('a',solo),eventId:'solo'},token('a'),false);
+  const noExtraSession=await fetch(`${base}/events/solo_afternoon`,{headers:{Authorization:'Bearer owner'}});
+  assert.equal(noExtraSession.status,404,'afternoon-only must not require a morning or extra session');
+  const futureMorning={...solo,sessionGroupId:'switch',sessionPeriod:'morning'};
+  await write('events/switch',futureMorning,token('manager'));
+  await write('events/switch',{...futureMorning,sessionPeriod:'afternoon',rosterVersion:2},token('manager'));
+  await write('events/solo',{...solo,...afternoonOpen,sessionGroupId:'solo',rosterVersion:2});
+  await write('events/solo',{...solo,...afternoonOpen,sessionGroupId:'solo',sessionPeriod:'morning',rosterVersion:3},token('manager'),false);
+  console.log('Afternoon-only rules passed: standalone creation, no extra session, early submission denied, mode changes limited to unopened root sessions.');
   console.log('Session rules passed: atomic morning/afternoon polygon bundle, independent attendance, early check-in denied, opened schedules/identity/overlap protected, Attendance Admin authorized.');
   console.log('Firestore emulator passed: legacy mismatch denied, live multi-section update accepted, view-only read allowed/write denied, assigned check-ins accepted, removed participant checkout accepted, stale revisions/invalid sections/student edits/closed roster edits denied.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

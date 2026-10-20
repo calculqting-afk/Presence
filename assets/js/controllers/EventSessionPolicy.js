@@ -5,6 +5,16 @@ import { EventAudiencePolicy } from './EventAudiencePolicy.js';
 export class EventSessionPolicy {
   static scheduleFields = ['date', 'timeIn', 'checkInCutoff', 'timeOut', 'checkOutCutoff', 'openAt', 'checkInClosesAt', 'closeAt', 'checkOutClosesAt'];
   static afternoonId(id) { return `${id}_afternoon`; }
+  static period(event) { return event.sessionPeriod || (event.timeIn >= '12:00' ? 'afternoon' : 'morning'); }
+  static related(event, events = []) {
+    if (!event.sessionGroupId) return [event];
+    return [...new Map([event, ...events.filter(item => item.sessionGroupId === event.sessionGroupId)].map(item => [item.id, item])).values()]
+      .sort((a, b) => (this.period(a) === 'morning' ? 0 : 1) - (this.period(b) === 'morning' ? 0 : 1));
+  }
+  static modeLabel(sessions) {
+    const periods = new Set(sessions.map(event => this.period(event)));
+    return periods.size > 1 ? 'Both — Morning and Afternoon' : periods.has('afternoon') ? 'Afternoon only' : 'Morning only';
+  }
   static opened(event, now = new Date()) { const date = EventAudiencePolicy.date(event?.openAt); return Boolean(date && date <= now); }
   static assertSchedule(record, previous, now = new Date()) {
     if (!previous || !this.opened(previous, now)) return;
@@ -14,15 +24,21 @@ export class EventSessionPolicy {
       return String(before) !== String(after);
     })) throw new Error('This session has opened. Its attendance schedule is locked; create another event for a different schedule.');
   }
-  static prepare({ id, record, previous, afternoon, enabled, times, students, sections, timestamp, fromDate, now = new Date() }) {
+  static prepare({ id, record, previous, afternoon, enabled, mode = enabled ? 'both' : previous?.sessionPeriod || 'morning', times, students, sections, timestamp, fromDate, now = new Date() }) {
+    if (!['morning','afternoon','both'].includes(mode)) throw new Error('Choose Morning only, Afternoon only, or Both.');
+    enabled = mode === 'both';
     if (afternoon && !enabled) throw new Error('A published afternoon session cannot be disabled here. Its attendance and history must be preserved.');
     this.assertSchedule(record, previous, now);
+    const period = mode === 'afternoon' ? 'afternoon' : 'morning';
+    if (previous?.sessionPeriod && previous.sessionPeriod !== period && this.opened(previous, now)) throw new Error('This session has opened. Its morning/afternoon attendance mode is locked.');
+    if ((period === 'afternoon' && record.timeIn < '12:00') || (period === 'morning' && record.timeIn >= '12:00')) throw new Error('Morning check-in must be before noon; afternoon check-in must be at or after noon.');
     const baseName = record.name;
-    const maximum = !previous || previous.sessionPeriod || enabled ? 145 : 160;
+    const metadata = !previous || previous.sessionPeriod || enabled || mode === 'afternoon';
+    const maximum = metadata ? 145 : 160;
     if (!baseName || baseName.length > maximum) throw new Error(`Use an event name of 1–${maximum} characters.`);
     const primary = { ...record };
-    if (!previous || previous.sessionPeriod || enabled) Object.assign(primary, {
-      sessionPeriod: 'morning', sessionGroupId: id, sessionBaseName: baseName, name: `${baseName} — Morning`
+    if (metadata) Object.assign(primary, {
+      sessionPeriod: period, sessionGroupId: id, sessionBaseName: baseName, name: `${baseName} — ${period === 'morning' ? 'Morning' : 'Afternoon'}`
     });
     if (!enabled) return { primary, afternoon: null };
     const [timeIn, checkInCutoff, timeOut, checkOutCutoff] = times;

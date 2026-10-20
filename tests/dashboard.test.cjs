@@ -111,7 +111,7 @@ test('event schedules label the check-in and checkout openings and cutoffs', asy
   assert.ok(html.includes('&lt;script&gt;')); assert.ok(!html.includes('<script>'));
   assert.match(presenter.render({ timeIn: '16:00', timeOut: '16:15' }), /Closes<\/dt><dd>16:30/);
   assert.match(presenter.render({}), /Not set/);
-  for (const role of ['admin', 'student']) assert.match(fs.readFileSync(path.join(root, `assets/js/${role}/${role === 'admin' ? 'Admin' : 'Student'}Dashboard.js`), 'utf8'), /schedulePresenter.render\(event\)/);
+  for (const role of ['admin', 'student']) assert.match(fs.readFileSync(path.join(root, `assets/js/${role}/${role === 'admin' ? 'Admin' : 'Student'}Dashboard.js`), 'utf8'), /schedulePresenter.render\(event, dashboard.events\)/);
 });
 test('event form pairs each attendance opening with its cutoff', () => {
   const html = fs.readFileSync(path.join(root, 'pages/admin-dashboard.html'), 'utf8');
@@ -176,18 +176,23 @@ test('admin session form toggles afternoon, locks opened schedules and resets wi
   const {EventSessionController}=await isolatedModule('assets/js/controllers/EventSessionController.js',{},browser);
   const editor=new EventSessionController({document:browser.document,scope});
   assert.equal(browser.document.querySelector('#eventAfternoonFields').hidden,true);
-  browser.document.querySelector('#eventAfternoonEnabled').checked=true;
-  await browser.document.querySelector('#eventAfternoonEnabled').emit('change');
+  browser.document.querySelector('#eventAttendanceMode').value='both';
+  await browser.document.querySelector('#eventAttendanceMode').emit('change');
   assert.equal(browser.document.querySelector('#eventAfternoonFields').hidden,false);
   assert.equal(browser.document.querySelector('#eventAfternoonTimeIn').required,true);
   const afternoon={timeIn:'13:00',checkInCutoff:'14:00',timeOut:'16:00',checkOutCutoff:'17:00',rosterVersion:2,openAt:{toDate:()=>new Date(Date.now()-1000)}};
   editor.set({openAt:afternoon.openAt},afternoon);
   assert.equal(browser.document.querySelector('#eventTimeIn').disabled,true);
   assert.equal(browser.document.querySelector('#eventAfternoonTimeIn').disabled,true);
-  assert.equal(browser.document.querySelector('#eventAfternoonEnabled').disabled,true);
+  assert.equal(browser.document.querySelector('#eventAttendanceMode').disabled,true);
   assert.equal(editor.read().times.join(','),'13:00,14:00,16:00,17:00');
   editor.set();
   assert.equal(editor.read().enabled,false); assert.equal(browser.document.querySelector('#eventTimeIn').disabled,false);
+  browser.document.querySelector('#eventAttendanceMode').value='afternoon';
+  await browser.document.querySelector('#eventAttendanceMode').emit('change');
+  assert.equal(editor.read().mode,'afternoon');
+  assert.equal(browser.document.querySelector('#eventPrimarySessionTitle').textContent,'Afternoon attendance');
+  assert.equal(browser.document.querySelector('#eventAfternoonFields').hidden,true);
   assert.equal(browser.document.querySelector('#eventAfternoonTimeIn').required,false);
   assert.equal(mounts.some(html=>html.includes('event-card')),false);
 });
@@ -195,7 +200,7 @@ test('admin session form toggles afternoon, locks opened schedules and resets wi
 test('real admin save publishes both session events and geofences in one batch; afternoon off creates only morning', async () => {
   const names=fs.readFileSync(path.join(root,'assets/js/dashboard.js'),'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
   const shared=Object.fromEntries(names.map(name=>[name,()=> ''])),browser=fakeBrowser(),writes=[],notifications=[];
-  let commits=0,enabled=true;
+  let commits=0,enabled=true,mode;
   Object.assign(shared,{currentUser:{uid:'head'},Timestamp:{fromDate:date=>({toDate:()=>date})},serverTimestamp:()=>({server:true}),isEventFinished:()=>false,
     doc:(db,collection,id)=>id?({collection,id}):({collection:db,id:'group'}),collection:(_db,name)=>name,
     writeBatch:()=>({set:(reference,data,options)=>writes.push({reference,data,options}),commit:async()=>{commits++;}}),
@@ -203,7 +208,7 @@ test('real admin save publishes both session events and geofences in one batch; 
   const {AdminDashboard}=await isolatedModule('assets/js/admin/AdminDashboard.js',shared,browser);
   for(const [id,value] of Object.entries({editingEventId:'',eventName:'Intramurals',eventDate:'2099-10-20',eventTimeIn:'07:00',eventCheckInCutoff:'09:00',eventTimeOut:'11:00',eventCheckOutCutoff:'12:10',eventType:'Assembly',eventLocation:'Hall',eventAudience:'Selected sections',eventNotes:''})) browser.document.querySelector('#'+id).value=value;
   const state={document:browser.document,can:()=>true,studentsLoaded:true,students:[{uid:'a',active:true,section:'2A'}],events:[],eventForm:{dataset:{}},
-    eventAudienceEditor:{read:()=>['2A']},eventSessionEditor:{read:()=>({enabled,times:['13:00','14:00','16:00','17:00']})},eventGeofenceEditor:{validate:()=>({enabled:false})},
+    eventAudienceEditor:{read:()=>['2A']},eventSessionEditor:{read:()=>({enabled,mode,times:['13:00','14:00','16:00','17:00']})},eventGeofenceEditor:{validate:()=>({enabled:false})},
     duplicateEventSignature:AdminDashboard.prototype.duplicateEventSignature,stageAfternoonSession:AdminDashboard.prototype.stageAfternoonSession,notifyAfternoonSession:AdminDashboard.prototype.notifyAfternoonSession,notifyRoles:async()=>{},resetEventForm(){}};
   await AdminDashboard.prototype.handleEventFormSubmit.call(state,{preventDefault(){}});
   assert.equal(commits,1);assert.equal(writes.length,4);
@@ -214,6 +219,11 @@ test('real admin save publishes both session events and geofences in one batch; 
   writes.length=0;enabled=false;
   await AdminDashboard.prototype.handleEventFormSubmit.call(state,{preventDefault(){}});
   assert.equal(writes.length,2);assert.equal(writes.some(item=>item.reference.id==='group_afternoon'),false);
+  writes.length=0;mode='afternoon';
+  for(const [id,value] of Object.entries({eventTimeIn:'13:00',eventCheckInCutoff:'14:00',eventTimeOut:'16:00',eventCheckOutCutoff:'17:00'}))browser.document.querySelector('#'+id).value=value;
+  await AdminDashboard.prototype.handleEventFormSubmit.call(state,{preventDefault(){}});
+  assert.equal(writes.length,2);assert.equal(writes.find(item=>item.reference.collection==='events').data.sessionPeriod,'afternoon');
+  assert.equal(writes.some(item=>item.reference.id==='group_afternoon'),false,'afternoon-only must not create a second attendance requirement');
 });
 
 test('event update distinguishes a saved event from a linked record synchronization failure', () => {

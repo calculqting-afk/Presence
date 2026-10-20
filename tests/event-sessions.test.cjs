@@ -67,3 +67,33 @@ test('report scopes keep morning and afternoon separate instead of consolidating
   assert.deepEqual(service.eventIds(morning,[morning,afternoon]),['group']);
   assert.deepEqual(service.eventIds(afternoon,[morning,afternoon]),['group_afternoon']);
 });
+
+test('afternoon-only creates a single primary session and rejects a pre-noon schedule', async () => {
+  const {EventSessionPolicy:Policy}=await load();
+  const record={...options().record,timeIn:'13:00',checkInCutoff:'14:00',timeOut:'16:00',checkOutCutoff:'17:00',
+    openAt:stamp(new Date('2026-10-20T13:00:00')),checkInClosesAt:stamp(new Date('2026-10-20T14:00:00')),closeAt:stamp(new Date('2026-10-20T16:00:00')),checkOutClosesAt:stamp(new Date('2026-10-20T17:00:00'))};
+  const plan=Policy.prepare({...options(),record,mode:'afternoon'});
+  assert.equal(plan.primary.sessionPeriod,'afternoon');assert.equal(plan.primary.sessionGroupId,'group');
+  assert.equal(plan.primary.name,'Intramurals — Afternoon');assert.equal(plan.afternoon,null);
+  assert.throws(()=>Policy.prepare({...options(),mode:'afternoon'}),/after noon/);
+  assert.throws(()=>Policy.prepare({...options(),record,mode:'morning'}),/before noon/);
+  assert.throws(()=>Policy.prepare({...options(),mode:'unknown'}),/Choose/);
+  assert.throws(()=>Policy.prepare({...options(),record,previous:plan.primary,mode:'morning',now:new Date('2026-10-20T14:00:00')}),/mode is locked/);
+});
+
+test('cards show both grouped schedules, including finished morning, with independent current-session labels', async () => {
+  const {EventSessionPolicy:Policy}=await load();
+  const {EventSchedulePresenter}=await import(pathToFileURL(path.resolve(__dirname,'../assets/js/controllers/EventSchedulePresenter.js')));
+  const plan=Policy.prepare(options()),morning={...plan.primary,id:'group'},afternoon={...plan.afternoon,id:'group_afternoon'};
+  const presenter=new EventSchedulePresenter({formatTime:value=>value,escapeHtml:String,addMinutes:value=>value});
+  const html=presenter.render(afternoon,[morning,afternoon]);
+  assert.match(html,/Both — Morning and Afternoon/);assert.match(html,/Morning schedule/);assert.match(html,/Afternoon schedule/);
+  for(const time of ['07:00','09:00','11:00','12:10','13:00','14:00','16:00','17:00'])assert.ok(html.includes(time),time);
+  assert.match(html,/Afternoon <span>Current session/);
+  assert.equal((html.match(/Current session/g)||[]).length,1);
+  assert.equal(html.includes('<button'),false,'schedule rendering must not replace attendance controls');
+  const unrelated={...morning,id:'different',sessionGroupId:'different',timeIn:'04:00'};
+  assert.equal(presenter.render(afternoon,[morning,afternoon,unrelated]).includes('04:00'),false);
+  assert.match(presenter.render(morning),/Morning only/);
+  assert.match(presenter.render({...afternoon,id:'solo',sessionGroupId:'solo'}),/Afternoon only/);
+});

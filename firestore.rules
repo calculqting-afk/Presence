@@ -193,7 +193,8 @@ service cloud.firestore {
           && shortText(data.sessionBaseName, 145)
           && shortText(data.sessionGroupId, 128) && data.sessionGroupId.matches('^[A-Za-z0-9_-]+$')
           && (!existing || ((!before.keys().hasAny(fields)
-              || (data.sessionPeriod == before.sessionPeriod && data.sessionGroupId == before.sessionGroupId))
+              || (data.sessionGroupId == before.sessionGroupId && (data.sessionPeriod == before.sessionPeriod
+                || (before.openAt > request.time && before.sessionGroupId == eventId))))
             && (before.openAt > request.time || !data.diff(before).affectedKeys().hasAny([
               "date", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt"]))))
           && (data.sessionPeriod == "morning"
@@ -201,11 +202,13 @@ service cloud.firestore {
               && (!exists(/databases/$(database)/documents/events/$(eventId + '_afternoon'))
                 || (getAfter(/databases/$(database)/documents/events/$(eventId + '_afternoon')).data.date == data.date
                   && data.checkOutClosesAt <= getAfter(/databases/$(database)/documents/events/$(eventId + '_afternoon')).data.openAt)))
-            : (eventId == data.sessionGroupId + '_afternoon'
+            : (data.sessionGroupId == eventId
+              ? !exists(/databases/$(database)/documents/events/$(eventId + '_afternoon'))
+              : (eventId == data.sessionGroupId + '_afternoon'
               && (existing || data.openAt > request.time)
               && getAfter(/databases/$(database)/documents/events/$(data.sessionGroupId)).data.sessionPeriod == "morning"
               && getAfter(/databases/$(database)/documents/events/$(data.sessionGroupId)).data.date == data.date
-              && getAfter(/databases/$(database)/documents/events/$(data.sessionGroupId)).data.checkOutClosesAt <= data.openAt)));
+              && getAfter(/databases/$(database)/documents/events/$(data.sessionGroupId)).data.checkOutClosesAt <= data.openAt))));
     }
 
     function validStudent(data) {
