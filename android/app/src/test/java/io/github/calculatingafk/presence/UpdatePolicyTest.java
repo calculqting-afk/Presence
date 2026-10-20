@@ -5,10 +5,11 @@ import static org.junit.Assert.*;
 
 public class UpdatePolicyTest {
     @Test public void acceptsOnlyOurReleaseAssets() {
-        assertTrue(UpdatePolicy.isReleaseAsset("https://github.com/calculqting-afk/Presencee/releases/download/v1.3/Presence.apk"));
-        assertFalse(UpdatePolicy.isReleaseAsset("http://github.com/calculqting-afk/Presencee/releases/download/v1/Presence.apk"));
-        assertFalse(UpdatePolicy.isReleaseAsset("https://github.com/attacker/Presencee/releases/download/v1/Presence.apk"));
-        assertFalse(UpdatePolicy.isReleaseAsset("https://github.com.evil.test/calculqting-afk/Presencee/releases/download/v1/a"));
+        assertTrue(UpdatePolicy.isReleaseAsset("https://github.com/calculqting-afk/Presence/releases/download/v1.7/Presence.apk"));
+        assertFalse(UpdatePolicy.isReleaseAsset("https://github.com/calculqting-afk/Presencee/releases/download/v1.3/Presence.apk"));
+        assertFalse(UpdatePolicy.isReleaseAsset("http://github.com/calculqting-afk/Presence/releases/download/v1/Presence.apk"));
+        assertFalse(UpdatePolicy.isReleaseAsset("https://github.com/attacker/Presence/releases/download/v1/Presence.apk"));
+        assertFalse(UpdatePolicy.isReleaseAsset("https://github.com.evil.test/calculqting-afk/Presence/releases/download/v1/a"));
         assertFalse(UpdatePolicy.isReleaseAsset(null));
     }
     @Test public void rejectsInsecureAndUntrustedRedirects() {

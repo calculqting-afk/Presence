@@ -32,15 +32,15 @@ Camera capture keeps the current WebView live-camera workflow; it still requires
 
 ## Update alerts without Google sign-in (GitHub Releases)
 
-Firebase's tester updater has been replaced. Version 1.2 (3) uses public releases in **calculqting-afk/Presencee** (the verified Git remote). No tester invitation or Google account is needed. Presence student login and Firebase attendance data are unchanged.
+Firebase's tester updater has been replaced. Version 1.7 (8) uses public releases in **calculqting-afk/Presence** (the verified Git remote). No tester invitation or Google account is needed. Presence student login and Firebase attendance data are unchanged. Older APKs still configured for the previous repository name, Presencee, may need one manual installation of v1.7 over the existing app; do not uninstall.
 
 Run `npm run android:apk` (debug) or `npm run android:beta` (beta). After a successful build, the output directory contains **Presence.apk** and **presence-update.json**, generated from the actual APK metadata and SHA-256 checksum. Both variants include the updater and retain the existing debug signing identity; release builds disable self-updates for future Google Play distribution.
 
 ### Publish each update
 
-1. Increase `versionCode` and `versionName` in `android/app/build.gradle` before every new build (current: 7 / 1.6; next: 8 / 1.7).
+1. Increase `versionCode` and `versionName` in `android/app/build.gradle` before every new build (current: 8 / 1.7; next: 9 / 1.8).
 2. Build using one of the commands above.
-3. Create a GitHub release in **calculqting-afk/Presencee**, for example tag `v1.2.0`, title `Presence 1.2 — Updates without Google sign-in`.
+3. Create a GitHub release in **calculqting-afk/Presence**, for example tag `v1.7`, title `Presence v1.7 — Morning and Afternoon Attendance`.
 4. Upload **both files from the same build**: `Presence.apk` and `presence-update.json`. Keep those exact asset names. Publish after both uploads complete. Public prereleases are intentionally supported too; drafts are ignored. Publishing a qualifying release makes it eligible for every installed app with a lower version code, so do not use this repository for private test-only updates.
 5. Never edit the manifest hash/version manually or replace only one of the assets. Build and publish a new version instead.
 

@@ -4,7 +4,7 @@ import java.net.URI;
 
 /** Pure release policy, shared by discovery and APK verification. */
 public final class UpdatePolicy {
-    public static final String REPOSITORY = "calculqting-afk/Presencee";
+    public static final String REPOSITORY = "calculqting-afk/Presence";
 
     private UpdatePolicy() {}
 
