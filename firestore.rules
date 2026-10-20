@@ -45,7 +45,8 @@ service cloud.firestore {
     }
 
     function canManageAttendance() {
-      return isSuperAdmin() || isHeadAdmin() || isAttendanceAdmin();
+      return isSuperAdmin() || (isStudent()
+        && get(/databases/$(database)/documents/students/$(request.auth.uid)).data.get("role", "student") in ["head_admin", "attendance_admin"]);
     }
 
     function canViewAttendanceReports() {
@@ -161,7 +162,7 @@ service cloud.firestore {
       return data.keys().hasOnly([
           "name", "type", "date", "location", "timeIn", "checkInCutoff", "checkInClose", "timeOut", "checkOutCutoff",
           "audience", "description", "notes", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt",
-          "lateAfterAt", "checkOutClosesAt", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt", "hasSurvey", "surveyArchived", "audienceSections", "sectionAssignedAt", "rosterVersion"
+          "lateAfterAt", "checkOutClosesAt", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt", "hasSurvey", "surveyArchived", "audienceSections", "sectionAssignedAt", "rosterVersion", "sessionPeriod", "sessionGroupId", "sessionBaseName"
         ])
         && data.keys().hasAll(["name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "audience", "description", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt"])
         && shortText(data.name, 160) && shortText(data.type, 60) && shortText(data.date, 10)
@@ -180,6 +181,31 @@ service cloud.firestore {
         && (!('createdAt' in data) || data.createdAt is timestamp)
         && optionalShortText(data, "createdBy", 128)
         && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function validSession(data, eventId) {
+      let existing = exists(/databases/$(database)/documents/events/$(eventId));
+      let before = existing ? get(/databases/$(database)/documents/events/$(eventId)).data : data;
+      let fields = ["sessionPeriod", "sessionGroupId", "sessionBaseName"];
+      return !data.keys().hasAny(fields) ? !before.keys().hasAny(fields)
+        : (data.keys().hasAll(fields)
+          && data.sessionPeriod in ["morning", "afternoon"]
+          && shortText(data.sessionBaseName, 145)
+          && shortText(data.sessionGroupId, 128) && data.sessionGroupId.matches('^[A-Za-z0-9_-]+$')
+          && (!existing || ((!before.keys().hasAny(fields)
+              || (data.sessionPeriod == before.sessionPeriod && data.sessionGroupId == before.sessionGroupId))
+            && (before.openAt > request.time || !data.diff(before).affectedKeys().hasAny([
+              "date", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt"]))))
+          && (data.sessionPeriod == "morning"
+            ? (data.sessionGroupId == eventId
+              && (!exists(/databases/$(database)/documents/events/$(eventId + '_afternoon'))
+                || (getAfter(/databases/$(database)/documents/events/$(eventId + '_afternoon')).data.date == data.date
+                  && data.checkOutClosesAt <= getAfter(/databases/$(database)/documents/events/$(eventId + '_afternoon')).data.openAt)))
+            : (eventId == data.sessionGroupId + '_afternoon'
+              && (existing || data.openAt > request.time)
+              && getAfter(/databases/$(database)/documents/events/$(data.sessionGroupId)).data.sessionPeriod == "morning"
+              && getAfter(/databases/$(database)/documents/events/$(data.sessionGroupId)).data.date == data.date
+              && getAfter(/databases/$(database)/documents/events/$(data.sessionGroupId)).data.checkOutClosesAt <= data.openAt)));
     }
 
     function validStudent(data) {
@@ -520,10 +546,7 @@ service cloud.firestore {
         || (isStudent() && !resource.data.keys().hasAll(["geofence"]));
       allow create, update: if canManageAttendance()
         && validEvent(request.resource.data)
-        && request.resource.data.openAt is timestamp
-        && request.resource.data.checkInClosesAt is timestamp
-        && request.resource.data.closeAt is timestamp
-        && request.resource.data.checkOutClosesAt is timestamp
+        && validSession(request.resource.data, eventId)
         && request.resource.data.openAt < request.resource.data.checkInClosesAt
         && request.resource.data.checkInClosesAt <= request.resource.data.closeAt
         && request.resource.data.closeAt < request.resource.data.checkOutClosesAt

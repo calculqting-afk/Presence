@@ -1,6 +1,8 @@
 import { ControllerScope } from '../core/ControllerScope.js';
 import { EventAudiencePolicy } from '../controllers/EventAudiencePolicy.js';
 import { EventAudienceController } from '../controllers/EventAudienceController.js';
+import { EventSessionController } from '../controllers/EventSessionController.js';
+import { EventSessionPolicy } from '../controllers/EventSessionPolicy.js';
 import { AttendanceReportController } from '../controllers/AttendanceReportController.js';
 import { StudentPasswordPolicy } from '../core/StudentPasswordPolicy.js';
 import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261011-optimized';
@@ -411,6 +413,7 @@ export class AdminDashboard {
     dashboard.document.querySelector('label[for="eventAudience"]').textContent = 'Attendance participants';
     dashboard.scope.mount(dashboard.document.querySelector('#eventAudience').closest('.field'), 'afterend', `<fieldset id="eventSectionChoices" class="field full" hidden><legend>Sections allowed to take attendance</legend><div class="event-section-choices">${EventAudiencePolicy.sections.map(section => `<label><input type="checkbox" data-event-section value="${section}"> Section ${section}</label>`).join('')}</div><small>Other sections can view the event, but cannot check in or check out without an existing check-in.</small></fieldset>`);
     dashboard.eventAudienceEditor = new EventAudienceController({ document: dashboard.document, scope: dashboard.scope });
+    dashboard.eventSessionEditor = new EventSessionController({ document: dashboard.document, scope: dashboard.scope });
     dashboard.studentTableBody.closest("table").querySelectorAll("th")[1].textContent = "Course / Section";
     dashboard.studentTableBody.closest("table").querySelectorAll("th")[2].textContent = "Face / live status";
     dashboard.document.querySelector('label[for="eventNotes"]').textContent = "Description";
@@ -1359,6 +1362,7 @@ export class AdminDashboard {
     dashboard.eventForm.reset();
     delete dashboard.eventForm.dataset.rosterVersion;
     dashboard.eventAudienceEditor?.set();
+    dashboard.eventSessionEditor?.set();
     dashboard.eventGeofenceEditor.clear();
     dashboard.document.querySelector("#editingEventId").value = "";
     dashboard.document.querySelector("#eventFormTitle").textContent = "Event details";
@@ -1368,13 +1372,17 @@ export class AdminDashboard {
   duplicateEventSignature(event) {
     const dashboard = this;
     const normalized = value => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
-    return [event.name, event.date, event.location, EventAudiencePolicy.selected(event).join(','), event.timeIn, event.checkInCutoff, event.timeOut, event.checkOutCutoff].map(normalized).join("\u001f");
+    return [event.sessionBaseName || event.name, event.sessionPeriod || 'morning', event.date, event.location, EventAudiencePolicy.selected(event).join(','), event.timeIn, event.checkInCutoff, event.timeOut, event.checkOutCutoff].map(normalized).join("\u001f");
   }
   async editEvent(id) {
     const dashboard = this;
     if (!dashboard.can('manageEvents')) return;
     const event = dashboard.events.find(item => item.id === id);
     if (!event) return;
+    if (event.sessionPeriod === 'afternoon' && event.sessionGroupId !== id) {
+      if (!dashboard.events.some(item => item.id === event.sessionGroupId)) return showDashboardToast('Morning session unavailable', 'Refresh the event list. The linked morning event must be available before editing this group.');
+      return dashboard.editEvent(event.sessionGroupId);
+    }
     try {
       const snapshot = await getDoc(doc(db, "eventGeofences", id));
       event.geofence = snapshot.data() || {
@@ -1385,7 +1393,7 @@ export class AdminDashboard {
       return;
     }
     dashboard.document.querySelector("#editingEventId").value = event.id;
-    dashboard.document.querySelector("#eventName").value = event.name;
+    dashboard.document.querySelector("#eventName").value = event.sessionBaseName || event.name;
     dashboard.document.querySelector("#eventDate").value = event.date;
     dashboard.document.querySelector("#eventLocation").value = event.location;
     dashboard.document.querySelector("#eventType").value = event.type || "Other";
@@ -1394,6 +1402,7 @@ export class AdminDashboard {
     dashboard.document.querySelector("#eventCheckInCutoff").value = event.checkInCutoff || timePlusMinutes(event.timeIn) || event.timeOut;
     dashboard.document.querySelector("#eventCheckOutCutoff").value = event.checkOutCutoff || timePlusMinutes(event.timeOut);
     dashboard.eventAudienceEditor.set(event);
+    dashboard.eventSessionEditor?.set(event, dashboard.events.find(item => item.id === EventSessionPolicy.afternoonId(event.id)));
     dashboard.eventForm.dataset.rosterVersion = String(event.rosterVersion || 0);
     dashboard.document.querySelector("#eventNotes").value = event.description || event.notes || "";
     dashboard.eventGeofenceEditor.set(event.geofence || {});
@@ -1472,6 +1481,10 @@ export class AdminDashboard {
   }
   async removeEventAndRecords(event) {
     const dashboard = this;
+    if (event.sessionPeriod === 'morning') {
+      const afternoon = await getDocFromServer(doc(db, 'events', EventSessionPolicy.afternoonId(event.id)));
+      if (afternoon.exists()) throw new Error('This morning session has a linked afternoon session. Keep it for editing the event group, or remove the afternoon session first. No attendance was removed.');
+    }
     const [attendanceSnapshot, dismissedSnapshot, fineSnapshot] = await Promise.all([getDocs(query(collection(db, "attendance"), where("eventId", "==", event.id))), getDocs(query(collection(db, "dismissedHistory"), where("eventId", "==", event.id))), getDocs(query(collection(db, "fines"), where("eventId", "==", event.id)))]);
     await Promise.all([dashboard.writeInBatches(attendanceSnapshot.docs, (batch, item) => batch.delete(item.ref)), dashboard.writeInBatches(dismissedSnapshot.docs, (batch, item) => batch.delete(item.ref)), dashboard.writeInBatches(fineSnapshot.docs, (batch, item) => batch.set(item.ref, {
       eventRemoved: true,
@@ -1650,13 +1663,12 @@ export class AdminDashboard {
     }
     try {
       const batch = writeBatch(db);
-      batch.set(doc(db, "eventGeofences", selectedEvent.id), geofence);
-      batch.set(doc(db, "events", selectedEvent.id), {
-        requiresGeofence: geofence.enabled,
-        updatedAt: serverTimestamp()
-      }, {
-        merge: true
-      });
+      const group = selectedEvent.sessionGroupId;
+      const sessions = group ? dashboard.events.filter(event => event.sessionGroupId === group) : [selectedEvent];
+      for (const session of sessions) {
+        batch.set(doc(db, "eventGeofences", session.id), geofence);
+        batch.set(doc(db, "events", session.id), { requiresGeofence: geofence.enabled, updatedAt: serverTimestamp() }, { merge: true });
+      }
       await batch.commit();
       showDashboardToast("Attendance area saved", `${selectedEvent.name} now uses the updated location rule.`);
     } catch (error) {
@@ -1958,7 +1970,7 @@ export class AdminDashboard {
     const geofence = requestedGeofence.enabled ? requestedGeofence : {
       enabled: false
     };
-    const record = {
+    let record = {
       name: dashboard.document.querySelector("#eventName").value.trim(),
       type: dashboard.document.querySelector("#eventType").value,
       date,
@@ -1976,6 +1988,7 @@ export class AdminDashboard {
       checkOutClosesAt: Timestamp.fromDate(new Date(`${date}T${checkOutCutoff}`)),
       updatedAt: serverTimestamp()
     };
+    let sessionPlan, afternoonPrevious, eventReference;
     try {
       let previousEvent;
       if (id) {
@@ -1989,6 +2002,18 @@ export class AdminDashboard {
         if (JSON.stringify([...sections].sort()) !== JSON.stringify([...EventAudiencePolicy.selected(previousEvent)].sort())) throw new Error('Closed-event groups cannot be changed. Create a new event for additional sections.');
         record.audience = previousEvent.audience;
       } else Object.assign(record, EventAudiencePolicy.assignment(dashboard.students, sections, previousEvent, { timestamp: serverTimestamp }));
+      if (dashboard.eventSessionEditor) {
+        const sessionInput = dashboard.eventSessionEditor.read();
+        eventReference = id ? doc(db, 'events', id) : doc(collection(db, 'events'));
+        if (id && sessionInput.enabled) {
+          const saved = await getDocFromServer(doc(db, 'events', EventSessionPolicy.afternoonId(id)));
+          afternoonPrevious = saved.exists() ? saved.data() : undefined;
+          if ((afternoonPrevious?.rosterVersion ?? null) !== (dashboard.eventSessionEditor.afternoonVersion ?? null)) throw new Error('The afternoon participants changed. Reopen the event before saving.');
+        }
+        sessionPlan = EventSessionPolicy.prepare({ id: eventReference.id, record, previous: previousEvent, afternoon: afternoonPrevious,
+          ...sessionInput, students: dashboard.students, sections, timestamp: serverTimestamp, fromDate: value => Timestamp.fromDate(value) });
+        record = sessionPlan.primary;
+      }
     } catch (error) { return showDashboardToast('Unable to update participants', error.message || 'Refresh and try again.'); }
     const duplicate = dashboard.events.find(event => event.id !== id && dashboard.duplicateEventSignature(event) === dashboard.duplicateEventSignature(record));
     if (duplicate) {
@@ -2003,8 +2028,11 @@ export class AdminDashboard {
           mergeFields: Object.keys(record)
         });
         batch.set(doc(db, "eventGeofences", id), geofence);
+        dashboard.stageAfternoonSession?.(batch, id, sessionPlan, afternoonPrevious, geofence);
         await batch.commit();
         linkedRecordsSynced = (await dashboard.syncEventRecordsAfterSave(id, record)).synced;
+        if (sessionPlan?.afternoon && afternoonPrevious) linkedRecordsSynced = (await dashboard.syncEventRecordsAfterSave(EventSessionPolicy.afternoonId(id), sessionPlan.afternoon)).synced && linkedRecordsSynced;
+        dashboard.notifyAfternoonSession?.(id, sessionPlan, afternoonPrevious);
         if (!isEventFinished(record)) {
           const recipients = dashboard.students.filter(student => EventAudiencePolicy.canAttend(student, record));
           Promise.allSettled(recipients.map(student => createNotification({
@@ -2028,7 +2056,7 @@ export class AdminDashboard {
           }).catch(() => {});
         }
       } else {
-        const eventReference = doc(collection(db, "events"));
+        eventReference ||= doc(collection(db, "events"));
         const batch = writeBatch(db);
         batch.set(eventReference, {
           ...record,
@@ -2036,7 +2064,9 @@ export class AdminDashboard {
           createdBy: currentUser.uid
         });
         batch.set(doc(db, "eventGeofences", eventReference.id), geofence);
+        dashboard.stageAfternoonSession?.(batch, eventReference.id, sessionPlan, afternoonPrevious, geofence);
         await batch.commit();
+        dashboard.notifyAfternoonSession?.(eventReference.id, sessionPlan, afternoonPrevious);
         if (!isEventFinished(record)) {
           const recipients = dashboard.students.filter(student => EventAudiencePolicy.canAttend(student, record));
           Promise.allSettled(recipients.map(student => createNotification({
@@ -2073,6 +2103,26 @@ export class AdminDashboard {
       const message = firebaseErrorCode(error) === "permission-denied" ? "Firestore rejected the event or its location settings. Refresh, sign in again, and reopen the event. If it still fails, confirm the published rules match this app version and your account has event-management access." : error.message || "The event could not be saved. Please try again.";
       showDashboardToast("Unable to save event", message);
     }
+  }
+  stageAfternoonSession(batch, id, plan, previous, geofence) {
+    if (!plan?.afternoon) return;
+    const reference = doc(db, 'events', EventSessionPolicy.afternoonId(id));
+    if (previous) batch.set(reference, plan.afternoon, { mergeFields: Object.keys(plan.afternoon) });
+    else batch.set(reference, { ...plan.afternoon, createdAt: serverTimestamp(), createdBy: currentUser.uid });
+    batch.set(doc(db, 'eventGeofences', reference.id), geofence);
+  }
+  notifyAfternoonSession(id, plan, previous) {
+    const event = plan?.afternoon;
+    if (!event || isEventFinished(event)) return;
+    // Closed-session saves omit roster fields; these notifications only concern
+    // an open/upcoming session with a fresh, independently captured roster.
+    const recipients = this.students.filter(student => EventAudiencePolicy.canAttend(student, event));
+    Promise.allSettled(recipients.map(student => createNotification({ recipientUid: student.uid, recipientRole: 'student',
+      category: 'attendance', title: previous ? 'Afternoon session updated' : 'Afternoon attendance added',
+      message: `${event.name} is scheduled for ${formatEventDate(event.date)}. Check in and check out separately from the morning session.`,
+      targetView: 'events', eventId: EventSessionPolicy.afternoonId(id),
+      studentName: [student.firstName, student.lastName].filter(Boolean).join(' '), studentId: student.accountId, section: student.section
+    }))).catch(() => {});
   }
   handlePastEventRemovalModalClick(event) {
     const dashboard = this;

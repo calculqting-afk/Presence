@@ -30,6 +30,14 @@ async function batchSave(id, event, geofence, auth, mask, success = true) {
   const result = await fetch(`${base}:commit`, { method:'POST', headers:{Authorization:`Bearer ${auth}`,'Content-Type':'application/json'},body:JSON.stringify({writes}) });
   assert.equal(result.ok, success, await result.text());
 }
+async function sessionPair(id, morning, afternoon, geofence, auth, success = true) {
+  const writes = [[`events/${id}`,morning],[`events/${id}_afternoon`,afternoon],[`eventGeofences/${id}`,geofence],[`eventGeofences/${id}_afternoon`,geofence]].map(([path,data])=> {
+    const transforms=[],fields=value(data,transforms).mapValue.fields;
+    return {update:{name:`projects/${project}/databases/(default)/documents/${path}`,fields},...(transforms.length?{updateTransforms:transforms}:{})};
+  });
+  const result=await fetch(`${base}:commit`,{method:'POST',headers:{Authorization:`Bearer ${auth}`,'Content-Type':'application/json'},body:JSON.stringify({writes})});
+  assert.equal(result.ok,success,await result.text());
+}
 const original = {
   name: 'Audience test', type: 'Assembly', date: '2026-10-20', location: 'Hall', timeIn: '07:00', checkInCutoff: '09:00', timeOut: '11:00', checkOutCutoff: '12:10',
   audience: 'All students', description: '', requiresGeofence: false, openAt: date(-3600000), checkInClosesAt: date(-1800000), closeAt: date(-300000), checkOutClosesAt: date(3600000),
@@ -78,5 +86,32 @@ const attendance = (uid, event) => ({ studentUid: uid, studentId: uid.toUpperCas
   await write('events/event', { ...all,sectionAssignedAt:{...all.sectionAssignedAt,'1A':date(9999999)},rosterVersion:4 },token('head'),false);
   await write('events/closed', { ...original, openAt:date(-7200000), checkInClosesAt:date(-5400000), closeAt:date(-3600000), checkOutClosesAt:date(-1800000) });
   await write('events/closed', { ...multi, openAt:date(-7200000), checkInClosesAt:date(-5400000), closeAt:date(-3600000), checkOutClosesAt:date(-1800000) }, token('head'), false);
+  const morning = {...all,rosterVersion:1,rosterCapturedAt:SERVER,requiresGeofence:true,sessionPeriod:'morning',sessionGroupId:'sessions',sessionBaseName:'Session test',name:'Session test — Morning'};
+  const afternoon = {...morning,sessionPeriod:'afternoon',name:'Session test — Afternoon',timeIn:'13:00',checkInCutoff:'14:00',timeOut:'16:00',checkOutCutoff:'17:00',
+    openAt:date(7200000),checkInClosesAt:date(10800000),closeAt:date(14400000),checkOutClosesAt:date(18000000)};
+  await sessionPair('sessions',morning,afternoon,polygon,superAdmin);
+  const polygon10={...polygon,vertices:[...polygon.vertices,{latitude:10.0001,longitude:124},{latitude:10.0002,longitude:124},{latitude:10.0003,longitude:124},{latitude:10.0004,longitude:124},{latitude:10.0005,longitude:124}]};
+  await sessionPair('sessions',{...morning,rosterVersion:2},{...afternoon,rosterVersion:2},polygon10,superAdmin);
+  await read('events/sessions_afternoon',token('a'));
+  await write('events/sessions',{...morning,rosterVersion:3,timeIn:'06:00',openAt:date(-7200000)},superAdmin,false);
+  await write('events/sessions',{...morning,rosterVersion:3,sessionGroupId:'changed'},superAdmin,false);
+  await write('events/sessions_afternoon',{...afternoon,rosterVersion:3,date:'2026-10-21'},superAdmin,false);
+  await write('events/sessions_afternoon',{...afternoon,rosterVersion:3,openAt:date(1000)},superAdmin,false);
+  const noMetadata={...morning,rosterVersion:3}; delete noMetadata.sessionPeriod;delete noMetadata.sessionGroupId;delete noMetadata.sessionBaseName;
+  await write('events/sessions',noMetadata,superAdmin,false);
+  // Student cannot submit the afternoon early, and needs no morning record to attend it later.
+  await write('attendance/a_sessions_afternoon',{...attendance('a',afternoon),eventId:'sessions_afternoon'},token('a'),false);
+  const afternoonOpen={...afternoon,requiresGeofence:false,openAt:date(-3600000),checkInClosesAt:date(-1800000),closeAt:date(-300000),checkOutClosesAt:date(3600000)};
+  await write('events/sessions_afternoon',afternoonOpen);
+  await write('attendance/a_sessions_afternoon',{...attendance('a',afternoonOpen),eventId:'sessions_afternoon'},token('a'));
+  const missingMorning=await fetch(`${base}/attendance/a_sessions`,{headers:{Authorization:'Bearer owner'}});
+  assert.equal(missingMorning.status,404);
+  // Attendance Admin can publish the same four-document, all-section bundle.
+  await sessionPair('manager_sessions',{...morning,sessionGroupId:'manager_sessions'},{...afternoon,sessionGroupId:'manager_sessions'},polygon10,token('manager'));
+  await sessionPair('manager_sessions',{...morning,rosterVersion:2,sessionGroupId:'manager_sessions'},{...afternoon,rosterVersion:2,sessionGroupId:'manager_sessions'},polygon10,token('manager'));
+  await sessionPair('invalid_sessions',{...morning,sessionGroupId:'invalid_sessions'},{...afternoon,sessionGroupId:'invalid_sessions',openAt:date(1000)},polygon,superAdmin,false);
+  const absentPair=await fetch(`${base}/events/invalid_sessions`,{headers:{Authorization:'Bearer owner'}});
+  assert.equal(absentPair.status,404,'an invalid afternoon must not publish the morning either');
+  console.log('Session rules passed: atomic morning/afternoon polygon bundle, independent attendance, early check-in denied, opened schedules/identity/overlap protected, Attendance Admin authorized.');
   console.log('Firestore emulator passed: legacy mismatch denied, live multi-section update accepted, view-only read allowed/write denied, assigned check-ins accepted, removed participant checkout accepted, stale revisions/invalid sections/student edits/closed roster edits denied.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

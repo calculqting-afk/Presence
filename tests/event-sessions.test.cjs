@@ -1,0 +1,69 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { pathToFileURL } = require('node:url');
+const path = require('node:path');
+const load = () => import(pathToFileURL(path.resolve(__dirname, '../assets/js/controllers/EventSessionPolicy.js')));
+const now = new Date('2026-10-20T06:00:00');
+const stamp = date => ({ toDate: () => date });
+const record = () => ({ name:'Intramurals', date:'2026-10-20', timeIn:'07:00', checkInCutoff:'09:00', timeOut:'11:00', checkOutCutoff:'12:10',
+  openAt:stamp(new Date('2026-10-20T07:00:00')), checkInClosesAt:stamp(new Date('2026-10-20T09:00:00')), closeAt:stamp(new Date('2026-10-20T11:00:00')), checkOutClosesAt:stamp(new Date('2026-10-20T12:10:00')),
+  audience:'Section 2A', audienceSections:['2A'], attendanceRoster:{a:'2A'}, rosterVersion:1 });
+const options = () => ({ id:'group',record:record(), enabled:true, times:['13:00','14:00','16:00','17:00'], students:[{uid:'a',section:'2A',active:true}], sections:['2A'], timestamp:()=>stamp(now), fromDate:stamp, now });
+
+test('morning and afternoon have separate IDs, schedules and roster metadata; morning-only creates no afternoon', async () => {
+  const {EventSessionPolicy:Policy} = await load();
+  const plan = Policy.prepare(options());
+  assert.equal(plan.primary.sessionGroupId,'group'); assert.equal(plan.primary.sessionPeriod,'morning');
+  assert.equal(plan.afternoon.sessionGroupId,'group'); assert.equal(plan.afternoon.sessionPeriod,'afternoon');
+  assert.equal(Policy.afternoonId('group'),'group_afternoon');
+  assert.equal(plan.primary.name,'Intramurals — Morning'); assert.equal(plan.afternoon.name,'Intramurals — Afternoon');
+  assert.equal(plan.primary.timeIn,'07:00'); assert.equal(plan.afternoon.timeIn,'13:00');
+  assert.equal(plan.afternoon.attendanceRoster.a,'2A'); assert.notEqual(plan.primary.attendanceRoster, plan.afternoon.attendanceRoster);
+  assert.equal(Policy.prepare({...options(),enabled:false}).afternoon,null);
+});
+
+test('legacy edits preserve the original single-session identity; enabling afternoon preserves the morning record ID', async () => {
+  const {EventSessionPolicy:Policy} = await load();
+  const original=record();
+  assert.equal(Policy.prepare({...options(),previous:original,enabled:false}).primary.name,original.name);
+  assert.equal(Policy.prepare({...options(),previous:original,enabled:false}).primary.sessionPeriod,undefined);
+  assert.equal(Policy.prepare({...options(),previous:original}).primary.sessionGroupId,'group');
+  assert.equal(original.sessionPeriod,undefined);
+});
+
+test('invalid, missing, overlapping and pre-noon afternoon windows are rejected', async () => {
+  const {EventSessionPolicy:Policy} = await load();
+  for (const times of [['','','',''],['11:00','12:00','15:00','16:00'],['12:00','13:00','15:00','16:00'],['13:00','13:00','15:00','16:00'],['13:00','15:00','14:00','16:00'],['13:00','14:00','16:00','16:00'],['25:00','26:00','27:00','28:00']]) {
+    assert.throws(()=>Policy.prepare({...options(),times}),/morning|afternoon/);
+  }
+});
+
+test('opened schedules are immutable, while upcoming afternoon can be added after morning opens', async () => {
+  const {EventSessionPolicy:Policy} = await load();
+  const later = new Date('2026-10-20T10:00:00'), previous=record();
+  assert.equal(Policy.prepare({...options(),previous,now:later}).afternoon.timeIn,'13:00');
+  assert.throws(()=>Policy.prepare({...options(),previous,now:later,record:{...record(),timeIn:'07:30'}}),/schedule is locked/);
+  assert.throws(()=>Policy.prepare({...options(),previous,now:new Date('2026-10-20T13:00:00')}),/before its check-in/);
+  const afternoon=Policy.prepare(options()).afternoon;
+  assert.throws(()=>Policy.prepare({...options(),previous,afternoon,enabled:false}),/preserved/);
+  assert.throws(()=>Policy.prepare({...options(),previous,afternoon,now:new Date('2026-10-20T14:00:00'),times:['13:00','14:00','16:30','17:30']}),/schedule is locked/);
+});
+
+test('closed afternoon groups retain their roster and cannot gain new obligations', async () => {
+  const {EventSessionPolicy:Policy} = await load();
+  const afternoon = Policy.prepare(options()).afternoon;
+  const plan=Policy.prepare({...options(),previous:record(),afternoon,now:new Date('2026-10-20T18:00:00')});
+  assert.equal(Object.hasOwn(plan.afternoon,'attendanceRoster'),false);
+  assert.equal(Object.hasOwn(plan.afternoon,'rosterVersion'),false);
+  assert.throws(()=>Policy.prepare({...options(),previous:record(),afternoon,sections:['2B'],now:new Date('2026-10-20T18:00:00')}),/Closed afternoon/);
+});
+
+test('report scopes keep morning and afternoon separate instead of consolidating their students', async () => {
+  const {EventSessionPolicy:Policy}=await load();
+  const {AttendanceReportService}=await import(pathToFileURL(path.resolve(__dirname,'../assets/js/controllers/AttendanceReportService.js')));
+  const plan=Policy.prepare(options());
+  const morning={...plan.primary,id:'group'},afternoon={...plan.afternoon,id:'group_afternoon'};
+  const service=new AttendanceReportService({});
+  assert.deepEqual(service.eventIds(morning,[morning,afternoon]),['group']);
+  assert.deepEqual(service.eventIds(afternoon,[morning,afternoon]),['group_afternoon']);
+});
