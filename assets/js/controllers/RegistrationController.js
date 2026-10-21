@@ -163,10 +163,11 @@ export class RegistrationController {
       uid: user.uid, accountId: data.accountId, accountIdKey, authEmail: this.studentIdToEmail(data.accountId),
       birthday: data.birthday, firstName: data.firstName, lastName: data.lastName, middleName: '',
       course: CoursePolicy.normalize(data.course), section: data.section, role: 'student', active: true,
+      mustChangePassword: true,
       createdAt: serverTimestamp(), updatedAt: serverTimestamp()
     });
     batch.set(doc(this.db, 'studentIds', accountIdKey), { studentId: data.accountId, uid: user.uid, createdAt: serverTimestamp() });
     await batch.commit();
-    return { ...data, uid: user.uid, active: true, role: 'student' };
+    return { ...data, uid: user.uid, active: true, role: 'student', mustChangePassword: true };
   }
 }

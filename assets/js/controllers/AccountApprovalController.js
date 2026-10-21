@@ -39,6 +39,7 @@ export class AccountApprovalController {
       authEmail: this.studentIdToEmail(request.accountId), birthday: request.birthday,
       firstName: request.firstName, middleName: '', lastName: request.lastName,
       course: CoursePolicy.normalize(request.course), section: request.section, active: true, role: 'student',
+      mustChangePassword: true,
       createdAt: serverTimestamp(), updatedAt: serverTimestamp()
     };
   }

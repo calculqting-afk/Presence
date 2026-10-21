@@ -482,7 +482,8 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if (canManageStudents()
           && validStudent(request.resource.data)
-          && !request.resource.data.keys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy"]))
+          && (!request.resource.data.keys().hasAny(["role"]) || request.resource.data.role == "student")
+          && !request.resource.data.keys().hasAny(["roleUpdatedAt", "roleUpdatedBy"]))
         || (validStudent(request.resource.data)
           && approvedRegistration(request.resource.data.accountIdKey, request.resource.data.uid)
           && request.resource.data.uid == studentUid
