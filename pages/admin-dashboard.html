@@ -84,6 +84,7 @@
           <article class="panel attendance-workspace">
             <form id="attendanceFilters" class="attendance-filters">
               <label class="attendance-event-field">Event<select id="adminAttendanceEventFilter"><option value="">Choose an event…</option></select></label>
+              <label class="attendance-session-field" id="attendanceSessionField" hidden>Session<select id="attendanceSession"><option value="both">Both sessions</option><option value="morning">Morning only</option><option value="afternoon">Afternoon only</option></select></label>
               <label class="attendance-search-field">Student<input type="search" id="attendanceStudentSearch" placeholder="Search name, ID or email"></label>
               <label class="attendance-sort-field">Sort<select id="attendanceSort"><option value="check-in-desc">Latest check-in first</option><option value="check-in-asc">Earliest check-in first</option><option value="no-check-in">No check-in first</option><option value="name-asc">First name A–Z</option><option value="name-desc">First name Z–A</option><option value="last-name-asc">Last name A–Z</option><option value="last-name-desc">Last name Z–A</option></select></label>
               <button class="outline-button attendance-filter-toggle" id="attendanceToggleFilters" type="button" aria-expanded="false" aria-controls="attendanceAdvancedFilters">Filters</button>

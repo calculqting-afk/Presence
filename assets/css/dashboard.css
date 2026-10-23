@@ -254,7 +254,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .timeline { display: grid; gap: 0; }
 .timeline-item { position: relative; display: grid; grid-template-columns: 58px 1fr auto; align-items: center; gap: 14px; padding: 15px 0; border-bottom: 1px solid #edf1f6; transition: padding .22s var(--ease-out), background-color .22s ease; }
-.timeline-item:hover { padding-right: 8px; padding-left: 8px; background: #f8fbff; }
+.timeline-item:hover { padding-right: 8px; padding-left: 8px; background: var(--blue-soft); }
+.timeline-event-button { width: 100%; appearance: none; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 8px; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.timeline-event-button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; background: var(--blue-soft); }
+.timeline-event-button:disabled { cursor: default; opacity: 1; }
 .timeline-item:last-child { border: 0; }
 .timeline-time { color: var(--muted); font-size: .72rem; }
 .timeline-main strong, .timeline-main small { display: block; }
@@ -321,6 +324,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 @media (max-width: 580px) { .event-card-actions { flex-wrap: wrap; } .event-card-attendance-actions { width: 100%; justify-content: stretch; } .attendance-action-button { flex: 1 1 100%; max-width: 100%; } }
 .history-section { margin-top: 22px; }
 .history-card-grid, .admin-event-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.admin-event-card-grid { align-items: start; }
 #studentFineList { align-items: start; }
 .history-event-card, .admin-event-card { min-width: 0; padding: 22px; background: white; border: 1px solid #dfe8f4; border-radius: 16px; box-shadow: 0 9px 28px rgba(36,65,109,.06); transition: border-color .25s ease, box-shadow .3s var(--ease-out), transform .3s var(--ease-out); }
 .history-event-card:hover, .admin-event-card:hover { border-color: #cbdcf1; box-shadow: 0 16px 34px rgba(36,65,109,.1); transform: translateY(-3px); }
@@ -346,6 +350,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .event-detail-boxes > .attendance-time-late span, .event-detail-boxes > .attendance-time-late strong { color: #735600; }
 .live-attendance-panel { margin-top: 18px; }
 .attendance-line { display: grid; gap: 10px; }
+.attendance-correction-reason { grid-column: 1 / -1; min-width: 0; margin: 0; padding-top: 8px; border-top: 1px solid var(--border, #e1eaf5); color: var(--muted); font-size: .65rem; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.attendance-correction-reason > span { font-weight: 700; }
 .attendance-line-item { display: grid; grid-template-columns: minmax(170px, 1.1fr) minmax(150px, 1fr) minmax(260px, 1.45fr) auto; align-items: center; gap: 16px; padding: 13px; background: #fbfdff; border: 1px solid #e1eaf5; border-radius: 8px; }
 .attendance-line-person { display: flex; min-width: 0; align-items: center; gap: 10px; }
 .attendance-line-person .mini-avatar { flex: 0 0 auto; }
@@ -371,6 +377,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .admin-event-card-student-style .event-card-actions { flex-wrap: wrap; align-items: center; gap: 14px; }
 .admin-event-card-student-style .event-card-actions > .badge { flex-shrink: 0; white-space: nowrap; }
 .admin-event-card-student-style .admin-event-card-actions { flex: 1 1 100%; justify-content: flex-start; gap: 8px; }
+.admin-event-group-status { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.admin-event-session-tools { display: grid; gap: 12px; margin-top: 12px; }
+.admin-session-actions { display: grid; gap: 8px; min-width: 0; }
+.admin-session-action-label { color: var(--muted); font-size: .7rem; }
+.admin-event-card-student-style .admin-session-actions .admin-event-card-actions { display: flex; flex-wrap: wrap; }
+@media (max-width: 580px) { .admin-session-actions .admin-event-card-actions > button { flex: 1 1 auto; } }
 .history-list { display: grid; }
 .history-row { display: grid; grid-template-columns: 90px 1fr auto; align-items: center; gap: 16px; padding: 15px 0; border-bottom: 1px solid #edf1f6; }
 .history-row:last-child { border-bottom: 0; }
@@ -930,6 +942,21 @@ body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
    search field below the date filters or leave an empty grid cell. */
 #attendanceFilters { grid-template-columns: minmax(0, 1fr) minmax(170px, 230px) auto; }
 #attendanceFilters .attendance-event-field { grid-column: 1 / -1; grid-row: 1; }
+#attendanceFilters .attendance-session-field { grid-column: 1 / -1; grid-row: 2; }
+#attendanceSessionField[hidden] { display: none; }
+#attendanceFilters.attendance-has-sessions .attendance-search-field,
+#attendanceFilters.attendance-has-sessions .attendance-sort-field,
+#attendanceFilters.attendance-has-sessions .attendance-filter-actions { grid-row: 3; }
+#attendanceFilters.attendance-has-sessions .attendance-filter-options { grid-row: 4; }
+.attendance-student-sessions { display: grid; gap: 12px; padding: 14px; margin-bottom: 16px; border: 1px solid var(--line, #344861); border-radius: 12px; }
+.attendance-session-label { margin: 0 0 6px; color: var(--muted); font-size: .75rem; font-weight: 700; }
+@media (max-width: 700px) {
+  #attendanceFilters.attendance-has-sessions .attendance-search-field { grid-row: 3; }
+  #attendanceFilters.attendance-has-sessions .attendance-filter-toggle { grid-row: 3; }
+  #attendanceFilters.attendance-has-sessions .attendance-sort-field { grid-row: 4; }
+  #attendanceFilters.attendance-has-sessions .attendance-filter-options { grid-row: 5; }
+  #attendanceFilters.attendance-has-sessions .attendance-filter-actions { grid-row: 6; }
+}
 #attendanceFilters .attendance-search-field { grid-column: 1; grid-row: 2; }
 #attendanceFilters .attendance-sort-field { grid-column: 2; grid-row: 2; }
 #attendanceFilters .attendance-filter-actions { grid-column: 3; grid-row: 2; justify-content: flex-end; }

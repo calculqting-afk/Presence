@@ -122,6 +122,9 @@ export class StudentAttendanceController {
   }
 
   async checkOutAttendance(record, event, button) {
+    if (!record && event?.checkoutOnlyReopened === true) {
+      showDashboardToast('Saved check-in required', 'This session was reopened for checkout only. Ask an Attendance Manager to review missing attendance.'); return;
+    }
     if (!record && Array.isArray(event?.audienceSections) && !EventAudiencePolicy.canAttend({ ...currentUserProfile, uid: currentUser.uid }, event)) {
       showDashboardToast('View-only event', 'Your section is not assigned to take attendance.'); return;
     }

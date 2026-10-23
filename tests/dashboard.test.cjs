@@ -148,13 +148,23 @@ test('all students see events, only selected sections can act, and removed check
   event.audienceSections=['2A'];event.attendanceRoster={a:'2A'};state.attendance=[{eventId:'event',checkedInAt:true}];
   StudentDashboard.prototype.renderEvents.call(state); html=browser.document.querySelector('#studentEventGrid').innerHTML;
   assert.ok(html.includes('data-check-out-event=')); assert.ok(!html.includes('data-attend-event='));
+  user.uid='a';state.studentProfile.section='2A';event.checkoutOnlyReopened=true;
+  state.attendance=[];state.attendanceCheckInController.policy.evaluateCheckIn=()=>({available:false});
+  StudentDashboard.prototype.renderEvents.call(state);html=browser.document.querySelector('#studentEventGrid').innerHTML;
+  assert.match(html,/Reopened checkout requires a saved check-in/);assert.doesNotMatch(html,/data-check-out-event=|data-attend-event=/);
+  state.attendance=[{eventId:'event',checkedInAt:true,status:'checked-in'}];
+  StudentDashboard.prototype.renderEvents.call(state);html=browser.document.querySelector('#studentEventGrid').innerHTML;
+  assert.match(html,/data-check-out-event="event"/);assert.doesNotMatch(html,/data-attend-event=/);
+  state.attendance[0].status='completed';state.attendance[0].checkedOutAt=true;
+  StudentDashboard.prototype.renderEvents.call(state);html=browser.document.querySelector('#studentEventGrid').innerHTML;
+  assert.doesNotMatch(html,/data-check-out-event=|data-attend-event=/);
 });
 
 test('saving an ongoing event refreshes section assignment, targets matching notifications, and rejects a stale editor', async () => {
   const names=fs.readFileSync(path.join(root,'assets/js/dashboard.js'),'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
   const shared=Object.fromEntries(names.map(name=>[name,()=> ''])), browser=fakeBrowser(), writes=[], recipients=[], messages=[];
   let allowScheduleChange=false,confirmationCalls=0;
-  const previous={id:'event',audience:'All students',attendanceRoster:{a:'2A'},rosterCapturedAt:{toDate:()=>new Date(Date.now()-86400000)},openAt:{toDate:()=>new Date(Date.now()-3600000)},checkOutClosesAt:{toDate:()=>new Date(Date.now()+3600000)}};
+  const previous={id:'event',date:'2026-10-20',audience:'All students',attendanceRoster:{a:'2A'},rosterCapturedAt:{toDate:()=>new Date(Date.now()-86400000)},openAt:{toDate:()=>new Date(Date.now()-3600000)},checkOutClosesAt:{toDate:()=>new Date(Date.now()+3600000)}};
   Object.assign(shared,{currentUser:{uid:'head'},Timestamp:{fromDate:date=>({toDate:()=>date})},serverTimestamp:()=>({server:true}),isEventFinished:()=>false,
     getDocFromServer:async()=>({exists:()=>true,data:()=>previous}),doc:(_db,collection,id)=>({collection,id}),
     writeBatch:()=>({set:(reference,data,options)=>writes.push({reference,data,options}),commit:async()=>{}}),createNotification:async data=>recipients.push(data.recipientUid),showDashboardToast:(...args)=>messages.push(args)});
@@ -196,6 +206,8 @@ test('admin session form permits ongoing time edits while retaining date/mode an
   editor.set({...afternoon,checkOutClosesAt:afternoon.openAt},{...afternoon,checkOutClosesAt:afternoon.openAt});
   assert.equal(browser.document.querySelector('#eventTimeIn').disabled,true);
   assert.equal(browser.document.querySelector('#eventAfternoonTimeIn').disabled,true);
+  assert.equal(browser.document.querySelector('#eventCheckOutCutoff').disabled,false);
+  assert.equal(browser.document.querySelector('#eventAfternoonCheckOutCutoff').disabled,false);
   editor.set();
   assert.equal(editor.read().enabled,false); assert.equal(browser.document.querySelector('#eventTimeIn').disabled,false);
   browser.document.querySelector('#eventAttendanceMode').value='afternoon';
@@ -256,6 +268,23 @@ test('attendance line retains exact timestamps and duration while adding only re
   const review=AdminDashboard.prototype.attendanceLineMarkup.call(state,[{...record,rosterUnverified:true,assignmentUnverified:true}]);
   assert.match(review,/<p class="attendance-no-record">No attendance recorded<\/p>/);
   assert.match(review,/Needs review — assigned after attendance opened/);
+  const corrected=AdminDashboard.prototype.attendanceLineMarkup.call(state,[{...record,recordSource:'admin-corrected',correctionReason:'Verified checkout with event staff.'}]);
+  assert.match(corrected,/<p class="attendance-correction-reason"><span>Correction reason:<\/span> Verified checkout with event staff\.<\/p>/);
+  assert.doesNotMatch(html,/attendance-correction-reason/);
+  const missingReason=AdminDashboard.prototype.attendanceLineMarkup.call(state,[{...record,recordSource:'admin-corrected'}]);
+  assert.match(missingReason,/Correction reason:<\/span> Reason not recorded/);
+  const absentRow={...record,id:'absent:a:event',checkedInAt:null,checkedOutAt:null,status:'absent',displayOnly:true};
+  assert.doesNotMatch(AdminDashboard.prototype.attendanceLineMarkup.call(state,[absentRow]),/data-correct-attendance/);
+  state.can=()=>true;
+  assert.match(AdminDashboard.prototype.attendanceLineMarkup.call(state,[absentRow]),/data-correct-attendance="absent:a:event"/);
+  assert.doesNotMatch(AdminDashboard.prototype.attendanceLineMarkup.call(state,[{...absentRow,status:'pending',pending:true}]),/data-correct-attendance/);
+  let opened;
+  Object.assign(state,{historyController:{records:[],displayRecords:()=>[absentRow]},attendance:[],correctionController:{open:row=>{opened=row;}}});
+  AdminDashboard.prototype.handleCorrection.call(state,{target:{closest:()=>({dataset:{correctAttendance:absentRow.id}})}});
+  assert.equal(opened,absentRow);
+  opened=null;
+  AdminDashboard.prototype.handleCorrection.call(state,{target:{closest:()=>({dataset:{correctAttendance:'stale-row'}})}});
+  assert.equal(opened,null);
   const css=fs.readFileSync(path.join(root,'assets/css/dashboard.css'),'utf8');
   assert.match(css,/\.attendance-line-times > \.attendance-no-record\s*\{[^}]*grid-column: 1 \/ -1;[^}]*font-size: \.65rem/);
 });
@@ -469,6 +498,17 @@ test('late check-in cancellation prevents saving and confirmation rechecks the w
   const expired = new AttendanceCheckInController({ policy: { evaluateCheckIn: () => (++checks === 1 ? { available: true, arrivalStatus: 'late' } : { available: false }) }, lateModal: { open: async () => true } });
   assert.equal((await expired.begin({})).available, false);
   assert.equal(checks, 2);
+});
+
+test('reopened sessions reject new check-ins and checkout-only actions in the client', async () => {
+  const { AttendancePolicy } = await isolatedModule('assets/js/controllers/AttendanceController.js', { currentUser: {}, currentUserRole: 'student', formatEventTime:String });
+  const policy=new AttendancePolicy({});
+  assert.equal(policy.evaluateCheckIn({checkoutOnlyReopened:true}).available,false);
+  assert.equal(policy.evaluateCheckIn({checkoutOnlyReopened:true}).reason,'checkout-only-reopened');
+  let message;
+  const { StudentAttendanceController }=await isolatedModule('assets/js/controllers/StudentAttendanceController.js',attendanceMocks({showDashboardToast:(_title,text)=>{message=text;}}));
+  await StudentAttendanceController.prototype.checkOutAttendance.call({},null,{checkoutOnlyReopened:true});
+  assert.match(message,/reopened for checkout only/);
 });
 
 function attendanceMocks(overrides = {}) {
@@ -1237,6 +1277,52 @@ test('attendance corrections atomically preserve the previous record and identif
   await assert.rejects(controller.save(input), /not assigned/); assert.equal(writes.length, 2);
 });
 
+test('admin event cards show linked schedules once with separately targeted session actions', async () => {
+  const css=fs.readFileSync(path.join(root,'assets/css/dashboard.css'),'utf8');
+  assert.match(css,/\.admin-event-card-grid\s*\{\s*align-items: start;\s*\}/);
+  const names=fs.readFileSync(path.join(root,'assets/js/dashboard.js'),'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared=Object.fromEntries(names.map(name=>[name,()=> '']));
+  Object.assign(shared,{escapeHtml:String,formatEventDate:String,getEventStatus:()=> 'closed',eventStatusBadge:()=> '<span>Closed</span>',isEventFinished:()=>true});
+  const {AdminDashboard}=await isolatedModule('assets/js/admin/AdminDashboard.js',shared,fakeBrowser());
+  const events=['morning','afternoon'].map((period,index)=>({id:index?'day_afternoon':'day',sessionGroupId:'day',sessionBaseName:'Day 5',sessionPeriod:period,name:`Day 5 — ${period}`,date:'2026-10-23',timeIn:index?'13:00':'07:00',checkOutCutoff:index?'17:00':'12:00'}));
+  let schedules=0;
+  const state={events,can:()=>true,schedulePresenter:{render:()=>{schedules++;return '<div>Both schedules</div>';}}};
+  const html=AdminDashboard.prototype.eventCardMarkup.call(state,events[0],true);
+  assert.equal(schedules,1);assert.equal((html.match(/<article/g)||[]).length,1);assert.match(html,/<h3>Day 5<\/h3>/);
+  for(const id of ['day','day_afternoon']) for(const action of ['edit-event','delete-event','survey-event']) assert.ok(html.includes(`data-${action}="${id}"`));
+  assert.match(html,/admin-session-action-label">Morning/);assert.match(html,/admin-session-action-label">Afternoon/);
+  assert.doesNotMatch(html,/data-manage-geofence/);
+  state.can=()=>false;
+  const restricted=AdminDashboard.prototype.eventCardMarkup.call(state,events[0],true);
+  assert.doesNotMatch(restricted,/data-delete-event|data-survey-event/);
+  state.pastEventList={};state.eventCardMarkup=AdminDashboard.prototype.eventCardMarkup;
+  AdminDashboard.prototype.renderPastEvents.call(state);
+  assert.equal((state.pastEventList.innerHTML.match(/<article/g)||[]).length,1);
+  const timeline={},count={};state.document={querySelector:id=>id==='#adminEventTimeline'?timeline:count};state.eventTableBody={};state.can=()=>true;
+  AdminDashboard.prototype.renderAdminEvents.call(state);
+  assert.match(timeline.innerHTML,/<button type="button" class="timeline-item timeline-event-button" data-edit-event="day"/);
+  assert.match(timeline.innerHTML,/aria-label="Edit Day 5/);
+  let edited;state.editEvent=id=>{edited=id;};
+  await AdminDashboard.prototype.handleEventCardAction.call(state,{target:{closest:selector=>selector==='[data-edit-event]'?{dataset:{editEvent:'day'}}:null}});
+  assert.equal(edited,'day');
+  assert.match(css,/\.timeline-item:hover\s*\{[^}]*background: var\(--blue-soft\)/);
+  assert.match(css,/\.timeline-event-button:focus-visible/);
+});
+
+test('correcting a roster-only absence creates real attendance and an audit with no previous document', async () => {
+  const { AttendanceCorrectionController } = await isolatedModule('assets/js/controllers/AttendanceCorrectionController.js');
+  const writes=[];
+  const controller=new AttendanceCorrectionController({db:{},user:{uid:'admin'},role:'attendance_admin',
+    getStudents:()=>[{uid:'a',accountId:'123',section:'2A',active:true}],
+    getEvents:()=>[{id:'morning',name:'Morning',type:'Activity',date:'2026-10-01',timeIn:'07:00',timeOut:'11:00',location:'School',audience:'All students',attendanceRoster:{a:'2A'}}],
+    transaction:async(_,run)=>run({get:async()=>({exists:()=>false}),set:(ref,data)=>writes.push(data)})});
+  await controller.save({studentUid:'a',eventId:'morning',checkIn:'2026-10-01T07:30',checkOut:'2026-10-01T11:00',arrival:'present',reason:'Verified attendance with event staff'});
+  assert.equal(writes.length,2);assert.equal(writes[0].eventId,'morning');assert.equal(writes[0].studentUid,'a');
+  assert.equal(writes[0].status,'completed');assert.equal(writes[0].recordSource,'admin-corrected');
+  assert.equal(writes[1].before,null);assert.equal(writes[1].after,writes[0]);
+  assert.equal(writes[1].reason,writes[0].correctionReason);
+});
+
 test('shared summaries preserve roster eligibility after a section change and exclude nonparticipants', async () => {
   const { AttendanceSummaryService } = await isolatedModule('assets/js/controllers/AttendanceSummaryService.js');
   const summary = new AttendanceSummaryService({ closeDate: event => new Date(event.close), checkoutCloseDate: event => new Date(event.end), now: () => new Date(10000) });
@@ -1398,6 +1484,25 @@ test('attendance history filters late arrivals and redraws immediately while sea
   controller.dispose();
 });
 
+test('checked-in filter includes completed, late, review and legacy arrivals but never rows without a saved check-in', async () => {
+  const {AttendanceHistoryController}=await isolatedModule('assets/js/controllers/AttendanceHistoryController.js');
+  const events=['morning','afternoon'].map((sessionPeriod,index)=>({id:index?'day_afternoon':'day',sessionGroupId:'day',sessionPeriod,date:'2026-10-23',timeIn:index?'13:00':'07:00'}));
+  const controller=new AttendanceHistoryController({getStudents:()=>[{uid:'a',section:'2A'}],getEvents:()=>events,summary:{needsReview:record=>record.id==='review'}});
+  controller.records=[
+    {id:'completed',studentUid:'a',eventId:'day',checkedInAt:{seconds:1},checkedOutAt:{seconds:2},status:'completed'},
+    {id:'review',studentUid:'a',eventId:'day_afternoon',checkedInAt:{seconds:3},arrivalStatus:'late'},
+    {id:'legacy',studentUid:'a',eventId:'day',attendedAt:{seconds:1}},
+    {id:'partial',studentUid:'a',eventId:'day',checkedOutAt:{seconds:2},status:'checkout-only'},
+    {id:'absent',studentUid:'a',eventId:'day',status:'absent'},
+    {id:'pending',studentUid:'a',eventId:'day',status:'pending'},
+    {id:'deleted',studentUid:'missing',eventId:'day',checkedInAt:{seconds:1}}
+  ];
+  controller.applied={event:'day',session:'both',status:'checked-in'};
+  assert.equal(controller.filtered().map(record=>record.id).join(','),'completed,review,legacy,deleted');
+  controller.applied.session='afternoon';assert.equal(controller.filtered().map(record=>record.id).join(','),'review');
+  controller.applied.session='both';controller.applied.status='completed';assert.equal(controller.filtered().map(record=>record.id).join(','),'completed,partial');
+});
+
 test('attendance history sorts arrivals before pagination and redraws when sorting changes', async () => {
   const browser = fakeBrowser();
   const { AttendanceHistoryController } = await isolatedModule('assets/js/controllers/AttendanceHistoryController.js', {}, browser);
@@ -1440,6 +1545,43 @@ test('course dropdown filters immediately, recognizes legacy spelling and keeps 
   course.value = 'BSFI'; await course.emit('change'); assert.equal(shown.length, 0);
   course.value = ''; await course.emit('change'); assert.equal(shown.length, 3);
   controller.dispose();
+});
+
+test('attendance views keep each student session pair on one page and filter each period independently', async () => {
+  const browser = fakeBrowser();
+  const { AttendanceHistoryController } = await isolatedModule('assets/js/controllers/AttendanceHistoryController.js', {}, browser);
+  const sessions = [{ id:'morning',sessionGroupId:'day',sessionPeriod:'morning',date:'2026-10-22',timeIn:'07:00' },{ id:'afternoon',sessionGroupId:'day',sessionPeriod:'afternoon',date:'2026-10-22',timeIn:'13:00' }];
+  let shown;
+  const controller = new AttendanceHistoryController({ repository:{},getStudents:()=>[{uid:'a',firstName:'Ana'},{uid:'b',firstName:'Ben'}],getEvents:()=>sessions,
+    summary:{needsReview:()=>false},notify(){},pageSize:1,render:rows=>{shown=rows;},prepareRecords:rows=>controller.sortForDisplay(rows) });
+  controller.initialize();controller.more=false;
+  controller.records=[{id:'a_m',studentUid:'a',eventId:'morning',checkedInAt:100},{id:'b_a',studentUid:'b',eventId:'afternoon',checkedInAt:400},{id:'a_a',studentUid:'a',eventId:'afternoon',checkedInAt:300},{id:'b_m',studentUid:'b',eventId:'morning',checkedInAt:200}];
+  browser.document.querySelector('#adminAttendanceEventFilter').value='morning';
+  const session=browser.document.querySelector('#attendanceSession');session.value='both';await session.emit('change');
+  assert.deepEqual(Array.from(shown,r=>r.id),['b_m','b_a']);
+  await controller.onNext();assert.deepEqual(Array.from(shown,r=>r.id),['a_m','a_a']);
+  session.value='morning';await session.emit('change');assert.deepEqual(Array.from(shown,r=>r.id),['b_m']);assert.equal(controller.page,0);
+  session.value='afternoon';await session.emit('change');assert.deepEqual(Array.from(shown,r=>r.id),['b_a']);
+  controller.dispose();
+});
+
+test('unified student card routes actions to the live session and blocks buttons in the gap', async () => {
+  const browser=fakeBrowser();let now=+new Date('2026-10-22T08:00:00+08:00');
+  class Clock extends Date { constructor(...args){super(...(args.length?args:[now]));} static now(){return now;} }
+  const names=fs.readFileSync(path.join(root,'assets/js/dashboard.js'),'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared=Object.fromEntries(names.map(name=>[name,()=> '']));
+  Object.assign(shared,{escapeHtml:String,currentUser:{uid:'a'},formatEventTime:String,formatEventDate:String,getEventStatus:()=> 'open',eventStatusBadge:()=>'<span>Status</span>',isCheckoutAvailable:()=>false});
+  const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,{...browser,Date:Clock});
+  const pair=[{id:'day',sessionGroupId:'day',sessionPeriod:'morning',sessionBaseName:'Day 4',name:'Day 4 — Morning',date:'2026-10-22',timeIn:'07:00',checkOutCutoff:'12:30',audience:'All students'},
+    {id:'day_afternoon',sessionGroupId:'day',sessionPeriod:'afternoon',sessionBaseName:'Day 4',name:'Day 4 — Afternoon',date:'2026-10-22',timeIn:'13:25',checkOutCutoff:'17:25',audience:'All students'}];
+  const state={document:browser.document,view:'events',events:pair,attendance:[],studentProfile:{section:'2A'},attendanceCheckInController:{policy:{evaluateCheckIn:()=>({available:true,arrivalStatus:'present'})}},
+    attendanceController:{syncLoadingButtons(){}},schedulePresenter:{render:()=> 'schedules'},renderAttendanceSummary(){},updateMarkup(target,html){target.innerHTML=html;}};
+  state.currentEventsForStudent=()=>StudentDashboard.prototype.currentEventsForStudent.call(state);
+  const draw=()=>{StudentDashboard.prototype.renderEvents.call(state);return browser.document.querySelector('#studentEventGrid').innerHTML;};
+  let html=draw();assert.equal((html.match(/class="event-card"/g)||[]).length,1);assert.match(html,/data-attend-event="day"/);assert.match(html,/<h3>Day 4<\/h3>/);
+  now=+new Date('2026-10-22T12:45:00+08:00');html=draw();assert.match(html,/Afternoon not open yet/);assert.doesNotMatch(html,/data-attend-event|data-check-out-event/);
+  now=+new Date('2026-10-22T14:00:00+08:00');html=draw();assert.match(html,/data-attend-event="day_afternoon"/);assert.doesNotMatch(html,/data-attend-event="day"/);
+  now=+new Date('2026-10-22T18:00:00+08:00');assert.match(draw(),/No open or upcoming events/);
 });
 
 test('event-required history waits for a selection before fetching records', async () => {

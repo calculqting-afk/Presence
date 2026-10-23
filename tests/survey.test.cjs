@@ -25,6 +25,35 @@ test('survey policy validates questions/windows and only requests selected locat
   assert.equal(policy.reviewApproved({ reviewDecision: 'approved', reviewStage: 'start', reviewedAt: new Date(5000), reviewRequestedAt: new Date(6000) }, 'start'), false);
 });
 
+test('admin survey picker groups sessions once and loads only the chosen session without changing existing surveys', async () => {
+  const {SurveyController}=await moduleAt('SurveyController');
+  const loaded=[],list={innerHTML:''};
+  const controller=new SurveyController({repository:{load:async id=>{loaded.push(id);return {config:null};}},locationService:{},profile:()=>({}),canManage:true,escapeHtml:String,openView(){},showToast(){},document:{},window:{location:{href:'https://school.test/'}}});
+  controller.visible=true;controller.workspace={innerHTML:''};
+  controller.section={querySelector:()=>list,querySelectorAll:()=>[]};
+  const morning={id:'day',sessionGroupId:'day',sessionBaseName:'Intramurals',sessionPeriod:'morning',name:'Intramurals — Morning',date:'2026-10-23',timeIn:'07:00',openAt:new Date('2026-10-23T07:00:00+08:00'),checkOutClosesAt:new Date('2026-10-23T12:00:00+08:00'),hasSurvey:true};
+  const afternoon={...morning,id:'day_afternoon',sessionPeriod:'afternoon',timeIn:'13:00',name:'Intramurals — Afternoon',hasSurvey:false};
+  controller.events=[afternoon,morning];controller.renderList();
+  assert.equal((list.innerHTML.match(/data-survey-select=/g)||[]).length,1);
+  assert.match(list.innerHTML,/<strong>Intramurals<\/strong>/);
+  await controller.select('day');
+  assert.match(controller.workspace.innerHTML,/data-survey-session/);
+  assert.match(controller.workspace.innerHTML,/value="day" selected>Morning — Manage survey/);
+  assert.match(controller.workspace.innerHTML,/value="day_afternoon">Afternoon — Create survey/);
+  await controller.select('day_afternoon');
+  assert.equal(loaded.join(','),'day,day_afternoon');
+  assert.match(controller.workspace.innerHTML,/value="day_afternoon" selected/);
+  assert.match(list.innerHTML,/aria-pressed="true" data-survey-select="day_afternoon"/);
+  assert.equal(morning.hasSurvey,true);assert.equal(afternoon.hasSurvey,false);
+  afternoon.surveyArchived=true;controller.archivePanel=true;controller.renderList();
+  assert.equal((list.innerHTML.match(/data-survey-select=/g)||[]).length,1);
+  assert.doesNotMatch(controller.sessionPickerMarkup(),/data-survey-session/);
+  controller.archivePanel=false;controller.selectedEvent=morning;controller.renderList();
+  assert.doesNotMatch(list.innerHTML,/data-survey-select="day_afternoon"/);
+  afternoon.surveyArchived=false;controller.canManage=false;controller.renderList();
+  assert.equal((list.innerHTML.match(/data-survey-select=/g)||[]).length,2,'student survey entries retain original session IDs');
+});
+
 test('QR links preserve GitHub project paths and reject injected event IDs', async () => {
   const { SurveyLinkService } = await moduleAt('SurveyLinkService');
   const service = new SurveyLinkService({ href: 'https://school.github.io/Presence/pages/admin-dashboard.html?v=old#x' });

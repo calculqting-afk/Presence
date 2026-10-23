@@ -39,8 +39,9 @@ a separate manual correction action.
 Morning and afternoon must remain ordered and non-overlapping. Existing
 legacy cutoff aliases are updated along with the new cutoff, independently
 for each session. Event date and session identity/mode remain protected after
-opening. Closed-session times and closed participant groups cannot be changed;
-this does not silently reopen past events. Firestore rules enforce role,
+opening. Closed participant groups stay locked. Closed sessions may now extend
+only their checkout cutoff, with confirmation and existing-check-in-only access;
+see [Reopen checkout](REOPEN-CHECKOUT.md). Firestore rules enforce role,
 window order, session linkage, overlap, date and closed-session constraints.
 
 ## Deployment

@@ -63,6 +63,24 @@ test('closed afternoon groups retain their roster and cannot gain new obligation
   assert.throws(()=>Policy.prepare({...options(),previous:record(),afternoon,sections:['2B'],now:new Date('2026-10-20T18:00:00')}),/Closed afternoon/);
 });
 
+test('finished sessions reopen only by extending checkout, with other times locked and separate session flags', async () => {
+  const {EventSessionPolicy:Policy}=await load();
+  const previous=record(),at=new Date('2026-10-20T12:20:00');
+  const extended={...record(),checkOutCutoff:'12:45',checkOutClosesAt:stamp(new Date('2026-10-20T12:45:00'))};
+  const plan=Policy.prepare({...options(),previous,record:extended,now:at});
+  assert.equal(plan.primary.checkoutOnlyReopened,true);
+  assert.equal(plan.afternoon.checkoutOnlyReopened,undefined,'reopening morning must not mark afternoon as reopened');
+  assert.equal(Policy.needsScheduleConfirmation(plan.primary,previous,at),true);
+  assert.throws(()=>Policy.prepare({...options(),previous,record:{...extended,timeOut:'11:15'},now:at}),/only extend/);
+  assert.throws(()=>Policy.prepare({...options(),previous,record:{...extended,checkOutCutoff:'12:15',checkOutClosesAt:stamp(new Date('2026-10-20T12:15:00'))},now:at}),/current time/);
+  assert.throws(()=>Policy.prepare({...options(),previous,record:{...extended,checkOutCutoff:'14:00',checkOutClosesAt:stamp(new Date('2026-10-20T14:00:00'))},now:at}),/morning|afternoon/);
+  const afternoon=Policy.prepare(options()).afternoon;
+  const both=Policy.prepare({...options(),previous,afternoon,now:new Date('2026-10-20T18:00:00'),times:['13:00','14:00','16:00','20:00']});
+  assert.equal(both.primary.checkoutOnlyReopened,undefined);assert.equal(both.afternoon.checkoutOnlyReopened,true);
+  const preserved=Policy.prepare({...options(),previous:plan.primary,record:{...extended},now:at});
+  assert.equal(preserved.primary.checkoutOnlyReopened,true,'later saves cannot clear checkout-only protection');
+});
+
 test('legacy cutoff aliases follow edited primary and afternoon schedules, never the other session', async () => {
   const {EventSessionPolicy:Policy}=await load(),previous={...record(),lateAfterAt:record().checkInClosesAt,checkInClose:'09:00'};
   const changed={...record(),checkInCutoff:'09:30',checkInClosesAt:stamp(new Date('2026-10-20T09:30:00'))};
@@ -95,11 +113,11 @@ test('afternoon-only creates a single primary session and rejects a pre-noon sch
   assert.throws(()=>Policy.prepare({...options(),record,previous:plan.primary,mode:'morning',now:new Date('2026-10-20T14:00:00')}),/mode is locked/);
 });
 
-test('cards show both grouped schedules, including finished morning, with independent current-session labels', async () => {
+test('cards show both schedules and mark the session matching the current time', async () => {
   const {EventSessionPolicy:Policy}=await load();
   const {EventSchedulePresenter}=await import(pathToFileURL(path.resolve(__dirname,'../assets/js/controllers/EventSchedulePresenter.js')));
   const plan=Policy.prepare(options()),morning={...plan.primary,id:'group'},afternoon={...plan.afternoon,id:'group_afternoon'};
-  const presenter=new EventSchedulePresenter({formatTime:value=>value,escapeHtml:String,addMinutes:value=>value});
+  const presenter=new EventSchedulePresenter({formatTime:value=>value,escapeHtml:String,addMinutes:value=>value,now:()=>+afternoon.openAt.toDate()+60000});
   const html=presenter.render(afternoon,[morning,afternoon]);
   assert.match(html,/Both — Morning and Afternoon/);assert.match(html,/Morning schedule/);assert.match(html,/Afternoon schedule/);
   for(const time of ['07:00','09:00','11:00','12:10','13:00','14:00','16:00','17:00'])assert.ok(html.includes(time),time);

@@ -2,6 +2,7 @@ import { collection, query, where, orderBy, limit, startAfter, getDocsFromServer
 import { AttendanceToolbarController } from './AttendanceToolbarController.js';
 import { AttendanceSort } from './AttendanceSort.js';
 import { CoursePolicy } from '../core/CoursePolicy.js';
+import { AttendanceViews } from './AttendanceViews.js';
 
 export class AttendanceRepository {
   constructor(db, fetch = getDocsFromServer) { this.db = db; this.fetch = fetch; }
@@ -61,6 +62,7 @@ export class AttendanceHistoryController {
         document.querySelector('#attendanceFromDate').value = selected.date;
         document.querySelector('#attendanceToDate').value = selected.date;
       }
+      this.syncSessionControl(true);
       void this.reload();
     };
     this.localFilterControls = [
@@ -68,18 +70,19 @@ export class AttendanceHistoryController {
       { control: document.querySelector('#attendanceSection'), event: 'change' },
       { control: document.querySelector('#attendanceCourse'), event: 'change' },
       { control: document.querySelector('#attendanceStatus'), event: 'change' },
-      { control: document.querySelector('#attendanceSort'), event: 'change' }
+      { control: document.querySelector('#attendanceSort'), event: 'change' },
+      { control: document.querySelector('#attendanceSession'), event: 'change' }
     ];
     this.dateFilterControls = ['#attendanceFromDate', '#attendanceToDate']
       .map(selector => document.querySelector(selector));
     this.onNext = async () => {
       if (this.busy) return;
-      if ((this.page + 1) * this.pageSize < this.displayRecords().length) this.page++;
+      if ((this.page + 1) * this.pageSize < this.pageItems().length) this.page++;
       else if (this.more) {
-        const previousCount = this.displayRecords().length;
+        const previousCount = this.pageItems().length;
         const pageWasFull = previousCount >= (this.page + 1) * this.pageSize;
         await this.load();
-        if (pageWasFull && this.displayRecords().length > (this.page + 1) * this.pageSize) this.page++;
+        if (pageWasFull && this.pageItems().length > (this.page + 1) * this.pageSize) this.page++;
       }
       this.draw();
     };
@@ -95,10 +98,12 @@ export class AttendanceHistoryController {
     return { from: value('#attendanceFromDate'), to: value('#attendanceToDate'),
       search: value('#attendanceStudentSearch').trim().toLowerCase(), section: value('#attendanceSection'),
       course: value('#attendanceCourse'),
+      session: value('#attendanceSession') || 'both',
       event: value('#adminAttendanceEventFilter'), status: value('#attendanceStatus'), sort: value('#attendanceSort') };
   }
   filtered() {
     const filters = this.applied || this.filters();
+    const ids = this.selectedSessions(filters).map(event => event.id);
     const students = new Map(this.getStudents().map(student => [student.uid, student]));
     const events = new Map(this.getEvents().map(event => [event.id, event]));
     return this.records.filter(record => {
@@ -109,8 +114,9 @@ export class AttendanceHistoryController {
       const review = !student || record.rosterUnverified || this.summary.needsReview(record, event);
       return (!filters.search || text.includes(filters.search)) && (!filters.section || section === filters.section)
         && (!filters.course || CoursePolicy.normalize(record.studentCourse || student?.course) === filters.course)
-        && (!filters.event || filters.event === 'all' || filters.event === record.eventId)
+        && (!filters.event || filters.event === 'all' || ids.includes(record.eventId))
         && (!filters.status || (filters.status === 'absent' ? record.status === 'absent' && !review
+          : filters.status === 'checked-in' ? Boolean(record.checkedInAt || record.attendedAt)
           : filters.status === 'late' ? record.arrivalStatus === 'late'
           : filters.status === 'review' ? review
           : filters.status === 'completed' ? Boolean(record.checkedOutAt) && !review : !record.checkedOutAt && !review));
@@ -128,12 +134,33 @@ export class AttendanceHistoryController {
       return [...names, record.studentId]
         .filter(Boolean).join(' ').toLocaleLowerCase();
     };
-    return [...records].sort((first, second) => AttendanceSort.compare(first, second, {
+    const compare = (first, second) => AttendanceSort.compare(first, second, {
       sort, name: nameFor,
       key: record => String(record.id || `${record.eventId}:${record.studentUid}`)
+    });
+    if (!this.combined()) return [...records].sort(compare);
+    const groups = new Map();
+    for (const record of records) { const key = record.studentUid || record.id; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(record); }
+    const representative = group => [...group].sort(compare)[0];
+    return [...groups.values()].sort((a,b) => compare(representative(a),representative(b))).flatMap(group => group.sort((a,b) => {
+      const events = this.getEvents();
+      const first = events.find(event => event.id === a.eventId), second = events.find(event => event.id === b.eventId);
+      return (first ? AttendanceViews.time(first,'openAt') : 0) - (second ? AttendanceViews.time(second,'openAt') : 0) || String(a.id).localeCompare(String(b.id));
     }));
   }
+  selectedSessions(filters = this.applied || this.filters()) { return AttendanceViews.selection(this.getEvents(), filters.event, filters.session); }
+  combined() { return this.selectedSessions().length > 1; }
+  syncSessionControl(reset = false) {
+    const control = document.querySelector('#attendanceSession'), field = document.querySelector('#attendanceSessionField');
+    const event = this.getEvents().find(item => item.id === document.querySelector('#adminAttendanceEventFilter').value);
+    const sessions = event ? AttendanceViews.related(event,this.getEvents()) : [];
+    if (field) field.hidden = sessions.length < 2;
+    this.form?.classList.toggle('attendance-has-sessions', sessions.length > 1);
+    if (sessions.length < 2 && control) control.value = 'both';
+    if (reset && control && sessions.length > 1) { const current = AttendanceViews.state(sessions).current; control.value = current ? current.sessionPeriod || (AttendanceViews.label(current) === 'Morning' ? 'morning' : 'afternoon') : 'both'; }
+  }
   async reload() {
+    this.syncSessionControl();
     const filters = this.filters();
     if (filters.from && filters.to && filters.from > filters.to) {
       this.notify('Invalid date range', 'The start date must not be after the end date.'); return;
@@ -183,6 +210,13 @@ export class AttendanceHistoryController {
   displayRecords() {
     return this.prepareRecords(this.filtered(), { busy: this.busy, partial: this.more, verified: this.verified });
   }
+  pageItems() {
+    const records = this.displayRecords();
+    if (!this.combined()) return records.map(record => [record]);
+    const groups = new Map();
+    for (const record of records) { const key = record.studentUid || record.id; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(record); }
+    return [...groups.values()];
+  }
   draw() {
     if (this.requireEvent && (!(this.applied || this.filters()).event || (this.applied || this.filters()).event === 'all')) {
       this.render([], { chooseEvent: true });
@@ -190,11 +224,12 @@ export class AttendanceHistoryController {
       document.querySelector('#attendancePagination').hidden = true;
       return;
     }
-    const records = this.displayRecords();
+    const records = this.pageItems();
     this.page = Math.min(this.page, Math.max(0, Math.ceil(records.length / this.pageSize) - 1));
-    const shown = records.slice(this.page * this.pageSize, (this.page + 1) * this.pageSize);
+    const page = records.slice(this.page * this.pageSize, (this.page + 1) * this.pageSize);
+    const shown = page.flat();
     this.render(shown, { busy: this.busy, partial: this.more, verified: this.verified, filtered: Object.values(this.applied || {}).some(value => value && value !== 'all') });
-    this.info.textContent = this.busy ? 'Loading…' : `${records.length ? this.page * this.pageSize + 1 : 0}–${this.page * this.pageSize + shown.length} of ${records.length} students${this.more ? ' · More available' : ''}`;
+    this.info.textContent = this.busy ? 'Loading…' : `${records.length ? this.page * this.pageSize + 1 : 0}–${this.page * this.pageSize + page.length} of ${records.length} students${this.more ? ' · More available' : ''}`;
     this.info.setAttribute('aria-label', `Page ${this.page + 1}, ${shown.length} shown, ${records.length} matches in ${this.records.length} loaded records${this.more ? ', additional records may match' : ', end of date range'}`);
     document.querySelector('#attendanceCurrentPage').textContent = this.page + 1;
     document.querySelector('#attendancePagination').hidden = !this.busy && !this.more && records.length === 0;

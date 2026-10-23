@@ -23,12 +23,19 @@ export class EventSessionPolicy {
   static opened(event, now = new Date()) { const date = EventAudiencePolicy.date(event?.openAt); return Boolean(date && date <= now); }
   static assertSchedule(record, previous, now = new Date()) {
     if (!previous) return;
+    if (previous.checkoutOnlyReopened === true) record.checkoutOnlyReopened = true;
     if (this.opened(previous, now) && record.date !== previous.date) throw new Error('Keep the event date unchanged after attendance opens. You can still edit its time windows.');
     const end = EventAudiencePolicy.date(previous.checkOutClosesAt);
-    if (end && end <= now && this.scheduleChanged(record, previous)) throw new Error('Closed-session schedules cannot be changed. Create a new event instead.');
+    if ((previous.checkoutOnlyReopened || (end && end <= now)) && this.scheduleChanged(record, previous)) {
+      const locked = this.scheduleFields.filter(key => !['checkOutCutoff','checkOutClosesAt'].includes(key));
+      if (this.scheduleChanged(record, previous, locked)) throw new Error('Closed-session schedules can only extend the checkout cutoff. Keep the date and all other times unchanged.');
+      const next = EventAudiencePolicy.date(record.checkOutClosesAt);
+      if (!end || !next || next <= end || next <= now) throw new Error('Extend the checkout cutoff beyond its previous value and the current time, on the same event date.');
+      record.checkoutOnlyReopened = true;
+    }
   }
-  static scheduleChanged(record, previous) {
-    return Boolean(previous) && this.scheduleFields.some(key => {
+  static scheduleChanged(record, previous, fields = this.scheduleFields) {
+    return Boolean(previous) && fields.some(key => {
       const before = EventAudiencePolicy.date(previous[key]) || previous[key];
       const after = EventAudiencePolicy.date(record[key]) || record[key];
       return String(before) !== String(after);
@@ -65,10 +72,11 @@ export class EventSessionPolicy {
       timeIn, checkInCutoff, timeOut, checkOutCutoff,
       openAt: fromDate(new Date(`${record.date}T${timeIn}`)), checkInClosesAt: fromDate(new Date(`${record.date}T${checkInCutoff}`)),
       closeAt: fromDate(new Date(`${record.date}T${timeOut}`)), checkOutClosesAt: fromDate(new Date(`${record.date}T${checkOutCutoff}`)) };
+    delete secondary.checkoutOnlyReopened;
     this.normalizeAliases(secondary, afternoon);
     this.assertSchedule(secondary, afternoon, now);
     if (!afternoon && EventAudiencePolicy.date(secondary.openAt) <= now) throw new Error('Add the afternoon session before its check-in opens.');
-    if (afternoon && EventAudiencePolicy.date(afternoon.checkOutClosesAt) <= now) {
+    if (afternoon && (afternoon.checkoutOnlyReopened || EventAudiencePolicy.date(afternoon.checkOutClosesAt) <= now)) {
       if (JSON.stringify([...sections].sort()) !== JSON.stringify([...EventAudiencePolicy.selected(afternoon)].sort())) throw new Error('Closed afternoon-session groups cannot be changed.');
       for (const key of ['attendanceRoster', 'rosterCapturedAt', 'audienceSections', 'sectionAssignedAt', 'rosterVersion']) delete secondary[key];
       secondary.audience = afternoon.audience;

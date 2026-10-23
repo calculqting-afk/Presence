@@ -8,6 +8,7 @@ export class AttendancePolicy {
   evaluateCheckIn(event, now = new Date()) {
     const { eventOpenDate, eventCheckInCloseDate, eventCheckoutCloseDate } = this.windows;
     if (!event) return { available: false, reason: 'not-open' };
+    if (event.checkoutOnlyReopened === true) return { available: false, reason: 'checkout-only-reopened' };
     const open = eventOpenDate(event);
     const lateAfter = eventCheckInCloseDate(event);
     const checkoutClose = eventCheckoutCloseDate(event);

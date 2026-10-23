@@ -50,6 +50,21 @@ test('live report moves pending to check-in to completed without premature absen
   assert.match(completed.rows[0].checkIn, /2026/);
   assert.doesNotMatch(JSON.stringify(completed), /SECRET-|birthday|password|gps/i);
 });
+
+test('checked-in report filter includes completed and review check-ins and excludes partial and absent records across sessions', async () => {
+  const service=await serviceAt('2026-10-17T10:00:00Z');
+  const records=[{...checkIn,checkedOutAt:stamp('2026-10-17T08:00:00Z')},
+    {id:'legacy',studentUid:'b',eventId:event.id,attendedAt:stamp('2026-10-17T00:02:00Z')},
+    {id:'partial',studentUid:'c',eventId:event.id,checkedOutAt:stamp('2026-10-17T08:00:00Z'),status:'checkout-only',arrivalStatus:'absent'}];
+  const report=snapshot(service,records,{filters:{status:'checked-in'}});
+  assert.deepEqual(report.rows.map(row=>row.studentId).sort(),['2026-0','2026-1']);
+  assert.equal(report.totals.completed,1);assert.equal(report.totals.review,1);assert.equal(report.totals.present,2);
+  assert.ok(report.rows.every(row=>!('hasCheckIn' in row)));
+  const afternoon={...event,id:'event-2',sessionPeriod:'afternoon',sessionGroupId:event.id,sessionBaseName:'Assembly'};
+  const combined=service.snapshotGroup({events:[{...event,sessionPeriod:'morning',sessionGroupId:event.id},afternoon],students,
+    records:[...records,{...checkIn,id:'pm',eventId:afternoon.id}],filters:{status:'checked-in'},verifiedAt:new Date('2026-10-17T10:00:00Z')});
+  assert.equal(combined.rows.length,3);assert.equal(combined.rows.filter(row=>row.sessionLabel==='Afternoon').length,1);
+});
 test('closed report distinguishes missed checkout, confirmed absence and unverified legacy roster', async () => {
   const service = await serviceAt('2026-10-17T10:00:00Z');
   const report = snapshot(service, [checkIn]);
@@ -141,6 +156,23 @@ async function isolated(relative, sdk = {}) {
   }
   const module = await load(path.join(root, relative)); await module.evaluate(); return module.namespace;
 }
+test('combined repository verifies both sessions, keeps duplicate-student records separate and cleans all listeners', async () => {
+  const callbacks=[];let stopped=0;
+  const {AttendanceReportRepository}=await isolated('assets/js/controllers/AttendanceReportRepository.js',{onSnapshot:(ref,options,receive)=>{callbacks.push(receive);return ()=>{stopped++;};}});
+  const updates=[],repository=new AttendanceReportRepository({});
+  const stop=repository.watchSessions([{id:'morning'},{id:'afternoon'}],event=>[event.id],update=>updates.push(update),()=>{});
+  const meta={fromCache:false,hasPendingWrites:false};
+  callbacks[0]({exists:()=>true,id:'morning',data:()=>({name:'Morning'}),metadata:meta});
+  assert.equal(updates.at(-1).verified,false);
+  callbacks[1]({docs:[{id:'a_m',data:()=>({studentUid:'a',eventId:'morning'})}],metadata:meta});assert.equal(updates.at(-1).verified,false);
+  callbacks[2]({exists:()=>true,id:'afternoon',data:()=>({name:'Afternoon'}),metadata:meta});assert.equal(updates.at(-1).verified,true);
+  callbacks[3]({docs:[{id:'a_a',data:()=>({studentUid:'a',eventId:'afternoon'})}],metadata:meta});
+  assert.equal(updates.at(-1).verified,true);assert.equal(updates.at(-1).records.length,2);
+  assert.deepEqual(Array.from(updates.at(-1).records,r=>r.reportSessionId),['morning','afternoon']);
+  callbacks[3]({docs:[],metadata:{...meta,fromCache:true}});assert.equal(updates.at(-1).verified,false);
+  stop();assert.equal(stopped,4);
+});
+
 test('report repository watches full event scope, verifies metadata, caps overflow and cleans up', async () => {
   const watches = []; let stopped = 0;
   const { AttendanceReportRepository } = await isolated('assets/js/controllers/AttendanceReportRepository.js', { onSnapshot: (reference, options, receive, fail) => { watches.push({ reference, options, receive, fail }); return () => stopped++; } });
@@ -214,7 +246,7 @@ test('PDF header uses readable Philippine dates, hides unused filters and keeps 
   const { AttendancePdfExporter } = await import('../assets/js/controllers/AttendancePdfExporter.js');
   const exporter = new AttendancePdfExporter(), report = snapshot(await serviceAt());
   const header = exporter.header(report);
-  assert.equal(header.filters, ''); assert.match(header.schedule, /Oct 17, 2026/);
+  assert.equal(header.filters, 'Session: Morning'); assert.match(header.schedule, /Oct 17, 2026/);
   assert.match(header.exported, /12:00 PM/); assert.match(header.exported, /PH time/);
   assert.doesNotMatch(JSON.stringify(header), /name-asc|Search: None|T04:00|0 duplicate|Server verified|Asia\/Manila/);
   assert.match(header.totals, /Students: 3/); assert.match(header.breakdown, /Pending: 3/); assert.match(header.note, /ongoing/);

@@ -3,6 +3,7 @@ import { AttendanceReportRepository } from './AttendanceReportRepository.js';
 import { AttendanceReportService } from './AttendanceReportService.js';
 import { AttendancePdfExporter } from './AttendancePdfExporter.js';
 import { AttendanceReportFileService } from './AttendanceReportFileService.js';
+import { AttendanceViews } from './AttendanceViews.js';
 
 export class AttendanceReportController {
   constructor({ document, window, db, can, context, summary, checkoutCloseDate, notify,
@@ -62,20 +63,23 @@ export class AttendanceReportController {
     if (!this.can()) { this.close(); return; }
     const { filters, events } = this.context(), selected = events.find(event => event.id === filters.event);
     if (!selected) { this.stopWatch(); this.error = 'Select an available event to continue.'; this.report = null; this.render(); return; }
-    const ids = this.service.eventIds(selected, events), key = JSON.stringify(ids);
-    if (key !== this.selectionKey) this.begin(selected, ids, key);
+    const sessions = AttendanceViews.selection(events, filters.event, filters.session);
+    if (!sessions.length) { this.stopWatch(); this.report = null; this.error = 'This event has no selected session.'; this.render(); return; }
+    const ids = this.service.eventIds(sessions[0], events), key = JSON.stringify(sessions.map(event => this.service.eventIds(event, events)));
+    if (key !== this.selectionKey) this.begin(sessions[0], ids, key, sessions);
     else this.render();
   }
-  begin(event, ids, key) {
+  begin(event, ids, key, sessions = [event]) {
     this.stopWatch(); this.selectionKey = key; this.error = ''; this.timedOut = false;
-    this.event = null; this.records = []; this.eventVerified = false; this.recordsVerified = false; this.report = null; this.verifiedAt = null;
+    this.event = null; this.events = []; this.records = []; this.eventVerified = false; this.recordsVerified = false; this.report = null; this.verifiedAt = null;
     const generation = this.generation;
     this.timeout = this.window.setTimeout(() => { if (this.active && generation === this.generation && !this.ready()) { this.timedOut = true; this.render(); } }, 20000);
     try {
-      this.unsubscribe = this.repository.watch(event.id, ids, update => {
+      const receive = update => {
         if (!this.active || generation !== this.generation) return;
         if (update.kind === 'event') {
           this.event = update.event; this.eventVerified = update.verified;
+          this.events = update.events || (update.event ? [update.event] : []);
           if (!update.exists) this.error = 'The selected event was removed or is unavailable.';
         } else {
           this.records = update.records; this.recordsVerified = update.verified;
@@ -84,9 +88,13 @@ export class AttendanceReportController {
         if (update.verified) this.verifiedAt = new Date();
         if (this.ready()) { this.window.clearTimeout(this.timeout); this.timedOut = false; }
         this.render();
-      }, () => {
+      };
+      const fail = () => {
         if (this.active && generation === this.generation) { this.error = 'Live verification failed. Check your permissions/connection and retry.'; this.recordsVerified = false; this.render(); }
-      });
+      };
+      this.unsubscribe = sessions.length > 1
+        ? this.repository.watchSessions(sessions, session => this.service.eventIds(session, this.context().events), receive, fail)
+        : this.repository.watch(event.id, ids, receive, fail);
     } catch (error) { this.error = error.message; }
     this.render();
   }
@@ -99,7 +107,9 @@ export class AttendanceReportController {
       : !this.eventVerified || !this.recordsVerified ? (this.timedOut ? 'Server verification timed out. Retry before exporting.' : 'Connecting - verifying all event attendance records...') : '');
     if (this.event && ((context.filters.from && this.event.date < context.filters.from) || (context.filters.to && this.event.date > context.filters.to))) issue = 'The selected event is outside the current date filter. Adjust the filters before exporting.';
     if (!issue && this.ready()) {
-      try { this.report = this.service.snapshot({ event: this.event, students: context.students, records: this.records, filters: context.filters, verifiedAt: this.verifiedAt }); }
+      try { this.report = this.events.length > 1
+        ? this.service.snapshotGroup({ events: this.events, students: context.students, records: this.records, filters: context.filters, verifiedAt: this.verifiedAt })
+        : this.service.snapshot({ event: this.event, students: context.students, records: this.records, filters: context.filters, verifiedAt: this.verifiedAt }); }
       catch (error) { issue = error.message; this.report = null; }
     }
     this.valid = !issue && this.ready() && Boolean(this.report);
@@ -124,7 +134,7 @@ export class AttendanceReportController {
     this.page = Math.min(this.page, Math.max(0, Math.ceil(rows.length / 50) - 1));
     rows.slice(this.page * 50, this.page * 50 + 50).forEach((row, index) => {
       const tr = this.document.createElement('tr');
-      for (const value of [this.page * 50 + index + 1, row.studentId, row.name, row.course, row.section, row.checkIn, row.checkOut, row.arrival, row.completion + (row.corrected ? ' (manual)' : '')]) {
+      for (const value of [this.page * 50 + index + 1, row.studentId, row.sessionLabel ? `${row.name} — ${row.sessionLabel}` : row.name, row.course, row.section, row.checkIn, row.checkOut, row.arrival, row.completion + (row.corrected ? ' (manual)' : '')]) {
         const td = this.document.createElement('td'); td.textContent = String(value); tr.append(td);
       }
       body.append(tr);
@@ -142,7 +152,7 @@ export class AttendanceReportController {
     try {
       const bytes = await this.exporter.generate(report);
       if (!this.scope.initialized || !this.active || !this.can() || !this.online()) return;
-      const name = `Presence-attendance-${report.event.date}-${report.event.id}`.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100) + '.pdf';
+      const name = `Presence-attendance-${report.event.date}-${report.event.id}-${report.filters.session || 'session'}`.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) + '.pdf';
       const result = await this.files.deliver(bytes, name, mode);
       if (this.active) this.notify(result.cancelled ? 'Save cancelled' : 'PDF ready', result.cancelled ? 'No PDF was saved.' : mode === 'share' ? 'Android share dialog opened. Choose a trusted recipient.' : 'The PDF save/download was started. It is a fixed snapshot.');
     } catch (error) { if (this.active) this.notify('Unable to export PDF', error.message || 'Please retry.'); }

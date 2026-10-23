@@ -3,6 +3,7 @@ import { AttendancePdfAssets } from './AttendancePdfAssets.js';
 export class AttendancePdfExporter {
   constructor({ assets = new AttendancePdfAssets() } = {}) { this.assets = assets; }
   footer(report) {
+    if (report.event.schedules) return report.event.schedules.map(schedule => `${schedule.label}: In ${schedule.checkIn} | Late ${schedule.checkInCutoff} | Out ${schedule.checkOut} | Cutoff ${schedule.checkOutCutoff}`);
     const schedule = report.event.schedule || {};
     return [`Check-in time: ${schedule.checkIn || 'Not set'} | Check-in cutoff: ${schedule.checkInCutoff || 'Not set'}`,
       `Check-out time: ${schedule.checkOut || 'Not set'} | Check-out cutoff: ${schedule.checkOutCutoff || 'Not set'}`];
@@ -16,6 +17,7 @@ export class AttendancePdfExporter {
       ? new Date(`${report.event.date}T00:00:00+08:00`).toLocaleDateString('en-PH', { dateStyle: 'medium', timeZone: 'Asia/Manila' }) : report.event.date;
     const statuses = { 'checked-in': 'Checked in', completed: 'Completed', late: 'Late', review: 'Needs review', absent: 'Absent', pending: 'Pending' };
     const filters = [report.filters.section !== 'All sections' && `Section: ${report.filters.section}`,
+      report.filters.session && `Session: ${report.filters.session}`,
       report.filters.course && report.filters.course !== 'All courses' && `Course: ${report.filters.course}`,
       report.filters.status !== 'All statuses' && `Status: ${statuses[report.filters.status] || report.filters.status}`,
       report.filters.search && `Search: ${report.filters.search}`].filter(Boolean).join(' | ');
@@ -24,7 +26,7 @@ export class AttendancePdfExporter {
       schedule: [date, report.event.time].filter(Boolean).join(' | '),
       location: [report.event.location, report.event.audience].filter(Boolean).join(' | '), filters,
       exported: `Exported: ${timestamp(report.generatedAt)} | Updated: ${timestamp(report.verifiedAt)} (PH time)`,
-      totals: `Students: ${totals.rows} | Present: ${totals.present} | Absent: ${totals.absent} | Needs review: ${totals.review}`,
+      totals: `${report.event.schedules ? 'Session records' : 'Students'}: ${totals.rows} | Present: ${totals.present} | Absent: ${totals.absent} | Needs review: ${totals.review}`,
       breakdown: `Completed: ${totals.completed} | Late: ${totals.late}${totals.pending ? ` | Pending: ${totals.pending}` : ''}`,
       note: `${report.closed ? 'Event closed.' : 'Event ongoing - attendance is not final.'} Late/completed counts may overlap with present.${report.duplicateCount ? ` ${report.duplicateCount} duplicate record(s) merged.` : ''}`
     };
@@ -94,7 +96,7 @@ export class AttendancePdfExporter {
     };
     newPage(true);
     for (const row of report.rows) {
-      const cells = [String(index + 1), row.studentId, row.name, row.course, row.section, row.checkIn, row.checkOut, row.arrival, row.completion + (row.corrected ? ' (manual)' : '')];
+      const cells = [String(index + 1), row.studentId, row.sessionLabel ? `${row.name} — ${row.sessionLabel}` : row.name, row.course, row.section, row.checkIn, row.checkOut, row.arrival, row.completion + (row.corrected ? ' (manual)' : '')];
       const lines = cells.map((cell, i) => wrap(cell, columns[i] - 10));
       const rowHeight = Math.max(27, ...lines.map(value => value.length * 11 + 12));
       if (rowHeight > 380) throw new Error('A report field is too long to fit safely. Review the student/event details.');

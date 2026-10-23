@@ -152,6 +152,27 @@ const attendance = (uid, event) => ({ studentUid: uid, studentId: uid.toUpperCas
   const closedSchedule={...original,openAt:date(-7200000),checkInClosesAt:date(-5400000),closeAt:date(-3600000),checkOutClosesAt:date(-1800000)};
   await write('events/closed',{...closedSchedule,timeIn:'06:00',openAt:date(-9000000)},token('head'),false);
   await write('events/closed',{...closedSchedule,description:'Metadata still editable'},token('head'));
+  const reopening={...closedSchedule,checkOutCutoff:'23:00',checkOutClosesAt:date(3600000),checkoutOnlyReopened:true};
+  await write('attendance/a_closed',{...attendance('a',closedSchedule),eventId:'closed',checkedInAt:date(-5400000),attendedAt:date(-5400000)});
+  const beforeReopen=await raw('attendance/a_closed');
+  await write('events/closed',{...reopening,checkoutOnlyReopened:false},token('head'),false);
+  await write('events/closed',{...reopening,timeOut:'11:30',closeAt:date(-1500000)},token('head'),false);
+  await write('events/closed',reopening,token('a'),false);
+  await write('events/closed',reopening,token('manager'));
+  assert.deepEqual((await raw('attendance/a_closed')).fields,beforeReopen.fields);
+  await write('attendance/b_closed',{...attendance('b',reopening),eventId:'closed'},token('b'),false);
+  const partialReopened={...attendance('b',reopening),eventId:'closed',status:'checkout-only',arrivalStatus:'absent',checkedOutAt:SERVER};
+  delete partialReopened.attendedAt;delete partialReopened.checkedInAt;
+  await write('attendance/b_closed',partialReopened,token('b'),false);
+  await checkout('a','closed');
+  const afterReopen=await raw('attendance/a_closed');
+  assert.deepEqual(afterReopen.fields.checkedInAt,beforeReopen.fields.checkedInAt);
+  assert.equal(afterReopen.fields.status.stringValue,'completed');
+  await checkout('a','closed',false);
+  await write('events/closed',{...reopening,checkoutOnlyReopened:false},token('head'),false);
+  await write('events/closed',{...reopening,timeIn:'06:00',openAt:date(-9000000)},token('head'),false);
+  await write('events/closed',{...reopening,checkOutCutoff:'23:30',checkOutClosesAt:date(7200000)},token('head'));
+  console.log('Reopened checkout rules passed: only cutoff extension accepted, check-in/partial checkout denied, existing check-in checkout accepted once, records preserved.');
   const wideCircle={enabled:true,type:'circle',latitude:10,longitude:124,radiusMeters:100000,address:'Wide circle test'};
   await write('eventGeofences/large_circle',wideCircle,token('manager'));
   assert.equal((await raw('eventGeofences/large_circle')).fields.radiusMeters.integerValue,'100000');
@@ -159,6 +180,13 @@ const attendance = (uid, event) => ({ studentUid: uid, studentId: uid.toUpperCas
   await write('eventGeofences/large_circle',{...wideCircle,radiusMeters:0},superAdmin,false);
   await write('eventGeofences/large_circle',wideCircle,token('a'),false);
   console.log('Circle rules passed: 100,000 m accepted for attendance admins; larger/zero radii and student edits denied.');
+  for (const key of ['name','type','date','location','timeIn','checkInCutoff','timeOut','checkOutCutoff','audience','description','requiresGeofence','openAt','checkInClosesAt','closeAt','checkOutClosesAt']) {
+    const invalid={...solo,sessionGroupId:`missing_${key}`};delete invalid[key];
+    await write(`events/missing_${key}`,invalid,token('manager'),false);
+  }
+  for (const badPoint of [{latitude:10},{latitude:10,longitude:181},{latitude:'10',longitude:124},{latitude:10,longitude:124,extra:true}]) {
+    await write('eventGeofences/invalid_polygon',{...polygon,vertices:[badPoint,...polygon.vertices.slice(1)]},token('manager'),false);
+  }
   console.log('Live schedule rules passed: authorized ongoing edits accepted, future actions use new cutoffs, recorded timestamps/statuses preserved, closed dates/schedules and student edits denied.');
   console.log('Afternoon-only rules passed: standalone creation, no extra session, early submission denied, mode changes limited to unopened root sessions.');
   console.log('Session rules passed: atomic morning/afternoon polygon bundle, independent attendance, early check-in denied, opened schedules/identity/overlap protected, Attendance Admin authorized.');

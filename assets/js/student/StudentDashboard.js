@@ -12,6 +12,7 @@ import { AttendanceSummaryService } from '../controllers/AttendanceSummaryServic
 import { StudentAttendanceListController } from '../controllers/StudentAttendanceListController.js?v=20261011-optimized';
 import { AttendanceToolbarController } from '../controllers/AttendanceToolbarController.js';
 import { EventSchedulePresenter } from '../controllers/EventSchedulePresenter.js';
+import { AttendanceViews } from '../controllers/AttendanceViews.js';
 export class StudentDashboard {
   constructor({
     document = globalThis.document,
@@ -434,7 +435,8 @@ export class StudentDashboard {
   }
   currentEventsForStudent() {
     const dashboard = this;
-    return dashboard.events.filter(event => !isEventFinished(event));
+    return AttendanceViews.groups(dashboard.events).filter(sessions => !AttendanceViews.state(sessions).closed)
+      .map(sessions => AttendanceViews.state(sessions).selected);
   }
   renderEvents() {
     const dashboard = this;
@@ -449,26 +451,29 @@ export class StudentDashboard {
       if (dashboard.view === 'dashboard') dashboard.updateMarkup(timeline, '<div class="empty-state">No open or upcoming events.</div>');
     } else {
       if (dashboard.view === 'events') dashboard.updateMarkup(eventGrid, activeEvents.map(event => {
+        const view = AttendanceViews.state(AttendanceViews.related(event, dashboard.events));
         const status = getEventStatus(event);
         const checkInResult = dashboard.attendanceCheckInController.policy.evaluateCheckIn(event);
         const attendanceRecord = attendanceByEventId.get(event.id);
         const eligible = EventAudiencePolicy.canAttend({ ...dashboard.studentProfile, uid: currentUser.uid }, event);
         const attended = Boolean(attendanceRecord);
         const completed = attendanceRecord?.status === "completed" || Boolean(attendanceRecord?.checkedOutAt);
-        const checkoutOpen = !completed && isCheckoutAvailable(event) && (eligible || Boolean(attendanceRecord?.checkedInAt || attendanceRecord?.attendedAt));
+        const checkoutOpen = !completed && isCheckoutAvailable(event) && (eligible || Boolean(attendanceRecord?.checkedInAt || attendanceRecord?.attendedAt)) && (!event.checkoutOnlyReopened || (attendanceRecord?.status === 'checked-in' && Boolean(attendanceRecord?.checkedInAt)));
         const checkInAvailable = eligible && !attended && checkInResult.available;
         const attendanceBadge = completed ? '<span class="badge green">Completed</span>' : attended ? `<span class="badge green">${checkoutOpen ? "Checkout available" : "Checked in"}</span>` : checkInAvailable && checkInResult.arrivalStatus === "late" ? '<span class="badge orange">Late check-in available</span>' : checkoutOpen ? '<span class="badge blue">Checkout available</span>' : eventStatusBadge(status);
         const description = event.description || event.notes || `Attendance event for ${event.audience}.`;
-        const actionNotice = !attended && checkoutOpen ? '<p class="event-card-notice">Check-in remains available as Late until checkout closes. You may also check out without checking in; that records partial attendance.</p>' : checkInAvailable && checkInResult.arrivalStatus === "late" ? `<p class="event-card-notice">Check-in is late after ${escapeHtml(formatEventTime(event.checkInCutoff || event.timeOut))}. It remains available until checkout closes.</p>` : "";
+        const actionNotice = event.checkoutOnlyReopened ? '<p class="event-card-notice">Checkout reopened. Only students with an existing check-in can check out; new attendance cannot be recorded.</p>' : !attended && checkoutOpen ? '<p class="event-card-notice">Check-in remains available as Late until checkout closes. You may also check out without checking in; that records partial attendance.</p>' : checkInAvailable && checkInResult.arrivalStatus === "late" ? `<p class="event-card-notice">Check-in is late after ${escapeHtml(formatEventTime(event.checkInCutoff || event.timeOut))}. It remains available until checkout closes.</p>` : "";
         let actionButtons = completed
           ? '<button class="outline-button attendance-action-button" type="button" disabled>✓ Attendance completed</button>'
           : attended
             ? `<button class="${checkoutOpen ? "primary-button" : "outline-button"} attendance-action-button" type="button" data-check-out-event="${escapeHtml(event.id)}" ${checkoutOpen ? "" : "disabled"}>${checkoutOpen ? "Check out" : "✓ Checked in"}</button>`
             : `${checkInAvailable ? `<button class="primary-button attendance-action-button" type="button" data-attend-event="${escapeHtml(event.id)}">${checkInResult.arrivalStatus === "late" ? "Check in late" : "Check in"}</button>` : ""}${checkoutOpen ? `<button class="outline-button attendance-action-button" type="button" data-check-out-event="${escapeHtml(event.id)}">Check out</button>` : ""}${!checkInAvailable && !checkoutOpen ? `<button class="outline-button attendance-action-button" type="button" disabled>${status === "closed" ? "Attendance unavailable" : "Not open yet"}</button>` : ""}`;
         if (!eligible && !attended) actionButtons = `<button class="outline-button attendance-action-button" type="button" disabled>View only - attendance for ${escapeHtml(EventAudiencePolicy.label(event))}</button>`;
-        return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(event.name)}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div>${dashboard.schedulePresenter.render(event, dashboard.events)}<p class="event-card-notice">Participants: ${escapeHtml(EventAudiencePolicy.label(event))}</p>${actionNotice}${eligible && event.hasSurvey && !event.surveyArchived ? `<div class="survey-student-tools"><button class="outline-button" type="button" data-survey-event="${escapeHtml(event.id)}">Open / resume survey</button></div>` : ""}<div class="event-card-actions">${!eligible && !attended ? '<span class="badge blue">View only</span>' : attendanceBadge}<div class="event-card-attendance-actions">${actionButtons}</div></div></div></article>`;
+        if (event.checkoutOnlyReopened && !completed && !checkoutOpen && eligible) actionButtons = '<button class="outline-button attendance-action-button" type="button" disabled>Reopened checkout requires a saved check-in</button>';
+        if (!view.current && view.upcoming) actionButtons = `<button class="outline-button attendance-action-button" type="button" disabled>${AttendanceViews.label(view.upcoming)} not open yet — opens at ${escapeHtml(formatEventTime(view.upcoming.timeIn))}</button>`;
+        return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(AttendanceViews.title(event))}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div>${dashboard.schedulePresenter.render(event, dashboard.events)}<p class="event-card-notice">Participants: ${escapeHtml(EventAudiencePolicy.label(event))}</p>${actionNotice}${eligible && event.hasSurvey && !event.surveyArchived ? `<div class="survey-student-tools"><button class="outline-button" type="button" data-survey-event="${escapeHtml(event.id)}">Open / resume survey</button></div>` : ""}<div class="event-card-actions">${!eligible && !attended ? '<span class="badge blue">View only</span>' : attendanceBadge}<div class="event-card-attendance-actions">${actionButtons}</div></div></div></article>`;
       }).join(""));
-      if (dashboard.view === 'dashboard') dashboard.updateMarkup(timeline, `<div class="timeline">${activeEvents.slice(0, 4).map(event => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${attendanceByEventId.has(event.id) ? '<span class="badge green">Attended</span>' : eventStatusBadge(getEventStatus(event))}</div>`).join("")}</div>`);
+      if (dashboard.view === 'dashboard') dashboard.updateMarkup(timeline, `<div class="timeline">${activeEvents.slice(0, 4).map(event => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(AttendanceViews.title(event))}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${attendanceByEventId.has(event.id) ? '<span class="badge green">Attended</span>' : eventStatusBadge(getEventStatus(event))}</div>`).join("")}</div>`);
     }
     if (dashboard.view === 'events') dashboard.attendanceController.syncLoadingButtons();
     dashboard.renderAttendanceSummary();
@@ -513,7 +518,7 @@ export class StudentDashboard {
       absences,
       presentDays
     } = result;
-    const closedEvents = dashboard.events.filter(event => isEventFinished(event) && (attendedIds.has(event.id) || dashboard.summaryService.eligibility({
+    const closedEvents = dashboard.events.filter(event => AttendanceViews.state(AttendanceViews.related(event, dashboard.events)).closed && (attendedIds.has(event.id) || dashboard.summaryService.eligibility({
       ...dashboard.studentProfile,
       uid: currentUser.uid
     }, event) !== 'excluded'));

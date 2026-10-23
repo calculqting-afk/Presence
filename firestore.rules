@@ -127,18 +127,19 @@ service cloud.firestore {
           : event.audience == "Section 4A" ? ["4A"] : ["4B"]);
     }
     function validSectionTimes(times) {
-      let a = times.get("1A", request.time);
-      let b = times.get("1B", request.time);
-      let c = times.get("2A", request.time);
-      let d = times.get("2B", request.time);
-      let e = times.get("3A", request.time);
-      let f = times.get("3B", request.time);
-      let g = times.get("4A", request.time);
-      let h = times.get("4B", request.time);
-      return a is timestamp && a <= request.time && b is timestamp && b <= request.time
-        && c is timestamp && c <= request.time && d is timestamp && d <= request.time
-        && e is timestamp && e <= request.time && f is timestamp && f <= request.time
-        && g is timestamp && g <= request.time && h is timestamp && h <= request.time;
+      let current = request.time;
+      let a = times.get("1A", current);
+      let b = times.get("1B", current);
+      let c = times.get("2A", current);
+      let d = times.get("2B", current);
+      let e = times.get("3A", current);
+      let f = times.get("3B", current);
+      let g = times.get("4A", current);
+      let h = times.get("4B", current);
+      return a is timestamp && a <= current && b is timestamp && b <= current
+        && c is timestamp && c <= current && d is timestamp && d <= current
+        && e is timestamp && e <= current && f is timestamp && f <= current
+        && g is timestamp && g <= current && h is timestamp && h <= current;
     }
     function validEventAudience(data) {
       let sections = eventSections(data);
@@ -157,18 +158,19 @@ service cloud.firestore {
     }
     function validRosterUpdate(data, before) {
       return !data.diff(before).affectedKeys().hasAny(["audience", "audienceSections", "sectionAssignedAt", "rosterVersion", "attendanceRoster", "rosterCapturedAt"])
-        || (("audienceSections" in data)
+        || (!('checkoutOnlyReopened' in before) && (("audienceSections" in data)
           ? (before.checkOutClosesAt > request.time && data.rosterCapturedAt == request.time
             && data.rosterVersion == (("rosterVersion" in before) ? before.rosterVersion + 1 : 1))
-          : (before.openAt > request.time && data.keys().hasAll(["attendanceRoster", "rosterCapturedAt"]) && data.rosterCapturedAt == request.time));
+          : (before.openAt > request.time && data.keys().hasAll(["attendanceRoster", "rosterCapturedAt"]) && data.rosterCapturedAt == request.time)));
     }
     function validEvent(data) {
       return data.keys().hasOnly([
           "name", "type", "date", "location", "timeIn", "checkInCutoff", "checkInClose", "timeOut", "checkOutCutoff",
           "audience", "description", "notes", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt",
-          "lateAfterAt", "checkOutClosesAt", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt", "hasSurvey", "surveyArchived", "audienceSections", "sectionAssignedAt", "rosterVersion", "sessionPeriod", "sessionGroupId", "sessionBaseName"
+          "lateAfterAt", "checkOutClosesAt", "checkoutOnlyReopened", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt", "hasSurvey", "surveyArchived", "audienceSections", "sectionAssignedAt", "rosterVersion", "sessionPeriod", "sessionGroupId", "sessionBaseName"
         ])
-        && data.keys().hasAll(["name", "type", "date", "location", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "audience", "description", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt"])
+        // Every required field is read and type-checked below. Missing fields
+        // therefore deny the write without a duplicate required-key scan.
         && shortText(data.name, 160) && shortText(data.type, 60) && shortText(data.date, 10)
         && shortText(data.location, 240) && shortText(data.timeIn, 5) && shortText(data.checkInCutoff, 5) && optionalShortText(data, "checkInClose", 5)
         && shortText(data.timeOut, 5) && shortText(data.checkOutCutoff, 5)
@@ -182,22 +184,35 @@ service cloud.firestore {
         && (!("attendanceRoster" in data) || (data.attendanceRoster is map
           && data.attendanceRoster.keys().size() <= 5000 && data.rosterCapturedAt is timestamp))
         && data.openAt is timestamp && (!('lateAfterAt' in data) || data.lateAfterAt is timestamp) && data.checkInClosesAt is timestamp && data.closeAt is timestamp && data.checkOutClosesAt is timestamp
+        && (!('checkoutOnlyReopened' in data) || data.checkoutOnlyReopened == true)
         && (!('createdAt' in data) || data.createdAt is timestamp)
         && optionalShortText(data, "createdBy", 128)
         && (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
+    function validCheckoutExtension(data, before) {
+      return data.checkoutOnlyReopened == true
+        && !data.diff(before).affectedKeys().hasAny([
+          "date", "timeIn", "checkInCutoff", "timeOut", "openAt", "checkInClosesAt", "closeAt", "lateAfterAt", "checkInClose"])
+        && (data.checkOutClosesAt > before.checkOutClosesAt && data.checkOutClosesAt > request.time
+          || ('checkoutOnlyReopened' in before && data.checkOutClosesAt == before.checkOutClosesAt && data.checkOutCutoff == before.checkOutCutoff));
+    }
     function validScheduleEdit(data, before) {
       return (before.openAt > request.time || data.date == before.date)
-        && (before.checkOutClosesAt > request.time || !data.diff(before).affectedKeys().hasAny([
-          "date", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt", "lateAfterAt", "checkInClose"]));
+        && ('checkoutOnlyReopened' in before ? validCheckoutExtension(data, before)
+          : before.checkOutClosesAt > request.time ? !('checkoutOnlyReopened' in data)
+          : ('checkoutOnlyReopened' in data ? validCheckoutExtension(data, before)
+            : !data.diff(before).affectedKeys().hasAny([
+              "date", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt", "lateAfterAt", "checkInClose"])));
     }
     function validSession(data, eventId) {
-      let existing = exists(/databases/$(database)/documents/events/$(eventId));
-      let before = existing ? get(/databases/$(database)/documents/events/$(eventId)).data : data;
+      // This helper is used only by the event write rule; resource already
+      // contains this document, so avoid duplicate exists/get expressions.
+      let existing = request.method == 'update';
+      let before = existing ? resource.data : data;
       let fields = ["sessionPeriod", "sessionGroupId", "sessionBaseName"];
       let hasSession = data.keys().hasAny(fields);
-      return (!existing || (validScheduleEdit(data, before)
+      return ((!existing && !('checkoutOnlyReopened' in data)) || (existing && validScheduleEdit(data, before)
           && (!before.keys().hasAny(fields) || (hasSession && data.sessionGroupId == before.sessionGroupId
             && (data.sessionPeriod == before.sessionPeriod || (before.openAt > request.time && before.sessionGroupId == eventId))))))
         && (!hasSession || (data.keys().hasAll(fields)
@@ -397,6 +412,7 @@ service cloud.firestore {
       let event = get(/databases/$(database)/documents/events/$(data.eventId)).data;
       let student = get(/databases/$(database)/documents/students/$(request.auth.uid)).data;
       return isStudent()
+        && !('checkoutOnlyReopened' in event)
         && attendanceId == request.auth.uid + "_" + data.eventId
         && exists(/databases/$(database)/documents/events/$(data.eventId))
         && exists(/databases/$(database)/documents/faceRegistrations/$(request.auth.uid))
@@ -440,6 +456,7 @@ service cloud.firestore {
       let event = get(/databases/$(database)/documents/events/$(data.eventId)).data;
       let student = get(/databases/$(database)/documents/students/$(request.auth.uid)).data;
       return isStudent()
+        && !('checkoutOnlyReopened' in event)
         && attendanceId == request.auth.uid + "_" + data.eventId
         && exists(/databases/$(database)/documents/events/$(data.eventId))
         && exists(/databases/$(database)/documents/faceRegistrations/$(request.auth.uid))
@@ -883,7 +900,11 @@ service cloud.firestore {
       // exact client-side distance. Listing all attendance areas stays denied.
       allow get: if canManageAttendance() || studentCanReadEventGeofence(eventId);
       allow list: if canManageAttendance();
-      allow create, update: if canManageAttendance() && validGeofence(request.resource.data);
+      allow create: if canManageAttendance() && validGeofence(request.resource.data);
+      // Event-group saves also send unchanged areas. A no-op needs no repeated
+      // 10-vertex validation; any actual area change still validates fully.
+      allow update: if canManageAttendance()
+        && (request.resource.data == resource.data || validGeofence(request.resource.data));
       allow delete: if isSuperAdmin();
     }
 

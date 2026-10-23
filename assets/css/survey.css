@@ -17,6 +17,8 @@
 [data-survey-message]:not([hidden]) { padding:12px; border:1px solid var(--line); border-radius:10px; font-size:.85rem; }
 .survey-event-option { display:flex; flex-direction:column; gap:6px; width:100%; text-align:left; padding:14px; margin-top:10px; border:1px solid var(--line); border-radius:12px; background:var(--surface, var(--white)); color:var(--ink); cursor:pointer; }
 .survey-event-option span { color:var(--muted); font-size:.8rem; }
+.survey-session-picker { display:grid; gap:8px; max-width:420px; margin:14px 0 8px; color:var(--ink); font-size:.8rem; font-weight:600; }
+.survey-session-picker select { width:100%; min-width:0; }
 .survey-event-option[aria-pressed="true"] { border-color:#2672ee; box-shadow:inset 3px 0 #2672ee; }
 .survey-workspace p { color:var(--muted); line-height:1.6; margin:12px 0; }
 .survey-workspace label { display:flex; flex-direction:column; gap:8px; color:var(--ink); font-size:.85rem; margin:12px 0; }
