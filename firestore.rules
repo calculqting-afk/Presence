@@ -790,6 +790,81 @@ service cloud.firestore {
       }
     }
 
+    function validCorrectionRequestCreate(requestId, data) {
+      let event = get(/databases/$(database)/documents/events/$(data.eventId)).data;
+      let student = get(/databases/$(database)/documents/students/$(request.auth.uid)).data;
+      let history = getAfter(/databases/$(database)/documents/attendanceCorrectionRequests/$(requestId)/history/submitted).data;
+      return isStudent() && student.get("role", "student") == "student"
+        && data.keys().hasOnly(["studentUid", "eventId", "kind", "reason", "status", "submittedAt"])
+        && data.studentUid == request.auth.uid && requestId == data.studentUid + "_" + data.eventId
+        && shortText(data.eventId, 128) && data.eventId.matches('^[A-Za-z0-9_-]+$')
+        && data.kind in ["missed-check-in", "missed-checkout", "incorrect-attendance"]
+        && shortText(data.reason, 1000) && data.reason.size() >= 5
+        && data.status == "pending" && data.submittedAt == request.time
+        && request.time > event.checkOutClosesAt && eligibleForAttendance(event, student, data.studentUid)
+        && history == {"action": "submitted", "by": data.studentUid, "at": request.time, "reason": data.reason, "correctionId": ""};
+    }
+    function correctionReviewerName() {
+      return isSuperAdmin() ? superAdminReviewerName() : assignedReviewerName();
+    }
+    function superAdminReviewerName() {
+      let path = /databases/$(database)/documents/adminProfiles/$(request.auth.uid);
+      let name = exists(path) ? get(path).data.get("displayName", "") : "";
+      return name is string && name.size() > 0 && name.size() <= 256 ? name : "Super Admin";
+    }
+    function assignedReviewerName() {
+      let profile = get(/databases/$(database)/documents/students/$(request.auth.uid)).data;
+      let first = profile.get("firstName", "");
+      let middle = profile.get("middleName", "");
+      let last = profile.get("lastName", "");
+      let name = first + (middle.size() > 0 ? (first.size() > 0 ? " " : "") + middle : "")
+        + (last.size() > 0 ? (first.size() > 0 || middle.size() > 0 ? " " : "") + last : "");
+      return name.size() > 0 && name.size() <= 256 ? name : "Administrator";
+    }
+    function validCorrectionRequestDecision(requestId, data, before) {
+      let history = getAfter(/databases/$(database)/documents/attendanceCorrectionRequests/$(requestId)/history/decision).data;
+      return canManageAttendance() && before.status == "pending"
+        && data.keys().hasOnly(["studentUid", "eventId", "kind", "reason", "status", "submittedAt", "reviewedBy", "reviewedByName", "reviewedAt", "decisionReason", "correctionId"])
+        && data.diff(before).affectedKeys().hasOnly(["status", "reviewedBy", "reviewedByName", "reviewedAt", "decisionReason", "correctionId"])
+        && data.reviewedBy == request.auth.uid && data.reviewedAt == request.time
+        && data.reviewedByName == correctionReviewerName()
+        && shortText(data.decisionReason, 1000) && data.decisionReason.size() >= 5
+        && history == {"action": data.status, "by": request.auth.uid, "byName": data.reviewedByName, "at": request.time, "reason": data.decisionReason, "correctionId": data.correctionId}
+        && ((data.status == "declined" && data.correctionId == "")
+          || (data.status == "approved" && approvedRequestCorrection(data)));
+    }
+    function approvedRequestCorrection(data) {
+      let attendanceId = data.studentUid + "_" + data.eventId;
+      let attendance = getAfter(/databases/$(database)/documents/attendance/$(attendanceId)).data;
+      let audit = getAfter(/databases/$(database)/documents/attendance/$(attendanceId)/corrections/$(data.correctionId)).data;
+      return shortText(data.correctionId, 128) && data.correctionId.size() > 0
+        && attendance.studentUid == data.studentUid && attendance.eventId == data.eventId
+        && attendance.correctedAt == request.time && attendance.correctedBy == request.auth.uid
+        && attendance.correctionId == data.correctionId && attendance.correctionReason == data.decisionReason
+        && audit.after == attendance && audit.by == request.auth.uid && audit.at == request.time;
+    }
+    match /attendanceCorrectionRequests/{requestId} {
+      allow get: if canManageAttendance() || (isStudent() && (
+        exists(/databases/$(database)/documents/attendanceCorrectionRequests/$(requestId))
+          ? resource.data.studentUid == request.auth.uid
+          : (request.auth.uid.matches('^[A-Za-z0-9_-]+$') && requestId.matches('^' + request.auth.uid + '_[A-Za-z0-9_-]+$'))));
+      allow list: if canManageAttendance() || (isStudent() && resource.data.studentUid == request.auth.uid);
+      allow create: if validCorrectionRequestCreate(requestId, request.resource.data);
+      allow update: if validCorrectionRequestDecision(requestId, request.resource.data, resource.data);
+      allow delete: if false;
+      match /history/{entryId} {
+        allow read: if canManageAttendance() || (isStudent() && get(/databases/$(database)/documents/attendanceCorrectionRequests/$(requestId)).data.studentUid == request.auth.uid);
+        allow create: if (entryId == "submitted"
+            && !exists(/databases/$(database)/documents/attendanceCorrectionRequests/$(requestId))
+            && getAfter(/databases/$(database)/documents/attendanceCorrectionRequests/$(requestId)).data.studentUid == request.auth.uid
+            && validCorrectionRequestCreate(requestId, getAfter(/databases/$(database)/documents/attendanceCorrectionRequests/$(requestId)).data))
+          || (entryId == "decision" && canManageAttendance()
+            && validCorrectionRequestDecision(requestId, getAfter(/databases/$(database)/documents/attendanceCorrectionRequests/$(requestId)).data,
+              get(/databases/$(database)/documents/attendanceCorrectionRequests/$(requestId)).data));
+        allow update, delete: if false;
+      }
+    }
+
     match /attendance/{attendanceId} {
       // A student's deterministic document may not exist before the first check-in.
       // Only missing documents in their own namespace can use this exception.

@@ -2,6 +2,14 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
+test('dark theme keeps animated attendance logos transparent without changing regular toast marks',()=>{
+  const root=path.resolve(__dirname,'..');
+  const theme=fs.readFileSync(path.join(root,'assets/css/dashboard-theme.css'),'utf8');
+  const css=fs.readFileSync(path.join(root,'assets/css/dashboard.css'),'utf8');
+  assert.match(theme, /:root\[data-theme="dark"\] \.toast-mark:not\(\.is-attendance-success\) \{[^}]*background: #168653;/);
+  assert.doesNotMatch(theme, /:root\[data-theme="dark"\] \.toast-mark\s*\{/);
+  assert.match(css, /\.toast-mark\.is-attendance-success \{[^}]*background: transparent;/);
+});
 test('attendance success toast opts into smooth animation, supports reduced motion and clears hidden animations',async()=>{
   const {DashboardToastController}=await import('../assets/js/controllers/DashboardToastController.js');
   const classes=new Set(),markClasses=new Set();let html='',text='✓';

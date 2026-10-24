@@ -24,6 +24,7 @@ const pageCopy = {
     geofence: ["Geofence Locations", "Set attendance areas for each event"],
     surveys: ["Event Surveys", "Configure questions, share QR links and review responses"],
     "account-approvals": ["Account Approvals", "Review pending student registration requests"],
+    "correction-requests": ["Correction Requests", "Review student attendance correction requests"],
     profile: ["Profile", "Update your administrator information"]
   }
 };

@@ -1,5 +1,6 @@
 import { hasPermission, requirePermission } from '../core/permissions.js?v=20261011-optimized';
 import { runTransaction, doc, collection, Timestamp, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
+import { assertPendingRequest, loadReviewerName, writeRequestDecision } from './CorrectionRequestService.js';
 
 export function correctionValues({ checkIn, checkOut, arrival, reason }) {
   const start = new Date(checkIn), end = checkOut ? new Date(checkOut) : null;
@@ -10,6 +11,12 @@ export function correctionValues({ checkIn, checkOut, arrival, reason }) {
   if (!['present', 'late'].includes(arrival)) throw new Error('Select Present or Late.');
   if (explanation.length < 5 || explanation.length > 1000) throw new Error('Provide a reason between 5 and 1000 characters.');
   return { start, end, arrival, reason: explanation };
+}
+
+export function renderCorrectionRequestContext(context, record) {
+  if (!context) return;
+  context.hidden = !record?.correctionRequestId;
+  context.querySelector('[data-correction-request-reason]').textContent = context.hidden ? '' : String(record.correctionRequestReason || 'No reason provided.');
 }
 
 export class AttendanceCorrectionController {
@@ -37,6 +44,9 @@ export class AttendanceCorrectionController {
   open(record) {
     if (!hasPermission(this.role, 'correctAttendance')) return;
     this.record = record;
+    this.requestId = record?.correctionRequestId || null;
+    const context = document.querySelector('#correctionRequestContext');
+    renderCorrectionRequestContext(context, record);
     const student = document.querySelector('#correctionStudent'), event = document.querySelector('#correctionEvent');
     student.innerHTML = this.getStudents().map(item => `<option value="${this.escapeHtml(item.uid)}">${this.escapeHtml(item.accountId + ' · ' + item.firstName + ' ' + item.lastName)}</option>`).join('');
     event.innerHTML = this.getEvents().map(item => `<option value="${this.escapeHtml(item.id)}">${this.escapeHtml(item.name + ' · ' + item.date)}</option>`).join('');
@@ -54,7 +64,7 @@ export class AttendanceCorrectionController {
     document.querySelector('#correctionReason').focus();
   }
 
-  async save({ studentUid, eventId, checkIn, checkOut, arrival, reason }) {
+  async save({ studentUid, eventId, checkIn, checkOut, arrival, reason, requestId = null }) {
     requirePermission(this.role, 'correctAttendance');
     const values = correctionValues({ checkIn, checkOut, arrival, reason });
     const student = this.getStudents().find(item => item.uid === studentUid);
@@ -69,6 +79,13 @@ export class AttendanceCorrectionController {
     await this.transaction(this.db, async transaction => {
       const snapshot = await transaction.get(reference);
       const before = snapshot.exists() ? snapshot.data() : null;
+      let request, reviewerName;
+      if (requestId) {
+        const pending = await transaction.get(doc(this.db, 'attendanceCorrectionRequests', requestId));
+        request = pending.exists() ? pending.data() : null;
+        assertPendingRequest(request, studentUid, eventId);
+        reviewerName = await loadReviewerName(transaction, this.db, this.user.uid, this.role);
+      }
       const after = {
         ...(before || {}), studentUid, studentId: student.accountId, eventId,
         eventName: event.name, eventType: event.type, eventDescription: event.description || '',
@@ -83,6 +100,9 @@ export class AttendanceCorrectionController {
       else { delete after.checkedOutAt; delete after.checkOutLocation; }
       transaction.set(reference, after);
       transaction.set(audit, { before, after, by: this.user.uid, at: serverTimestamp(), reason: values.reason });
+      if (requestId) writeRequestDecision(transaction, this.db, requestId, request, {
+        userUid: this.user.uid, reviewerName, status: 'approved', reason: values.reason, correctionId: audit.id
+      });
     });
   }
 
@@ -92,7 +112,7 @@ export class AttendanceCorrectionController {
     try {
       await this.save({ studentUid: document.querySelector('#correctionStudent').value, eventId: document.querySelector('#correctionEvent').value,
         checkIn: document.querySelector('#correctionCheckIn').value, checkOut: document.querySelector('#correctionCheckOut').value,
-        arrival: document.querySelector('#correctionArrival').value, reason: document.querySelector('#correctionReason').value });
+        arrival: document.querySelector('#correctionArrival').value, reason: document.querySelector('#correctionReason').value, requestId: this.requestId });
       this.modal.hidden = true;
       this.notify('Attendance corrected', 'The reason, administrator and previous record were saved together.');
     } catch (error) { this.notify('Correction not saved', error.message); }

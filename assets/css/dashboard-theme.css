@@ -42,7 +42,7 @@
 :root[data-theme="dark"] .welcome-card .primary-button { color: #0d4fbb; background: white; }
 :root[data-theme="dark"] .welcome-card { background: linear-gradient(110deg, #0d3a87, #1553aa); }
 :root[data-theme="dark"] .welcome-card .eyebrow { color: #dbeaff !important; }
-:root[data-theme="dark"] .toast-mark { color: white; background: #168653; }
+:root[data-theme="dark"] .toast-mark:not(.is-attendance-success) { color: white; background: #168653; }
 :root[data-theme="dark"] .progress-ring::before { background: var(--surface); }
 
 :root[data-theme="dark"] :is(.field input, .field select, .field textarea,

@@ -2,6 +2,7 @@ import { ControllerScope } from '../core/ControllerScope.js';
 import { CoursePolicy } from '../core/CoursePolicy.js';
 import { EventAudiencePolicy } from '../controllers/EventAudiencePolicy.js';
 import { StudentPasswordPolicy } from '../core/StudentPasswordPolicy.js';
+import { StudentHistoryPresenter } from '../controllers/StudentHistoryPresenter.js';
 import { SurveyConfirmationController } from '../controllers/SurveyConfirmationController.js';
 import { StudentIdentityController } from '../controllers/StudentIdentityController.js';
 import { StudentAttendanceController } from '../controllers/StudentAttendanceController.js?v=20261011-optimized';
@@ -92,6 +93,15 @@ export class StudentDashboard {
     this.wireFaceRegistrationActions();
     this.applyProfile(currentUserProfile);
     this.startSubscriptions();
+    void this.initializeCorrectionRequests().catch(() => {});
+  }
+  async initializeCorrectionRequests() {
+    const { CorrectionRequestsController } = await import('../controllers/CorrectionRequestsController.js');
+    if (!this.scope.initialized || this.correctionRequests) return;
+    this.correctionRequests = new CorrectionRequestsController({ root: this.document.querySelector('#studentCorrectionRequests'),
+      db, user: currentUser, getEvents: () => this.events, getStudent: () => ({ ...this.studentProfile, uid: currentUser.uid }), escapeHtml, notify: showDashboardToast });
+    this.correctionRequests.initialize();
+    this.scope.addCleanup(() => this.correctionRequests.dispose());
   }
   initializeState() {
     const dashboard = this;
@@ -281,6 +291,7 @@ export class StudentDashboard {
         ...item.data()
       }));
       dashboard.eventsById = new Map(dashboard.events.map(event => [event.id, event]));
+      dashboard.correctionRequests?.render();
       dashboard.metrics?.finish('events-first-data');
       dashboard.scheduleEventRender();
       dashboard.renderMyAttendances();
@@ -320,6 +331,7 @@ export class StudentDashboard {
   applyProfile(profile) {
     if (!this.scope.initialized || !profile || !Object.keys(profile).length) return;
     this.studentProfile = CoursePolicy.profile(profile);
+    this.correctionRequests?.refreshEvents();
     this.identity.save(currentUser.uid, profile);
     this.renderProfile();
     this.scheduleEventRender();
@@ -540,17 +552,9 @@ export class StudentDashboard {
       status: attendedIds.has(event.id) ? reviewIds.has(event.id) ? 'Needs review' : 'Attended' : absenceIds.has(event.id) ? 'Absent' : 'Eligibility unverified'
     }));
     const history = dashboard.document.querySelector("#studentEventHistory");
-    if (!records.length) {
-      history.innerHTML = '<div class="empty-state">No finished event history yet.</div>';
-      return;
-    }
-    history.innerHTML = records.reverse().map(({
-      event,
-      status
-    }) => {
-      const description = event.description || event.notes || "No description provided.";
-      return `<article class="history-event-card"><div class="history-card-top"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="badge ${status === "Attended" ? "green" : "orange"}">${status}</span></div><h3>${escapeHtml(event.name)}</h3><p>${escapeHtml(description)}</p><div class="event-detail-boxes"><div><span>Date</span><strong>${escapeHtml(formatEventDate(event.date))}</strong></div><div><span>Time</span><strong>${escapeHtml(formatTimeWindow(event))}</strong></div><div><span>Location</span><strong>${escapeHtml(event.location)}</strong></div><div><span>Audience</span><strong>${escapeHtml(event.audience || "All students")}</strong></div></div><div class="history-card-actions"><button class="small-button danger" type="button" data-dismiss-history="${escapeHtml(event.id)}">Remove from history</button></div></article>`;
-    }).join("");
+    history.innerHTML = StudentHistoryPresenter.render(records, {
+      escapeHtml, formatDate: formatEventDate, formatWindow: formatTimeWindow
+    });
   }
   renderMyAttendances() {
     const dashboard = this;

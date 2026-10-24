@@ -16,9 +16,9 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261024-floating-mascot">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261024-approval-badge">
   <link rel="stylesheet" href="../assets/css/theme-toggle.css?v=20261010-shared-theme">
-  <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261010-shared-theme">
+  <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261024-transparent-toast">
   <link rel="stylesheet" href="../assets/css/button-loading.css?v=20261010-auth-progress">
   <link rel="stylesheet" href="../assets/css/survey.css?v=20261011-survey-archive">
   <link rel="stylesheet" href="../assets/css/attendance-report.css?v=20261017">
@@ -26,7 +26,7 @@
 </head>
 <body data-dashboard="admin">
   <div class="app-shell">
-    <aside class="sidebar" style="--nav-count: 13">
+    <aside class="sidebar" style="--nav-count: 14">
       <a class="brand" href="../index.html" data-dashboard-home><span class="brand-mark"><span></span></span><span>Presence</span></a>
       <p class="nav-label" data-role-console>Admin console</p>
       <nav class="nav-list" aria-label="Admin navigation">
@@ -40,7 +40,8 @@
         <button class="nav-button" data-view="assigned-fines" type="button"><span class="nav-icon">!</span><span>Assigned Fines</span></button>
         <button class="nav-button" data-view="geofence" type="button"><span class="nav-icon">⌖</span><span>Geofence Locations</span></button>
         <button class="nav-button" data-view="surveys" type="button"><span class="nav-icon">▤</span><span>Event Surveys</span></button>
-        <button class="nav-button" data-view="account-approvals" type="button"><span class="nav-icon">✓</span><span>Account Approvals</span></button>
+        <button class="nav-button" data-view="account-approvals" type="button"><span class="nav-icon">✓</span><span>Account Approvals</span><span class="account-approval-nav-count" id="accountApprovalNavCount" aria-hidden="true" hidden></span></button>
+        <button class="nav-button" data-view="correction-requests" type="button"><span class="nav-icon">✎</span><span>Correction Requests</span><span class="account-approval-nav-count" id="correctionRequestNavCount" aria-hidden="true" hidden></span></button>
         <button class="nav-button" data-view="profile" type="button"><span class="nav-icon">○</span><span>Profile</span></button>
         <button class="nav-button logout-button" data-logout type="button"><span class="nav-icon">↙</span><span>Logout</span></button>
       </nav>
@@ -219,6 +220,10 @@
           <article class="panel"><div class="panel-head"><div><h3>Pending registrations</h3><p>Approval activates the account. Declined students can correct their details and resubmit.</p></div></div><div class="approval-list" id="accountApprovalList"><div class="empty-state">Loading registration requests…</div></div></article>
         </section>
 
+        <section class="view-section" data-section="correction-requests" hidden>
+          <div class="section-head"><div><p class="eyebrow">Attendance review</p><h2>Correction Requests</h2><p>Review student reasons and save verified, audited decisions.</p></div></div>
+          <article class="panel correction-requests-panel" id="adminCorrectionRequests"><p>Loading correction requests…</p></article>
+        </section>
         <section class="view-section" data-section="profile" hidden>
           <div class="section-head"><div><p class="eyebrow">Administrator account</p><h2>Profile</h2><p>Update your information and see changes immediately.</p></div><span class="badge green">Active</span></div>
           <article class="panel">
@@ -354,10 +359,15 @@
       <form id="attendanceCorrectionForm"><div class="form-grid">
         <div class="field"><label for="correctionStudent">Student</label><select id="correctionStudent" required></select></div>
         <div class="field"><label for="correctionEvent">Event</label><select id="correctionEvent" required></select></div>
+        <div class="correction-request-context" id="correctionRequestContext" hidden>
+          <strong>Student request</strong>
+          <p class="correction-request-reason" data-correction-request-reason></p>
+          <small>Verify the attendance times and enter your decision reason below. Review existing fines separately.</small>
+        </div>
         <div class="field"><label for="correctionCheckIn">Check-in time</label><input type="datetime-local" id="correctionCheckIn" required></div>
         <div class="field"><label for="correctionCheckOut">Check-out time (optional)</label><input type="datetime-local" id="correctionCheckOut"></div>
         <div class="field"><label for="correctionArrival">Arrival</label><select id="correctionArrival"><option value="present">Present</option><option value="late">Late</option></select></div>
-        <div class="field full"><label for="correctionReason">Required reason</label><textarea id="correctionReason" minlength="5" maxlength="1000" required></textarea></div>
+        <div class="field full"><label for="correctionReason">Required reason / admin decision</label><textarea id="correctionReason" minlength="5" maxlength="1000" required></textarea></div>
       </div><div class="form-actions"><button type="button" class="outline-button" data-close-correction>Cancel</button><button type="submit" class="primary-button" id="saveAttendanceCorrection">Save audited correction</button></div></form>
     </section>
   </div>

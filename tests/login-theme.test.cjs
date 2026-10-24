@@ -79,7 +79,7 @@ test('login and both dashboards load one shared controller before CSS with one a
     assert.equal([...html.matchAll(/id="themeToggle"/g)].length, 1, file);
     assert.ok(html.includes('aria-label="Switch to dark mode" aria-pressed="false"'), file);
     assert.ok(html.includes('theme-toggle.css?v=20261010-shared-theme'), file);
-    if (file.includes('dashboard')) assert.ok(html.includes('dashboard-theme.css?v=20261010-shared-theme'), file);
+    if (file.includes('dashboard')) assert.ok(html.includes('dashboard-theme.css?v=20261024-transparent-toast'), file);
     for (const script of scriptPaths) assert.ok(fs.existsSync(path.resolve(path.dirname(filename), script.split('?')[0])), script);
   }
 });

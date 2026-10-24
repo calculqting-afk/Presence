@@ -26,6 +26,7 @@ import { EventSchedulePresenter } from '../controllers/EventSchedulePresenter.js
 import { AttendanceViews } from '../controllers/AttendanceViews.js';
 import { StudentActionsPresenter } from '../controllers/StudentActionsPresenter.js';
 import { StudentSectionFilter } from '../controllers/StudentSectionFilter.js';
+import { AbsenceCardsPresenter } from '../controllers/AbsenceCardsPresenter.js';
 export class AdminDashboard {
   constructor({
     document = globalThis.document,
@@ -164,6 +165,9 @@ export class AdminDashboard {
     this.wireStudentAccountActions();
     this.wireDirectoryFilters();
     this.startSubscriptions();
+    // The approvals listener also owns the navigation badge on every admin view.
+    void this.loadAccountApprovals().catch(() => {});
+    void this.loadCorrectionRequests().catch(() => {});
     this.dailyClock = new DailyAttendanceClock({ window: this.window, document: this.document, onDayChange: () => {
       this.renderAdminAttendance();
       this.renderAttendanceLine();
@@ -601,14 +605,16 @@ export class AdminDashboard {
       if (activeView === "assign-fine") dashboard.renderFineOptions();
       if (["dashboard", "attendance-line"].includes(activeView)) dashboard.renderAttendanceLine();
       dashboard.scheduleAdminEventStatusRefresh();
+      dashboard.correctionRequests?.render();
     });
-    dashboard.listen('students', ["dashboard", "create", "modify-events", "past-events", "modify-students", "assign-fine", "attendance-line", "profile"], collection(db, "students"), snapshot => {
+    dashboard.listen('students', ["dashboard", "create", "modify-events", "past-events", "modify-students", "assign-fine", "attendance-line", "correction-requests", "profile"], collection(db, "students"), snapshot => {
       dashboard.studentsLoaded = !snapshot.metadata?.fromCache && !snapshot.metadata?.hasPendingWrites;
       dashboard.students = snapshot.docs.map(item => CoursePolicy.profile({
         uid: item.id,
         ...item.data()
       }));
       dashboard.scheduleStudentsRender();
+      dashboard.correctionRequests?.render();
       if (activeView === "assign-fine") dashboard.renderFineOptions();
       if (activeView === "dashboard") dashboard.renderAdminAttendance();
       if (["dashboard", "attendance-line"].includes(activeView)) dashboard.renderAttendanceLine();
@@ -690,6 +696,17 @@ export class AdminDashboard {
     const dashboard = this;
     dashboard.subscriptions.setView(event.detail.viewName);
     if (event.detail.viewName === 'account-approvals') void dashboard.loadAccountApprovals();
+    if (event.detail.viewName === 'correction-requests') void dashboard.loadCorrectionRequests().catch(() => {});
+  }
+  async loadCorrectionRequests() {
+    if (!this.can('correctAttendance') || this.correctionRequests) return;
+    const { CorrectionRequestsController } = await import('../controllers/CorrectionRequestsController.js');
+    if (!this.scope.initialized || this.correctionRequests) return;
+    this.correctionRequests = new CorrectionRequestsController({ root: this.document.querySelector('#adminCorrectionRequests'),
+      badge: this.document.querySelector('#correctionRequestNavCount'), db, user: currentUser, role: currentUserRole,
+      getEvents: () => this.events, getStudents: () => this.students, onApprove: record => this.correctionController.open(record), escapeHtml, notify: showDashboardToast });
+    this.correctionRequests.initialize();
+    this.scope.addCleanup(() => this.correctionRequests.dispose());
   }
   async loadAccountApprovals() {
     const dashboard = this;
@@ -1318,10 +1335,12 @@ export class AdminDashboard {
       return;
     }
     const absences = result.absences;
-    const records = absences.length ? absences.map(event => `<article class="community-service-record"><div class="community-service-record-top"><strong>${escapeHtml(event.name || "Attendance event")}</strong><span class="badge orange">Absent</span></div><div class="fine-detail-grid"><div><span>Date</span><strong>${escapeHtml(formatEventDate(event.date))}</strong></div><div><span>Time</span><strong>${escapeHtml(formatTimeWindow(event))}</strong></div><div><span>Location</span><strong>${escapeHtml(event.location || "Not specified")}</strong></div><div><span>Audience</span><strong>${escapeHtml(event.audience || "All students")}</strong></div></div></article>`).join("") : '<div class="community-service-empty">No recorded absences for this student.</div>';
+    const { markup: records, eventCount } = AbsenceCardsPresenter.render(absences, {
+      escapeHtml, formatDate: formatEventDate, formatWindow: formatTimeWindow
+    });
     dashboard.adminAbsenceModalController.open({
       title: `${studentName}'s absences`,
-      description: `${absences.length} confirmed absences · ${result.unverified.length} historical events unverified.`,
+      description: `${absences.length} confirmed session absences across ${eventCount} event${eventCount === 1 ? '' : 's'} · ${result.unverified.length} historical sessions unverified.`,
       markup: `<section class="community-service-section"><div class="community-service-section-heading"><h3>Missed events</h3><p>Confirmed roster participants only. Historical events without eligibility records are unverified. Missed checkout needs review, not an automatic absence.</p></div>${records}</section>`,
       trigger
     });
