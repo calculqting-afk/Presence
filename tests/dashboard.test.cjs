@@ -1459,6 +1459,30 @@ test('history filters use historical sections and pagination discards stale resp
   controller.dispose();
 });
 
+test('Present Today directory combines multiple sections with course filters and clear actions', async () => {
+  const names=fs.readFileSync(path.join(root,'assets/js/dashboard.js'),'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared=Object.fromEntries(names.map(name=>[name,()=> '']));
+  Object.assign(shared,{activeView:'modify-students',escapeHtml:String});
+  const browser=fakeBrowser(),{AdminDashboard}=await isolatedModule('assets/js/admin/AdminDashboard.js',shared,browser);
+  const {StudentSectionFilter}=await isolatedModule('assets/js/controllers/StudentSectionFilter.js');
+  const {DailyAttendanceClock}=await isolatedModule('assets/js/controllers/DailyAttendanceClock.js');
+  const state={document:browser.document,students:['2A','2B','1A','2B'].map((section,index)=>({uid:String(index),section,course:index===1?'BSMB':'BSA',lastName:String(index),accountId:String(index)})),
+    attendance:['0','1','2'].map(studentUid=>({studentUid,eventDate:DailyAttendanceClock.dateKey()})),fines:[],presenceByUid:new Map(),legacyPresenceByUid:new Map(),faceRegistrationsByUid:new Map(),
+    studentPage:1,studentPageSize:10,studentDirectoryMediaQuery:{matches:false},can:()=>false,getStudentPresence:()=>({status:'offline',label:'Offline'}),studentActions:{render:()=>''},renderSelectedStudent(){},renderAdminAttendance(){},resetStudentDirectoryPage(){this.studentPage=1;}};
+  for(const name of ['studentSearch','studentCourseFilter','studentFaceFilter','studentAccountFilter','studentAttendanceFilter','studentFineFilter','studentSort','studentTableBody','studentMobileCards','studentPagination','studentPageInfo','previousStudentPage','nextStudentPage']) state[name]=browser.document.querySelector('#'+name);
+  state.studentSearch.value='';for(const name of ['studentCourseFilter','studentFaceFilter','studentAccountFilter','studentFineFilter'])state[name].value='all';state.studentAttendanceFilter.value='present';state.studentSort.value='name';
+  state.studentSectionPicker=new StudentSectionFilter({root:browser.document.querySelector('#studentSectionFilter'),document:browser.document,escapeHtml:String,onChange(){}});
+  state.studentSectionPicker.selected.add('2A');state.studentSectionPicker.selected.add('2B');
+  AdminDashboard.prototype.renderStudents.call(state);assert.equal(browser.document.querySelector('#studentResultCount').textContent,'2 matching students');
+  state.studentCourseFilter.value='BSMB';AdminDashboard.prototype.renderStudents.call(state);assert.equal(browser.document.querySelector('#studentResultCount').textContent,'1 matching student');
+  state.studentCourseFilter.value='all';state.studentSectionPicker.reset();AdminDashboard.prototype.renderStudents.call(state);assert.equal(browser.document.querySelector('#studentResultCount').textContent,'3 matching students');
+  assert.equal(state.studentAttendanceFilter.value,'present');
+  state.studentSectionPicker.selected.add('2A');state.studentPage=3;AdminDashboard.prototype.openStudentAttendanceDirectory.call(state,'present');
+  assert.equal(state.studentSectionPicker.selected.size,0);assert.equal(state.studentAttendanceFilter.value,'present');assert.equal(state.studentPage,1);
+  AdminDashboard.prototype.handleClearStudentFiltersClick.call(state);assert.equal(state.studentAttendanceFilter.value,'all');
+  AdminDashboard.prototype.renderStudents.call(state);assert.equal(browser.document.querySelector('#studentResultCount').textContent,'4 matching students');
+});
+
 test('attendance history filters late arrivals and redraws immediately while searching', async () => {
   const browser = fakeBrowser();
   const { AttendanceHistoryController } = await isolatedModule('assets/js/controllers/AttendanceHistoryController.js', {}, browser);

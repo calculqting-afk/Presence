@@ -25,6 +25,7 @@ import { DailyAttendanceClock } from '../controllers/DailyAttendanceClock.js';
 import { EventSchedulePresenter } from '../controllers/EventSchedulePresenter.js';
 import { AttendanceViews } from '../controllers/AttendanceViews.js';
 import { StudentActionsPresenter } from '../controllers/StudentActionsPresenter.js';
+import { StudentSectionFilter } from '../controllers/StudentSectionFilter.js';
 export class AdminDashboard {
   constructor({
     document = globalThis.document,
@@ -537,6 +538,9 @@ export class AdminDashboard {
   }
   wireDirectoryFilters() {
     const dashboard = this;
+    dashboard.studentSectionPicker = new StudentSectionFilter({ root: dashboard.studentSectionFilter, document: dashboard.document, escapeHtml, onChange: dashboard.resetStudentDirectoryPage });
+    dashboard.studentSectionPicker.initialize();
+    dashboard.scope.addCleanup(() => dashboard.studentSectionPicker.dispose());
     dashboard.document.querySelectorAll("[data-show-student-attendance]").forEach(button => dashboard.scope.listen(button, "click", () => {
       dashboard.openStudentAttendanceDirectory(button.dataset.showStudentAttendance);
     }));
@@ -545,7 +549,7 @@ export class AdminDashboard {
       dashboard.studentSearchTimer = dashboard.window.setTimeout(dashboard.resetStudentDirectoryPage, 200);
     });
     dashboard.scope.addCleanup(() => dashboard.window.clearTimeout(dashboard.studentSearchTimer));
-    [dashboard.studentCourseFilter, dashboard.studentSectionFilter, dashboard.studentFaceFilter, dashboard.studentAccountFilter, dashboard.studentAttendanceFilter, dashboard.studentFineFilter, dashboard.studentSort].forEach(filter => dashboard.scope.listen(filter, "change", dashboard.resetStudentDirectoryPage));
+    [dashboard.studentCourseFilter, dashboard.studentFaceFilter, dashboard.studentAccountFilter, dashboard.studentAttendanceFilter, dashboard.studentFineFilter, dashboard.studentSort].forEach(filter => dashboard.scope.listen(filter, "change", dashboard.resetStudentDirectoryPage));
     dashboard.scope.listen(dashboard.document.querySelector("#clearStudentFilters"), "click", dashboard.handleClearStudentFiltersClick);
     dashboard.scope.listen(dashboard.previousStudentPage, "click", dashboard.handlePreviousStudentPageClick);
     dashboard.scope.listen(dashboard.nextStudentPage, "click", dashboard.handleNextStudentPageClick);
@@ -558,7 +562,7 @@ export class AdminDashboard {
     if (!["present", "absent"].includes(attendanceFilter)) return;
     dashboard.studentSearch.value = "";
     dashboard.studentCourseFilter.value = "all";
-    dashboard.studentSectionFilter.value = "all";
+    dashboard.studentSectionPicker.reset();
     dashboard.studentFaceFilter.value = "all";
     dashboard.studentAccountFilter.value = "all";
     dashboard.studentAttendanceFilter.value = attendanceFilter;
@@ -1191,7 +1195,7 @@ export class AdminDashboard {
     if (filterSignature !== dashboard.studentFilterSignature) {
       dashboard.studentFilterSignature = filterSignature;
       updateFilterOptions(dashboard.studentCourseFilter, "courses", courses);
-      updateFilterOptions(dashboard.studentSectionFilter, "sections", sections);
+      dashboard.studentSectionPicker.setOptions(sections);
     }
     const localDate = DailyAttendanceClock.dateKey();
     const presentToday = new Set(dashboard.attendance.filter(record => record.eventDate === localDate).map(record => record.studentUid));
@@ -1206,7 +1210,7 @@ export class AdminDashboard {
       const hasFaceRegistration = dashboard.faceRegistrationsByUid.get(student.uid)?.registered === true;
       const matchesSearch = !search || [student.firstName, student.middleName, student.lastName, student.accountId, student.email, student.course, student.section].join(" ").toLowerCase().includes(search);
       const matchesCourse = dashboard.studentCourseFilter.value === "all" || student.course === dashboard.studentCourseFilter.value;
-      const matchesSection = dashboard.studentSectionFilter.value === "all" || student.section === dashboard.studentSectionFilter.value;
+      const matchesSection = dashboard.studentSectionPicker.matches(student.section);
       const matchesFace = dashboard.studentFaceFilter.value === "all" || (dashboard.studentFaceFilter.value === "registered" ? hasFaceRegistration : !hasFaceRegistration);
       const matchesAccount = dashboard.studentAccountFilter.value === "all" || (dashboard.studentAccountFilter.value === "active" ? student.active !== false : student.active === false);
       const matchesAttendance = dashboard.studentAttendanceFilter.value === "all" || (dashboard.studentAttendanceFilter.value === "present" ? presentToday.has(student.uid) : !presentToday.has(student.uid));
@@ -2588,7 +2592,7 @@ export class AdminDashboard {
     const dashboard = this;
     dashboard.studentSearch.value = "";
     dashboard.studentCourseFilter.value = "all";
-    dashboard.studentSectionFilter.value = "all";
+    dashboard.studentSectionPicker.reset();
     dashboard.studentFaceFilter.value = "all";
     dashboard.studentAccountFilter.value = "all";
     dashboard.studentAttendanceFilter.value = "all";

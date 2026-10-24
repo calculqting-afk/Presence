@@ -21,7 +21,7 @@ export const dashboardRuntime = new DashboardRuntime({ state: sessionState, role
 
 // Thin compatibility adapters only; behavior and subscriptions belong to the runtime.
 export const setDashboardViewState = state => dashboardRuntime.setView(state);
-export const showDashboardToast = (title, message) => dashboardRuntime.showToast(title, message);
+export const showDashboardToast = (title, message, options) => dashboardRuntime.showToast(title, message, options);
 export const createNotification = notification => dashboardRuntime.createNotification(notification);
 export const uploadFacePhotoToDrive = (image, student) => dashboardRuntime.uploadFacePhoto(image, student);
 export const resetFacePhotoInDrive = (uid, options) => dashboardRuntime.resetFacePhoto(uid, options);

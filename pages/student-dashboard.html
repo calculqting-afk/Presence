@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261016-centered-modals">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261024-floating-mascot">
   <link rel="stylesheet" href="../assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/button-loading.css?v=20261010-auth-progress">
@@ -56,7 +56,17 @@
         <section class="view-section" data-section="dashboard">
           <div class="welcome-card">
             <div class="welcome-copy"><p class="eyebrow" data-dashboard-greeting>Good morning</p><h2 data-dashboard-greeting-title>Good morning, Student.</h2><p data-dashboard-greeting-message>Start the day prepared and stay on top of attendance.</p></div>
-            <button class="primary-button" type="button" data-go-view="events"><span>◇</span> View events</button>
+            <div class="welcome-actions">
+              <div class="welcome-mascot">
+                <picture class="welcome-mascot-motion" aria-hidden="true">
+                  <source media="(prefers-reduced-motion: reduce)" srcset="../assets/emoji/presence-check-in.png">
+                  <source type="image/webp" srcset="../assets/emoji/presence-check-in-smooth.webp">
+                  <img src="../assets/emoji/presence-check-in-128.gif" alt="" width="112" height="112" decoding="async">
+                </picture>
+                <img class="welcome-mascot-still" src="../assets/emoji/presence-check-in.png" alt="" width="112" height="112" decoding="async">
+              </div>
+              <button class="primary-button" type="button" data-go-view="events"><span>◇</span> View events</button>
+            </div>
           </div>
           <div class="stats-grid student-stats">
             <button class="stat-card stat-card-button" type="button" data-go-view="events" aria-label="View current events"><div class="stat-top"><span class="stat-label">Current events</span><span class="stat-icon orange">◇</span></div><div class="stat-value" id="currentEventsCount">0</div><div class="stat-meta" id="currentEventsMeta">No current events</div><span class="stat-card-link">View events <span aria-hidden="true">→</span></span></button>

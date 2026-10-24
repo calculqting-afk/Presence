@@ -20,7 +20,8 @@ export class LoginSessionService {
     const snapshot = await this.loadStudent(user.uid);
     const profile = snapshot.data();
     if (!snapshot.exists() || profile.active !== true) return null;
-    return ['head_admin', 'attendance_admin', 'student_manager'].includes(profile.role) ? 'admin' : 'student';
+    if (['head_admin', 'attendance_admin', 'student_manager'].includes(profile.role)) return 'admin';
+    return !profile.role || ['student','viewer'].includes(profile.role) ? 'student' : null;
   }
 
   async authenticate({ accountId, password, remember, completeRegistration }) {

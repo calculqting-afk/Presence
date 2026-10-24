@@ -51,7 +51,7 @@ export class DashboardRuntime {
   }
   verifyRole(user) { return this.sessionService.verifyRole(user); }
   setView(state) { this.state.setView(state); }
-  showToast(title, message) { this.toastController.show(title, message); }
+  showToast(title, message, options) { this.toastController.show(title, message, options); }
   createNotification(notification) { return this.notificationService.create(notification); }
   uploadFacePhoto(image, student = {}) { return this.faceRegistrationService.upload(image, student); }
   resetFacePhoto(uid, options) { return this.faceRegistrationService.reset(uid, options); }

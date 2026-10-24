@@ -187,7 +187,7 @@ export class StudentAttendanceController {
       const savedRecord = result.snapshot;
       this.loading.finish(loadingKey, 'Checked out');
       this.bridge.publish(savedRecord.id, savedRecord.data());
-      showDashboardToast("Checkout recorded", checkoutOnly ? "Your checkout was recorded. It will be shown as partial attendance because there was no check-in." : "Your attendance record now includes your checkout time.");
+      showDashboardToast("Checkout recorded", checkoutOnly ? "Your checkout was recorded. It will be shown as partial attendance because there was no check-in." : "Your attendance record now includes your checkout time.", { attendanceSuccess: result.state !== 'existing' });
     } catch (error) {
       if (error.geofenceIssue === "location") {
         this.showLocationError(error);
@@ -302,7 +302,7 @@ export class StudentAttendanceController {
       this.loading.finish(loadingKey, 'Checked in');
       this.bridge.publish(savedRecord.id, savedRecord.data());
       if (result.state === 'existing') showDashboardToast('Attendance already recorded', 'Your existing check-in was preserved; no duplicate was created.');
-      else showDashboardToast(savedRecord.data().arrivalStatus === "late" ? "Late attendance recorded" : "Attendance recorded", savedRecord.data().arrivalStatus === "late" ? "Your attendance was saved as Late." : "Your attendance was saved successfully.");
+      else showDashboardToast(savedRecord.data().arrivalStatus === "late" ? "Late attendance recorded" : "Attendance recorded", savedRecord.data().arrivalStatus === "late" ? "Your attendance was saved as Late." : "Your attendance was saved successfully.", { attendanceSuccess: true });
     } catch (error) {
       if (error.geofenceIssue === "location") {
         this.showLocationError(error);

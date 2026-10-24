@@ -1,6 +1,6 @@
 import { SurveyLinkService } from './SurveyLinkService.js';
 
-// Only survey deep links auto-resume an existing authenticated session.
+// Resume Firebase-authenticated sessions on login, preserving optional survey links.
 export class SurveyEntryController {
   constructor({ auth, subscribe, resolveRole, window: ownerWindow = globalThis.window, isLoginBusy = () => false }) {
     Object.assign(this, { auth, subscribe, resolveRole, window: ownerWindow, isLoginBusy });
@@ -8,16 +8,19 @@ export class SurveyEntryController {
     this.generation = 0;
   }
   initialize() {
-    if (this.unsubscribe || !this.links.eventId()) return;
+    if (this.disposed || this.initialized) return;
+    this.initialized = true;
     this.unsubscribe = this.subscribe(this.auth, user => this.resume(user).catch(() => {}));
   }
   async resume(user) {
     const generation = ++this.generation;
-    if (!user || this.isLoginBusy()) return;
+    if (!user || this.disposed || this.redirected || this.isLoginBusy()) return;
     const role = await this.resolveRole(user);
-    if (generation !== this.generation || !role || this.isLoginBusy()) return;
+    if (generation !== this.generation || this.disposed || this.redirected || !['admin','student'].includes(role) || this.isLoginBusy()) return;
     const page = role === 'admin' ? 'admin-dashboard.html' : 'student-dashboard.html';
-    this.window.location.replace(`pages/${page}?survey=${encodeURIComponent(this.links.eventId())}`);
+    const surveyId = this.links.eventId();
+    this.redirected = true;
+    this.window.location.replace(`pages/${page}${surveyId ? `?survey=${encodeURIComponent(surveyId)}` : ''}`);
   }
-  dispose() { this.generation++; this.unsubscribe?.(); this.unsubscribe = null; }
+  dispose() { this.disposed = true; this.generation++; this.unsubscribe?.(); this.unsubscribe = null; }
 }

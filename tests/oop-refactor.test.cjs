@@ -82,6 +82,10 @@ test('survey auto-resume eligibility and login error messages stay unchanged', a
   const service = new LoginSessionService(sessionOptions({ active: false, role: 'head_admin' }));
   assert.equal(await service.resolveExistingRole({ uid: 'one', email: 'a@test.local' }), null);
   assert.equal(await service.resolveExistingRole({ uid: 'owner', email: 'owner@test.local' }), 'admin');
+  for (const [role,expected] of [['student','student'],['viewer','student'],['head_admin','admin'],['attendance_admin','admin'],['student_manager','admin'],['unknown',null]]) {
+    const active=new LoginSessionService(sessionOptions({active:true,role}));
+    assert.equal(await active.resolveExistingRole({uid:'one',email:'a@test.local'}),expected);
+  }
   assert.match(service.errorMessage({ code: 'auth/invalid-credential' }), /incorrect/);
   assert.match(service.errorMessage({ code: 'auth/too-many-requests' }), /Too many attempts/);
   assert.match(service.errorMessage({ code: 'firestore/permission-denied' }), /Firestore rules/);

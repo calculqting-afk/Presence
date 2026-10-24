@@ -218,6 +218,31 @@ test('survey login routing is idempotent and cancels stale authentication result
   assert.equal(redirects.length, 1); assert.equal(cleanups, 1); assert.equal(typeof callback, 'function');
 });
 
+test('normal login restores the verified dashboard once without needing a survey link', async () => {
+  const {SurveyEntryController}=await moduleAt('SurveyEntryController');
+  for (const role of ['student','admin']) {
+    let callback,subscriptions=0;const redirects=[];
+    const controller=new SurveyEntryController({auth:{},subscribe:(_auth,listener)=>{callback=listener;subscriptions++;return ()=>{};},resolveRole:async()=>role,
+      window:{location:{href:'https://presence.test/index.html',replace:url=>redirects.push(url)}}});
+    controller.initialize();controller.initialize();assert.equal(subscriptions,1);
+    await callback(null);assert.equal(redirects.length,0,'signed-out users stay on login');
+    await callback({uid:'saved'});await callback({uid:'saved'});
+    assert.deepEqual(redirects,[`pages/${role}-dashboard.html`]);controller.dispose();
+  }
+});
+
+test('automatic login respects inactive profiles, read failures, manual sign-in and disposal', async () => {
+  const {SurveyEntryController}=await moduleAt('SurveyEntryController');
+  let busy=false,finish;const redirects=[];
+  const controller=new SurveyEntryController({auth:{},subscribe:()=>()=>{},resolveRole:async()=>null,isLoginBusy:()=>busy,
+    window:{location:{href:'https://presence.test/index.html',replace:url=>redirects.push(url)}}});
+  await controller.resume({uid:'inactive'});assert.equal(redirects.length,0);
+  controller.resolveRole=async()=>{throw Error('offline');};await assert.rejects(controller.resume({uid:'one'}),/offline/);assert.equal(redirects.length,0);
+  controller.resolveRole=()=>new Promise(resolve=>{finish=resolve;});
+  const manual=controller.resume({uid:'one'});busy=true;finish('student');await manual;assert.equal(redirects.length,0);
+  busy=false;const leaving=controller.resume({uid:'one'});controller.dispose();finish('admin');await leaving;assert.equal(redirects.length,0);
+});
+
 test('survey controller guards duplicate saves and cancels submissions after leaving during GPS', async () => {
   const { SurveyController } = await moduleAt('SurveyController');
   const { SurveyPolicy } = await moduleAt('SurveyPolicy');
