@@ -270,3 +270,93 @@ test('actual PDF generator produces multiple pages, local embedded Unicode font 
   assert.ok(bytes.length < 10 * 1024 * 1024);
   await assert.rejects(exporter.generate({ ...report, rows: [{ ...report.rows[0], name: 'Unsupported 🦄' }] }), /cannot display/);
 });
+
+function excelParts(bytes) {
+  const buffer = Buffer.from(bytes), parts = new Map(); let offset = 0;
+  while (buffer.readUInt32LE(offset) === 0x04034b50) {
+    const size = buffer.readUInt32LE(offset + 18), nameSize = buffer.readUInt16LE(offset + 26), extra = buffer.readUInt16LE(offset + 28);
+    const name = buffer.toString('utf8', offset + 30, offset + 30 + nameSize), start = offset + 30 + nameSize + extra;
+    assert.equal(buffer.readUInt16LE(offset + 8), 0, 'Stored ZIP entries are independently readable');
+    const crc = require('node:zlib').crc32;
+    if (crc) assert.equal(crc(buffer.subarray(start, start + size)), buffer.readUInt32LE(offset + 14));
+    parts.set(name, buffer.toString('utf8', start, start + size)); offset = start + size;
+  }
+  assert.equal(buffer.readUInt32LE(offset), 0x02014b50);
+  assert.equal(buffer.readUInt32LE(buffer.length - 22), 0x06054b50);
+  assert.equal(buffer.readUInt16LE(buffer.length - 12), parts.size);
+  assert.equal(buffer.readUInt32LE(buffer.length - 6), offset);
+  return parts;
+}
+test('Excel is a real XLSX with typed Philippine dates, text IDs and no private profile fields', async () => {
+  const { AttendanceExcelExporter } = await import('../assets/js/controllers/AttendanceExcelExporter.js');
+  const report = snapshot(await serviceAt(), [{ ...checkIn, checkedOutAt: stamp('2026-10-17T01:05:00Z'), status: 'completed' }]);
+  const record = report.rows.find(row => row.studentId === '2026-0');
+  assert.equal(record.checkInIso, '2026-10-17T00:01:00.000Z');
+  assert.equal(record.checkOutIso, '2026-10-17T01:05:00.000Z');
+  record.studentId = '0000123-4'; record.password = 'MUST-NOT-EXPORT'; record.uid = 'INTERNAL-UID';
+  const parts = excelParts(await new AttendanceExcelExporter().generate(report));
+  assert.match(parts.get('[Content_Types].xml'), /spreadsheetml.sheet.main\+xml/);
+  assert.match(parts.get('xl/workbook.xml'), /name="Summary"/);
+  assert.match(parts.get('xl/workbook.xml'), /name="Attendance"/);
+  const worksheet = parts.get('xl/worksheets/sheet2.xml');
+  assert.match(worksheet, /t="inlineStr"><is><t xml:space="preserve">0000123-4/);
+  assert.match(worksheet, /Year level/); assert.match(worksheet, /state="frozen"/); assert.match(worksheet, /autoFilter/);
+  const serial = +worksheet.match(/<c r="I\d+" s="2"><v>([^<]+)<\/v>/)[1];
+  assert.equal(new Date(Math.round((serial - 25569) * 86400000)).toISOString(), '2026-10-17T08:01:00.000Z');
+  assert.doesNotMatch([...parts.values()].join(''), /SECRET-|MUST-NOT-EXPORT|INTERNAL-UID|studentUid|authEmail/);
+});
+test('Excel exports all matching rows, literal formula-like text, Unicode and unknown year without guessing', async () => {
+  const { AttendanceExcelExporter } = await import('../assets/js/controllers/AttendanceExcelExporter.js');
+  const report = snapshot(await serviceAt(), [checkIn]);
+  report.rows = Array.from({ length: 80 }, (_, i) => ({ ...report.rows[0], studentId: `000${i}`, name: '=HYPERLINK("https://example.test","José <Peña> 🦄")', course: 'BS Info Tech', section: i ? '2B' : 'Unknown' }));
+  report.totals.rows = 80;
+  const parts = excelParts(await new AttendanceExcelExporter().generate(report)), xml = parts.get('xl/worksheets/sheet2.xml');
+  assert.equal((xml.match(/<row /g) || []).length, 81);
+  assert.match(xml, /=HYPERLINK\(&quot;https:\/\/example.test/); assert.match(xml, /José &lt;Peña&gt; 🦄/);
+  assert.doesNotMatch(xml, /<f[ >]|<hyperlink[ >]/);
+  assert.match(xml, /<c r="D2" s="0" t="inlineStr"><is><t xml:space="preserve"><\/t>/);
+  assert.match(xml, /<c r="D3" s="0" t="inlineStr"><is><t xml:space="preserve">2/);
+  await assert.rejects(new AttendanceExcelExporter().generate({ ...report, rows: Array(5001).fill(report.rows[0]) }), /5,000/);
+});
+test('Excel both-session workbook separates morning/afternoon and preserves the filtered roster', async () => {
+  const { AttendanceExcelExporter } = await import('../assets/js/controllers/AttendanceExcelExporter.js');
+  const report = snapshot(await serviceAt(), [checkIn], { filters: { course: 'BS Info Tech', section: '2A' } });
+  report.filters.session = 'Both sessions';
+  report.rows = [{ ...report.rows[0], name: 'Morning student', sessionLabel: 'Morning' }, { ...report.rows[0], name: 'Afternoon student', sessionLabel: 'Afternoon' }];
+  const parts = excelParts(await new AttendanceExcelExporter().generate(report));
+  assert.match(parts.get('xl/workbook.xml'), /name="Morning"/); assert.match(parts.get('xl/workbook.xml'), /name="Afternoon"/);
+  assert.match(parts.get('xl/worksheets/sheet2.xml'), /Morning student/); assert.doesNotMatch(parts.get('xl/worksheets/sheet2.xml'), /Afternoon student/);
+  assert.match(parts.get('xl/worksheets/sheet3.xml'), /Afternoon student/);
+  assert.match(parts.get('xl/worksheets/sheet1.xml'), /BS Info Tech/);
+});
+test('Excel export is server-gated, snapshot-frozen, and shares a duplicate-submit lock with PDF', async () => {
+  const { AttendanceReportController } = await isolated('assets/js/controllers/AttendanceReportController.js');
+  const document = element(); document.body = element(); document.createElement = element;
+  const window = element(); Object.assign(window, { setInterval: () => 1, clearInterval() {}, setTimeout: () => 2, clearTimeout() {} });
+  let receive, online = true, allowed = true, captured, finish, delivered = 0;
+  const service = await serviceAt(), context = { filters: { event: event.id }, events: [event], students, studentsReady: true };
+  const controller = new AttendanceReportController({ document, window, can: () => allowed, context: () => context, online: () => online, service,
+    repository: { watch: (_id, _ids, callback) => { receive = callback; return () => {}; } }, notify() {},
+    excelExporter: { generate: report => { captured = report; return new Promise(resolve => { finish = resolve; }); } },
+    excelFiles: { deliver: async (_bytes, filename) => { delivered++; assert.match(filename, /\.xlsx$/); return { started: true }; } } });
+  controller.initialize(); controller.open(); await controller.exportExcel(); assert.equal(captured, undefined);
+  receive({ kind: 'event', event, exists: true, verified: true }); receive({ kind: 'attendance', records: [], verified: true });
+  online = false; await controller.exportExcel(); assert.equal(captured, undefined); online = true;
+  const saving = controller.exportExcel(); await controller.exportExcel(); await controller.export('save');
+  receive({ kind: 'attendance', records: [checkIn], verified: true });
+  assert.equal(captured.totals.present, 0); assert.equal(controller.report.totals.present, 1);
+  finish(new Uint8Array([80, 75, 3, 4])); await saving; assert.equal(delivered, 1);
+  const stopped = controller.exportExcel(); controller.close(); finish(new Uint8Array([1])); await stopped; assert.equal(delivered, 1);
+  allowed = false; await controller.exportExcel(); assert.equal(delivered, 1); controller.dispose();
+});
+test('Excel Android delivery uses a separate save bridge and safely rejects old APKs and invalid files', async () => {
+  const { AttendanceExcelFileService } = await import('../assets/js/controllers/AttendanceExcelFileService.js');
+  let saved;
+  const files = new AttendanceExcelFileService({ native: () => ({ isNative: true, attendanceSpreadsheet: { save: async value => { saved = value; return { cancelled: true }; } } }) });
+  assert.equal((await files.deliver(new Uint8Array([80, 75, 3, 4]), 'report.xlsx')).cancelled, true);
+  assert.equal(saved.filename, 'report.xlsx'); assert.equal(Buffer.from(saved.base64, 'base64').toString('hex'), '504b0304');
+  await assert.rejects(files.deliver(new Uint8Array(10 * 1024 * 1024 + 1), 'report.xlsx'), /10 MB/);
+  await assert.rejects(files.deliver(new Uint8Array(4), '../report.xlsx'), /Invalid/);
+  const oldApk = new AttendanceExcelFileService({ native: () => ({ isNative: true }) });
+  await assert.rejects(oldApk.deliver(new Uint8Array(4), 'report.xlsx'), /Update the Presence APK/);
+});

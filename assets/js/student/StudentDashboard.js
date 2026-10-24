@@ -16,6 +16,7 @@ import { EventSchedulePresenter } from '../controllers/EventSchedulePresenter.js
 import { AttendanceViews } from '../controllers/AttendanceViews.js';
 import { AttendanceAlertsController } from '../controllers/AttendanceAlertsController.js';
 import { onAuthStateChanged } from '../dashboard.js?v=20261011-optimized';
+import { StudentAttendanceSummaryController } from '../controllers/StudentAttendanceSummaryController.js';
 export class StudentDashboard {
   constructor({
     document = globalThis.document,
@@ -94,6 +95,17 @@ export class StudentDashboard {
     this.wireAttendanceActions();
     this.wireFaceRegistrationActions();
     this.applyProfile(currentUserProfile);
+    this.studentSummary = new StudentAttendanceSummaryController({ document: this.document, window: this.window,
+      getState: () => ({ student: { ...this.studentProfile, uid: currentUser.uid }, events: this.events, attendance: this.attendance, view: this.view,
+        verified: Boolean(this.eventsConfirmed && this.attendanceConfirmed && !this.attendanceHasPendingWrites && this.window.navigator?.onLine !== false) }),
+      requestCorrection: async (eventId, kind) => {
+        try {
+          await this.initializeCorrectionRequests();
+          if (this.scope.initialized) this.correctionRequests?.focusSession(eventId, kind);
+        } catch { showDashboardToast('Request unavailable', 'Reload the page and try again.'); }
+      } });
+    this.studentSummary.initialize();
+    this.scope.addCleanup(() => this.studentSummary.dispose());
     this.attendanceAlerts = new AttendanceAlertsController({ uid: currentUser.uid, document: this.document, window: this.window,
       getState: () => ({ student: { ...this.studentProfile, uid: currentUser.uid }, events: this.events, attendance: this.attendance,
         ready: this.eventsConfirmed && this.attendanceConfirmed }) });
@@ -117,6 +129,9 @@ export class StudentDashboard {
     const dashboard = this;
     dashboard.subscriptions = new ScopedSubscriptions({
       onError: (error, key) => {
+        if (key === 'events') dashboard.eventsConfirmed = false;
+        if (key === 'attendance') dashboard.attendanceConfirmed = false;
+        dashboard.studentSummary?.render();
         console.error(key, error);
         showDashboardToast('Data sync unavailable', 'Check your connection and reload to retry.');
       }
@@ -312,6 +327,7 @@ export class StudentDashboard {
     });
     dashboard.listen('attendance', ["*"], query(collection(db, "attendance"), where("studentUid", "==", currentUser.uid)), snapshot => {
       dashboard.attendanceConfirmed = !snapshot.metadata?.fromCache;
+      dashboard.attendanceHasPendingWrites = Boolean(snapshot.metadata?.hasPendingWrites);
       dashboard.attendance = snapshot.docs.map(item => ({
         id: item.id,
         ...item.data()
@@ -345,6 +361,7 @@ export class StudentDashboard {
   applyProfile(profile) {
     if (!this.scope.initialized || !profile || !Object.keys(profile).length) return;
     this.studentProfile = CoursePolicy.profile(profile);
+    this.studentSummary?.render();
     this.attendanceAlerts?.update();
     this.correctionRequests?.refreshEvents();
     this.identity.save(currentUser.uid, profile);
@@ -573,6 +590,7 @@ export class StudentDashboard {
   }
   renderMyAttendances() {
     const dashboard = this;
+    dashboard.studentSummary?.render();
     if (dashboard.view !== 'attendances') return;
     const container = dashboard.document.querySelector("#studentAttendanceList");
     const records = dashboard.attendanceList.select(dashboard.attendance.slice().sort((first, second) => {

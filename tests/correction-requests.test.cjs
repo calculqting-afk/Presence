@@ -5,6 +5,21 @@ const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 
+test('summary correction shortcut only prefills the existing form and never duplicates or submits requests', async () => {
+  const f = await fixture(), messages = [], select = { value: '', options: [{ value: 'morning' }] }, kind = { value: '' };
+  let focused = 0;
+  const rootNode = { scrollIntoView() {}, querySelector: selector => ({ '[data-request-event]': select, '[name="kind"]': kind, '[name="reason"]': { focus: () => focused++ } })[selector] };
+  const ui = new f.exports.CorrectionRequestsController({ root: rootNode, db: {}, user: { uid: 'student' }, escapeHtml: String, notify: (...args) => messages.push(args) });
+  ui.initialized = true; ui.available = true; ui.refreshEvents = () => {};
+  assert.equal(ui.focusSession('morning', 'missed-checkout'), true);
+  assert.equal(select.value, 'morning'); assert.equal(kind.value, 'missed-checkout'); assert.equal(focused, 1);
+  ui.requests = [{ eventId: 'morning', status: 'approved' }];
+  assert.equal(ui.focusSession('morning', 'missed-checkout'), false); assert.match(messages.at(-1)[0], /already submitted/);
+  ui.requests = []; assert.equal(ui.focusSession('unavailable', 'missed-check-in'), false);
+  ui.available = false; assert.equal(ui.focusSession('morning', 'missed-check-in'), false);
+  assert.equal(focused, 1);
+});
+
 async function fixture() {
   const stored = new Map([
     ['students/student', { uid: 'student', accountId: '123', firstName: 'Test', lastName: 'Student', section: '2A', active: true }],

@@ -3,7 +3,7 @@ import { Geolocation } from '@capacitor/geolocation';
 import { App } from '@capacitor/app';
 import { LocalNotifications } from '@capacitor/local-notifications';
 
-globalThis.PresenceNative = { isNative: Capacitor.isNativePlatform(), geolocation: Geolocation, localNotifications: LocalNotifications, attendancePdf: registerPlugin('AttendancePdf') };
+globalThis.PresenceNative = { isNative: Capacitor.isNativePlatform(), geolocation: Geolocation, localNotifications: LocalNotifications, attendancePdf: registerPlugin('AttendancePdf'), attendanceSpreadsheet: registerPlugin('AttendanceSpreadsheet') };
 if (Capacitor.isNativePlatform()) {
   App.addListener('appStateChange', ({ isActive }) => {
     if (isActive) window.dispatchEvent(new Event('focus'));

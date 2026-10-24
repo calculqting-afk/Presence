@@ -57,6 +57,25 @@ export class CorrectionRequestsController {
     this.badge.hidden = count === 0; this.badge.textContent = count > 99 ? '99+' : String(count);
     this.badge.closest('button')?.setAttribute('aria-label', `Correction Requests${count ? `, ${count} pending` : ''}`);
   }
+  focusSession(eventId, kind) {
+    if (!this.initialized || this.admin || !this.available || this.busy) {
+      this.notify('Requests unavailable', 'Wait for correction requests to sync, then try again.'); return false;
+    }
+    if (this.requests.some(item => item.eventId === eventId)) {
+      this.root.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+      this.notify('Request already submitted', 'View the saved request and its decision below. Contact an admin for further review.'); return false;
+    }
+    this.refreshEvents();
+    const select = this.root.querySelector('[data-request-event]');
+    if (![...select.options].some(option => option.value === eventId)) {
+      this.notify('Session unavailable', 'This closed session is not available for a correction request.'); return false;
+    }
+    select.value = eventId;
+    if (CORRECTION_KINDS[kind]) this.root.querySelector('[name="kind"]').value = kind;
+    this.root.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    this.root.querySelector('[name="reason"]').focus();
+    return true;
+  }
   render() {
     if (!this.initialized || !this.available) return;
     if (this.busy) { this.renderPending = true; return; }

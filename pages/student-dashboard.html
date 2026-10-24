@@ -17,6 +17,7 @@
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261024-attendance-alerts">
+  <link rel="stylesheet" href="../assets/css/student-attendance-summary.css?v=20261025-grouped">
   <link rel="stylesheet" href="../assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261024-transparent-toast">
   <link rel="stylesheet" href="../assets/css/button-loading.css?v=20261010-auth-progress">
@@ -91,7 +92,17 @@
 
         <section class="view-section" data-section="attendances" hidden>
           <div class="section-head attendance-section-head"><h2>Your attendance</h2><details class="attendance-help" id="studentAttendanceHelp"><summary aria-label="Attendance help"><span aria-hidden="true">i</span></summary><div class="attendance-help-content"><strong>About your attendance</strong><p>Use the filters to find your saved check-ins and checkouts.</p><p>A missed checkout needs administrative review. It does not automatically create an absence or fine.</p></div></details></div>
-          <article class="panel attendance-workspace attendance-workspace--student">
+          <div class="student-attendance-tabs" role="group" aria-label="Attendance view"><button class="outline-button active" type="button" data-attendance-tab="records" aria-pressed="true" aria-controls="studentAttendanceRecordsPanel">Records</button><button class="outline-button" type="button" data-attendance-tab="summary" aria-pressed="false" aria-controls="studentAttendanceSummary">Summary</button></div>
+          <article class="panel student-attendance-summary" id="studentAttendanceSummary" hidden aria-labelledby="studentSummaryTitle">
+            <h3 id="studentSummaryTitle">Your attendance summary</h3>
+            <form class="student-summary-filters"><label>Month<input type="month" data-summary-month></label><label>Event<select data-summary-event><option value="">All events</option></select></label><label>Session<select data-summary-session><option value="both">Both sessions</option><option value="morning">Morning</option><option value="afternoon">Afternoon</option></select></label><div><button class="link-button" type="button" data-summary-clear>Clear</button><button class="primary-button" type="submit">Apply</button></div></form>
+            <div class="student-summary-totals"><div><span>Present (on time)</span><strong data-summary-count="present">0</strong></div><div><span>Late</span><strong data-summary-count="late">0</strong></div><div><span>Absent</span><strong data-summary-count="absent">0</strong></div><div><span>Incomplete</span><strong data-summary-count="incomplete">0</strong></div></div>
+            <p class="student-summary-note">Morning and afternoon count separately. Present/Late describe arrival; Incomplete describes a missed checkout and can overlap with either. A session still open is Awaiting checkout, not Incomplete. Unverified eligibility needs review, not an automatic absence.</p>
+            <p class="student-summary-sync" role="status" aria-live="polite" data-summary-status>Verifying attendance…</p>
+            <div class="student-summary-list" data-summary-list></div>
+            <div class="student-summary-pagination"><span data-summary-page role="status"></span><div><button class="outline-button" type="button" data-summary-previous>Previous</button><button class="outline-button" type="button" data-summary-next>Next</button></div></div>
+          </article>
+          <article class="panel attendance-workspace attendance-workspace--student" id="studentAttendanceRecordsPanel">
           <form class="attendance-filters" id="studentAttendanceFilters">
             <label class="attendance-search-field">Event<input type="search" id="studentAttendanceSearch" placeholder="Search event name"></label>
             <button class="outline-button attendance-filter-toggle" id="studentAttendanceToggleFilters" type="button" aria-expanded="false" aria-controls="studentAttendanceAdvancedFilters">Filters</button>
@@ -104,7 +115,7 @@
           <div class="history-card-grid attendance-results" id="studentAttendanceList"><div class="attendance-empty"><h3>No attendance records yet.</h3></div></div>
           <div class="attendance-pagination" id="studentAttendancePagination" hidden><span id="studentAttendancePageInfo" role="status" aria-live="polite"></span><div class="attendance-page-actions" id="studentAttendancePaginationControls"><button class="outline-button" type="button" id="studentAttendancePrevious">Previous</button><span class="attendance-page-number" id="studentAttendanceCurrentPage" aria-label="Current page">1</span><button class="outline-button" type="button" id="studentAttendanceNext">Next</button></div></div>
           </article>
-          <article class="panel correction-requests-panel" id="studentCorrectionRequests"><p>Loading correction requests…</p></article>
+          <article class="panel correction-requests-panel" id="studentCorrectionRequests" hidden><p>Loading correction requests…</p></article>
         </section>
 
         <section class="view-section" data-section="history" hidden>

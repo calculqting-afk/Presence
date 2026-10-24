@@ -805,11 +805,16 @@ function fakeBrowser() {
     if (!nodes.has(selector)) {
       const handlers = new Map();
       const node = { handlers, value: '', checked: false, hidden: true, disabled: false, dataset: {}, style: {}, textContent: '', innerHTML: '', classList: { add() {}, remove() {}, toggle() {} }, addEventListener(type, callback) { if (!handlers.has(type)) handlers.set(type, new Set()); handlers.get(type).add(callback); }, removeEventListener(type, callback) { handlers.get(type)?.delete(callback); }, async emit(type, event = {}) { for (const callback of handlers.get(type) || []) await callback(event); }, insertAdjacentHTML() {}, setAttribute() {}, removeAttribute() {}, toggleAttribute() {}, focus() {}, reset() {}, remove() {}, closest: () => node, querySelector: child => element(child), querySelectorAll: child => child === 'th' ? [element('th0'), element('th1'), element('th2'), element('th3')] : [] };
+      node.children = [];
+      node.append = child => node.children.push(child);
+      node.replaceChildren = (...children) => { node.children = children; };
       nodes.set(selector, node);
     }
     return nodes.get(selector);
   };
   const document = { querySelector: element, querySelectorAll: () => [], body: element('body'), addEventListener() {}, removeEventListener() {} };
+  let created = 0;
+  document.createElement = () => element(`created-${++created}`);
   const window = { addEventListener: (name, callback) => { if (!listeners.has(name)) listeners.set(name, new Set()); listeners.get(name).add(callback); }, removeEventListener: (name, callback) => listeners.get(name)?.delete(callback), emit: viewName => { for (const callback of listeners.get('presence:viewchange') || []) callback({ detail: { viewName } }); }, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {}, requestAnimationFrame: () => 1, cancelAnimationFrame() {} };
   return { document, window, sessionStorage: { getItem: () => null, setItem() {} } };
 }

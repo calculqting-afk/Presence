@@ -81,6 +81,8 @@ export class AttendanceReportService {
         course: AttendanceReportService.clean(CoursePolicy.normalize(record.studentCourse || student?.course || 'Unavailable')),
         section: AttendanceReportService.clean(event.attendanceRoster?.[record.studentUid] ?? record.rosterSection ?? student?.section ?? record.section ?? 'Unavailable'),
         checkIn: AttendanceReportService.time(checkIn), checkOut: AttendanceReportService.time(record.checkedOutAt),
+        checkInIso: AttendanceReportService.date(checkIn)?.toISOString() || null,
+        checkOutIso: AttendanceReportService.date(record.checkedOutAt)?.toISOString() || null,
         checkInMilliseconds: AttendanceSort.checkIn(record),
         hasCheckIn: Boolean(checkIn),
         arrival: record.pending && !profileMissing ? 'Not yet checked in' : absent ? 'Absent' : !checkIn ? 'No check-in' : record.arrivalStatus === 'late' ? 'Late' : 'Present',
