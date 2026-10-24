@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/css/style.css?v=20261015-compact-login">
+  <link rel="stylesheet" href="assets/css/style.css?v=20261024-registration-compact">
   <link rel="stylesheet" href="assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="assets/css/button-loading.css?v=20261010-auth-progress">
 </head>
@@ -143,15 +143,30 @@
       <span class="dialog-icon">＋</span>
       <h2 id="registrationDialogTitle">Create student account</h2>
       <p>Your request will be reviewed by an administrator. You cannot sign in until it is approved.</p>
-      <form id="registrationForm" class="registration-form" novalidate>
-        <label>Student ID<input name="accountId" autocomplete="username" required></label>
-        <label>Birthday<input name="birthday" type="date" autocomplete="bday" required></label>
-        <div class="registration-grid"><label>First name<input name="firstName" autocomplete="given-name" required></label><label>Last name<input name="lastName" autocomplete="family-name" required></label></div>
-        <div class="registration-grid"><label>Course<select name="course" required><option value="">Choose course</option><option value="BSA">BSA</option><option value="BS Info Tech">BS Info Tech</option><option value="BSMB">BSMB</option><option value="BSFI">BSFI</option></select></label><label>Section<select name="section" required><option value="">Choose</option><option>1A</option><option>1B</option><option>2A</option><option>2B</option><option>3A</option><option>3B</option><option>4A</option><option>4B</option></select></label></div>
-        <label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
-        <label>Confirm password<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label>
+      <form id="registrationForm" class="registration-form registration-wizard" novalidate>
+        <ol class="registration-steps" aria-label="Registration progress">
+          <li data-registration-indicator class="is-current" aria-current="step"><span class="registration-step-circle" aria-hidden="true"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17"/></svg><span class="registration-step-number">1</span><span class="registration-step-check">✓</span></span><span>Personal</span></li>
+          <li data-registration-indicator><span class="registration-step-circle" aria-hidden="true"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17"/></svg><span class="registration-step-number">2</span><span class="registration-step-check">✓</span></span><span>School</span></li>
+          <li data-registration-indicator><span class="registration-step-circle" aria-hidden="true"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17"/></svg><span class="registration-step-number">3</span><span class="registration-step-check">✓</span></span><span>Security</span></li>
+        </ol>
+        <p class="registration-step-status" data-registration-step-status role="status" aria-live="polite">Step 1 of 3: Personal details</p>
+        <fieldset class="registration-step-panel" data-registration-step="0">
+          <legend>Personal details</legend>
+          <div class="registration-grid"><label>Student ID<input name="accountId" autocomplete="username" maxlength="64" required></label><label>Birthday<input name="birthday" type="date" autocomplete="bday" required></label></div>
+          <div class="registration-grid"><label>First name<input name="firstName" autocomplete="given-name" maxlength="80" required></label><label>Last name<input name="lastName" autocomplete="family-name" maxlength="80" required></label></div>
+        </fieldset>
+        <fieldset class="registration-step-panel" data-registration-step="1" hidden>
+          <legend>School details</legend>
+          <div class="registration-grid"><label>Course<select name="course" required><option value="">Choose course</option><option value="BSA">BSA</option><option value="BS Info Tech">BS Info Tech</option><option value="BSMB">BSMB</option><option value="BSFI">BSFI</option></select></label><label>Section<select name="section" required><option value="">Choose</option><option>1A</option><option>1B</option><option>2A</option><option>2B</option><option>3A</option><option>3B</option><option>4A</option><option>4B</option></select></label></div>
+        </fieldset>
+        <fieldset class="registration-step-panel" data-registration-step="2" hidden>
+          <legend>Account security</legend>
+          <div class="registration-grid"><label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><label>Confirm password<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label></div>
+          <p class="registration-security-hint">Use at least 8 characters. Review your details before sending; your account still needs administrator approval.</p>
+          <dl class="registration-review" aria-label="Review registration details"><div><dt>Student ID</dt><dd data-registration-review="accountId"></dd></div><div><dt>Birthday</dt><dd data-registration-review="birthday"></dd></div><div><dt>First name</dt><dd data-registration-review="firstName"></dd></div><div><dt>Last name</dt><dd data-registration-review="lastName"></dd></div><div><dt>Course</dt><dd data-registration-review="course"></dd></div><div><dt>Section</dt><dd data-registration-review="section"></dd></div></dl>
+        </fieldset>
         <p class="field-error registration-error" id="registrationError" role="alert"></p>
-        <div class="dialog-actions"><button class="dialog-action" type="submit">Send registration request</button><button class="text-button" type="button" data-close-registration>Cancel</button></div>
+        <div class="dialog-actions registration-wizard-actions"><button class="text-button" type="button" data-close-registration>Cancel</button><button class="text-button" type="button" data-registration-back hidden>Back</button><button class="dialog-action" type="button" data-registration-next>Next</button><button class="dialog-action" type="submit" hidden>Send request</button></div>
       </form>
     </section>
   </div>

@@ -35,14 +35,16 @@ test('registration dialogs bound their height to the viewport and scroll interna
   }
 });
 
-test('registration submit appears above Cancel in visual and keyboard order', () => {
+test('registration wizard uses compact inline actions in matching visual and keyboard order', () => {
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const form = html.match(/<form id="registrationForm"[\s\S]*?<\/form>/)?.[0];
   assert.ok(form);
-  assert.match(form, /Send registration request<\/button>\s*<button[^>]*data-close-registration[^>]*>Cancel<\/button>/);
+  assert.match(form, /data-close-registration>Cancel<\/button>\s*<button[^>]*data-registration-back[^>]*>Back<\/button>\s*<button[^>]*data-registration-next[^>]*>Next<\/button>\s*<button[^>]*type="submit"[^>]*>Send request<\/button>/);
   const css = fs.readFileSync(path.join(__dirname, '../assets/css/style.css'), 'utf8');
-  assert.match(css, /\.registration-dialog \.dialog-actions\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;[^}]*flex-direction:\s*column;[^}]*align-items:\s*center/);
-  assert.match(css, /\.registration-dialog \.dialog-actions \.dialog-action\s*\{[^}]*width:\s*min\(100%, 320px\)/);
+  assert.match(css, /#registrationForm \.registration-wizard-actions\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*row;[^}]*flex-wrap:\s*wrap/);
+  assert.match(css, /#registrationForm \.registration-wizard-actions > button\s*\{[^}]*width:\s*auto;[^}]*min-height:\s*44px/);
+  assert.match(css, /#registrationForm \.registration-wizard-actions > \[data-close-registration\]\s*\{[^}]*margin-right:\s*auto/);
+  assert.match(css, /#registrationForm \.registration-step-status\s*\{[^}]*margin:\s*0/);
   assert.match(css, /\.dialog \.registration-error\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/);
 });
 

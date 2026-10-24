@@ -14,6 +14,8 @@ import { StudentAttendanceListController } from '../controllers/StudentAttendanc
 import { AttendanceToolbarController } from '../controllers/AttendanceToolbarController.js';
 import { EventSchedulePresenter } from '../controllers/EventSchedulePresenter.js';
 import { AttendanceViews } from '../controllers/AttendanceViews.js';
+import { AttendanceAlertsController } from '../controllers/AttendanceAlertsController.js';
+import { onAuthStateChanged } from '../dashboard.js?v=20261011-optimized';
 export class StudentDashboard {
   constructor({
     document = globalThis.document,
@@ -92,6 +94,14 @@ export class StudentDashboard {
     this.wireAttendanceActions();
     this.wireFaceRegistrationActions();
     this.applyProfile(currentUserProfile);
+    this.attendanceAlerts = new AttendanceAlertsController({ uid: currentUser.uid, document: this.document, window: this.window,
+      getState: () => ({ student: { ...this.studentProfile, uid: currentUser.uid }, events: this.events, attendance: this.attendance,
+        ready: this.eventsConfirmed && this.attendanceConfirmed }) });
+    this.attendanceAlerts.initialize();
+    this.scope.addCleanup(() => this.attendanceAlerts.dispose());
+    this.scope.addCleanup(onAuthStateChanged(auth, user => {
+      if (!user || user.uid !== this.attendanceAlerts.uid) void this.attendanceAlerts.stop().catch(() => {});
+    }));
     this.startSubscriptions();
     void this.initializeCorrectionRequests().catch(() => {});
   }
@@ -120,6 +130,7 @@ export class StudentDashboard {
     dashboard.eventsById = new Map();
     dashboard.attendance = [];
     dashboard.attendanceConfirmed = false;
+    dashboard.eventsConfirmed = false;
     dashboard.fines = [];
     dashboard.dismissedIds = new Set();
     dashboard.studentProfile = undefined;
@@ -285,7 +296,8 @@ export class StudentDashboard {
       }
       dashboard.applyProfile(snapshot.data());
     });
-    dashboard.listen('events', ["dashboard", "events", "history", "attendances"], query(collection(db, "events"), orderBy("openAt", "asc")), snapshot => {
+    dashboard.listen('events', ["*"], query(collection(db, "events"), orderBy("openAt", "asc")), snapshot => {
+      dashboard.eventsConfirmed = !snapshot.metadata?.fromCache && !snapshot.metadata?.hasPendingWrites;
       dashboard.events = snapshot.docs.map(item => ({
         id: item.id,
         ...item.data()
@@ -296,8 +308,9 @@ export class StudentDashboard {
       dashboard.scheduleEventRender();
       dashboard.renderMyAttendances();
       dashboard.scheduleEventStatusRefresh();
+      dashboard.attendanceAlerts?.update();
     });
-    dashboard.listen('attendance', ["dashboard", "events", "history", "attendances", "profile", "fines"], query(collection(db, "attendance"), where("studentUid", "==", currentUser.uid)), snapshot => {
+    dashboard.listen('attendance', ["*"], query(collection(db, "attendance"), where("studentUid", "==", currentUser.uid)), snapshot => {
       dashboard.attendanceConfirmed = !snapshot.metadata?.fromCache;
       dashboard.attendance = snapshot.docs.map(item => ({
         id: item.id,
@@ -305,6 +318,7 @@ export class StudentDashboard {
       }));
       dashboard.scheduleEventRender();
       dashboard.renderMyAttendances();
+      dashboard.attendanceAlerts?.update();
     });
     dashboard.listen('dismissed-history', ["history"], query(collection(db, "dismissedHistory"), where("studentUid", "==", currentUser.uid)), snapshot => {
       dashboard.dismissedIds = new Set(snapshot.docs.map(item => item.data().eventId));
@@ -331,6 +345,7 @@ export class StudentDashboard {
   applyProfile(profile) {
     if (!this.scope.initialized || !profile || !Object.keys(profile).length) return;
     this.studentProfile = CoursePolicy.profile(profile);
+    this.attendanceAlerts?.update();
     this.correctionRequests?.refreshEvents();
     this.identity.save(currentUser.uid, profile);
     this.renderProfile();
@@ -340,7 +355,7 @@ export class StudentDashboard {
   }
   listen(key, views, reference, callback) {
     const dashboard = this;
-    return dashboard.subscriptions.register(key, views, (guard, onError) => key === 'attendance'
+    return dashboard.subscriptions.register(key, views, (guard, onError) => ['attendance', 'events'].includes(key)
       ? onSnapshot(reference, { includeMetadataChanges: true }, guard(callback), onError)
       : onSnapshot(reference, guard(callback), onError));
   }

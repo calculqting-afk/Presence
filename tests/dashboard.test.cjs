@@ -857,7 +857,7 @@ for (const role of ['Student', 'Admin']) {
     const names = sharedSource.match(/export \{ ([^}]+) \}/)[1].split(', ');
     const shared = Object.fromEntries(names.map(name => [name, () => '']));
     const active = new Map(); const started = [];
-    Object.assign(shared, { currentUser: { uid: 'student-1', email: 'test@example.com' }, currentUserProfile: {}, currentUserRole: role === 'Student' ? 'student' : 'super_admin', activeView: 'dashboard', ASSIGNABLE_ROLE_LABELS: {}, sessionState: {}, db: {}, collection: (_, name) => name, doc: (_, name, id) => `${name}/${id}`, query: value => value, onSnapshot: (reference, optionsOrCallback, next) => { const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : next; started.push(reference); active.set(reference, callback); return () => active.delete(reference); }, setDoc: async () => {}, createDeviceSessionToken: () => 'test-session', FineModalController: class {}, Timestamp: { now: () => new Date(), fromMillis: value => new Date(value) } });
+    Object.assign(shared, { currentUser: { uid: 'student-1', email: 'test@example.com' }, currentUserProfile: {}, currentUserRole: role === 'Student' ? 'student' : 'super_admin', activeView: 'dashboard', ASSIGNABLE_ROLE_LABELS: {}, sessionState: {}, db: {}, collection: (_, name) => name, doc: (_, name, id) => `${name}/${id}`, query: value => value, onAuthStateChanged: () => () => {}, onSnapshot: (reference, optionsOrCallback, next) => { const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : next; started.push(reference); active.set(reference, callback); return () => active.delete(reference); }, setDoc: async () => {}, createDeviceSessionToken: () => 'test-session', FineModalController: class {}, Timestamp: { now: () => new Date(), fromMillis: value => new Date(value) } });
     const browser = fakeBrowser();
     const module = await isolatedModule(`assets/js/${role.toLowerCase()}/${role}Dashboard.js`, shared, browser);
     const dashboard = new module[`${role}Dashboard`]();
@@ -883,7 +883,7 @@ for (const role of ['Student', 'Admin']) {
       assert.equal(active.has('dismissedHistory'), false);
       browser.window.emit('history'); assert.equal(active.has('dismissedHistory'), true);
       browser.window.emit('dashboard'); assert.equal(active.has('dismissedHistory'), false);
-      browser.window.emit('surveys'); assert.equal(active.has('events'), false); assert.equal(active.has('attendance'), false);
+      browser.window.emit('surveys'); assert.equal(active.has('events'), true); assert.equal(active.has('attendance'), true);
       browser.window.emit('attendances'); assert.equal(active.has('events'), true); assert.equal(active.has('attendance'), true);
       const grid = browser.document.querySelector('#studentEventGrid'); let markup = '', writes = 0;
       Object.defineProperty(grid, 'innerHTML', { get: () => markup, set: value => { markup = value; writes++; } });

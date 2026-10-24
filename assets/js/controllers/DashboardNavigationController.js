@@ -1,6 +1,7 @@
 import { ControllerScope } from '../core/ControllerScope.js';
 import { StudentIdentityController } from './StudentIdentityController.js';
 import { AuthActionController } from './AuthActionController.js';
+import { clearPhoneReminders } from './PhoneAttendanceReminders.js';
 import { dashboardRole, pageCopy, currentUser, currentUserRole, currentUserProfile, activeView, previousView, sessionState, ROLE_VIEWS, ROLE_ACCESS_LABELS, roleLabel, renderView, openView, setDashboardViewState, auth, db, signOut, setDoc, doc, serverTimestamp, showDashboardToast } from '../dashboard.js?v=20261011-optimized';
 export class DashboardNavigationController {
   constructor({
@@ -72,6 +73,7 @@ export class DashboardNavigationController {
         successLabel: 'Logged out',
         action: async () => {
           try {
+            await clearPhoneReminders();
             if (sessionState.mediaStream) sessionState.mediaStream.getTracks().forEach(track => track.stop());
             dashboard.window.clearInterval(sessionState.presenceHeartbeatTimer);
             if (dashboardRole === "student" && currentUser && sessionState.presenceSessionId) {

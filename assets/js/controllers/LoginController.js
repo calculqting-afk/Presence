@@ -6,6 +6,7 @@ import { SurveyLinkService } from './SurveyLinkService.js';
 import { SurveyEntryController } from './SurveyEntryController.js';
 import { RegistrationController } from './RegistrationController.js';
 import { LoginSessionService } from './LoginSessionService.js';
+import { clearPhoneReminders } from './PhoneAttendanceReminders.js';
 
 /** Owns the login page lifecycle, form actions, help dialog, and login feedback. */
 export class LoginController {
@@ -25,6 +26,7 @@ export class LoginController {
 
   initialize() {
     if (this.disposed || !this.scope.initialize()) return;
+    void clearPhoneReminders().catch(() => {});
     for (const [name, selector] of Object.entries({ form: '#loginForm', accountInput: '#accountId',
       passwordInput: '#password', passwordToggle: '#passwordToggle', accountError: '#accountError',
       passwordError: '#passwordError', toast: '#toast', toastTitle: '#toastTitle',
