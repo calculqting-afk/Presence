@@ -24,9 +24,10 @@ export function replacePhoneReminders(uid, reminders) {
     const notifications = desired.filter(item => !existing.has(item.key) && item.at > Date.now()).map(item => {
       while (used.has(id)) id++;
       used.add(id);
-      return { id: id++, title: item.action === 'checkout' ? 'Checkout cutoff reminder' : 'Check-in cutoff reminder', body: item.body, channelId: 'attendance-reminders',
+      const action = item.action === 'checkout' ? 'Checkout' : 'Check-in';
+      return { id: id++, title: item.kind === 'opening' ? `${action} opening reminder` : `${action} cutoff reminder`, body: item.body, channelId: 'attendance-reminders',
         smallIcon: 'ic_stat_attendance', isExactNotification: false, schedule: { at: new Date(item.at) },
-        extra: { presenceAttendance: true, key: item.key, eventId: item.eventId } };
+        extra: { presenceAttendance: true, key: item.key, eventId: item.eventId, kind: item.kind || 'cutoff' } };
     });
     if (notifications.length && owner === uid) {
       await native.createChannel({ id: 'attendance-reminders', name: 'Attendance reminders', description: 'Upcoming attendance cutoffs', importance: 4, vibration: true });
@@ -39,3 +40,4 @@ export function replacePhoneReminders(uid, reminders) {
 }
 export function clearPhoneReminders() { owner = null; return replacePhoneReminders(null, []); }
 export async function requestPhoneReminders() { return (await plugin()?.requestPermissions())?.display === 'granted'; }
+export async function phoneReminderPermission() { return (await plugin()?.checkPermissions())?.display || 'unavailable'; }

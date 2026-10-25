@@ -1073,10 +1073,4 @@ body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
 .attendance-alert-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; margin-bottom: 18px; border: 1px solid var(--line); border-left: 4px solid #2d79ed; border-radius: 12px; background: var(--surface, #edf4ff); color: var(--ink, #183153); font-size: .88rem; }
 .attendance-alert-banner[hidden] { display: none; }
 .attendance-alert-banner > span { flex: 1 1 240px; }
-.attendance-alert-settings { margin-bottom: 20px; }
-.attendance-alert-settings summary { cursor: pointer; font-weight: 700; }
-.attendance-alert-settings p { color: var(--muted); font-size: .82rem; line-height: 1.6; margin: 12px 0 0; }
-.attendance-alert-options { display: flex; flex-wrap: wrap; gap: 14px 24px; margin-top: 14px; }
-.attendance-alert-options label { display: flex; align-items: center; gap: 9px; font-size: .85rem; }
-.attendance-alert-options input { width: 18px; height: 18px; accent-color: #2d79ed; }
 :root[data-theme="dark"] .attendance-alert-banner { background: #152b48; color: #e8f0ff; }
