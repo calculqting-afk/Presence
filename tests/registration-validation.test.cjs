@@ -8,7 +8,7 @@ async function controller() {
   const context = vm.createContext({ FormData: class { constructor(form) { return Object.entries(form.values); } } });
   const entry = new vm.SourceTextModule(fs.readFileSync(path.join(__dirname, '../assets/js/controllers/RegistrationController.js'), 'utf8'), { context });
   await entry.link(specifier => {
-    if (specifier.endsWith('/CoursePolicy.js')) return new vm.SourceTextModule(fs.readFileSync(path.join(__dirname, '../assets/js/core/CoursePolicy.js'), 'utf8'), { context });
+    if (/\/(CoursePolicy|GenderPolicy)\.js$/.test(specifier)) return new vm.SourceTextModule(fs.readFileSync(path.join(__dirname, '../assets/js/core', path.basename(specifier)), 'utf8'), { context });
     const names = specifier.includes('firebase-auth')
       ? ['createUserWithEmailAndPassword', 'signInWithEmailAndPassword', 'signOut']
       : ['doc', 'getDoc', 'serverTimestamp', 'setDoc', 'updateDoc', 'writeBatch'];
@@ -39,6 +39,12 @@ test('complete registration still enforces password length and confirmation', as
   assert.equal(registration.registrationValidationMessage({ ...complete, password: 'short', confirmPassword: 'short' }), 'Use a password with at least 8 characters.');
   assert.equal(registration.registrationValidationMessage({ ...complete, confirmPassword: 'different' }), 'Passwords do not match.');
   assert.equal(registration.registrationValidationMessage(complete), '');
+});
+
+test('registration accepts known or unspecified gender and rejects tampered values before Firebase', async () => {
+  const registration = await controller();
+  for (const gender of ['Male', 'Female', '', undefined]) assert.equal(registration.registrationValidationMessage({ ...complete, gender }), '');
+  for (const gender of ['invalid', '<script>', {}, null]) assert.match(registration.registrationValidationMessage({ ...complete, gender }), /gender/);
 });
 
 test('incomplete registration shows missing-field error without submitting or setting busy', async () => {

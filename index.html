@@ -154,6 +154,7 @@
           <legend>Personal details</legend>
           <div class="registration-grid"><label>Student ID<input name="accountId" autocomplete="username" maxlength="64" required></label><label>Birthday<input name="birthday" type="date" autocomplete="bday" required></label></div>
           <div class="registration-grid"><label>First name<input name="firstName" autocomplete="given-name" maxlength="80" required></label><label>Last name<input name="lastName" autocomplete="family-name" maxlength="80" required></label></div>
+          <div class="registration-grid"><label>Gender<select name="gender"><option value="">Not specified</option><option value="Male">Male</option><option value="Female">Female</option></select></label></div>
         </fieldset>
         <fieldset class="registration-step-panel" data-registration-step="1" hidden>
           <legend>School details</legend>
@@ -163,6 +164,7 @@
           <legend>Account security</legend>
           <div class="registration-grid"><label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><label>Confirm password<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label></div>
           <p class="registration-security-hint">Use at least 8 characters. Review your details before sending; your account still needs administrator approval.</p>
+          <p>Gender: <strong data-registration-review="gender"></strong></p>
           <dl class="registration-review" aria-label="Review registration details"><div><dt>Student ID</dt><dd data-registration-review="accountId"></dd></div><div><dt>Birthday</dt><dd data-registration-review="birthday"></dd></div><div><dt>First name</dt><dd data-registration-review="firstName"></dd></div><div><dt>Last name</dt><dd data-registration-review="lastName"></dd></div><div><dt>Course</dt><dd data-registration-review="course"></dd></div><div><dt>Section</dt><dd data-registration-review="section"></dd></div></dl>
         </fieldset>
         <p class="field-error registration-error" id="registrationError" role="alert"></p>

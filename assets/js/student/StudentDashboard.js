@@ -1,5 +1,6 @@
 import { ControllerScope } from '../core/ControllerScope.js';
 import { CoursePolicy } from '../core/CoursePolicy.js';
+import { GenderPolicy } from '../core/GenderPolicy.js';
 import { EventAudiencePolicy } from '../controllers/EventAudiencePolicy.js';
 import { StudentPasswordPolicy } from '../core/StudentPasswordPolicy.js';
 import { StudentHistoryPresenter } from '../controllers/StudentHistoryPresenter.js';
@@ -683,6 +684,7 @@ export class StudentDashboard {
     const profileVisual = dashboard.studentProfile.photoDataUrl ? `<img src="${escapeHtml(dashboard.studentProfile.photoDataUrl)}" alt="${escapeHtml(fullName)} profile photo">` : escapeHtml(initials);
     const fineCount = dashboard.fines.length;
     container.innerHTML = `<div class="profile-grid"><article class="panel student-profile-card"><header class="student-profile-header"><div class="student-profile-identity"><div class="profile-avatar">${profileVisual}</div><div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(dashboard.studentProfile.accountId)}</p><span>Course Registered · <strong>${escapeHtml(dashboard.studentProfile.course || "Not assigned")}</strong></span></div></div><button class="primary-button" type="button" id="editStudentProfile">Edit profile</button></header><div class="student-profile-details"><div class="profile-fact"><span>Birthday</span><strong>${escapeHtml(formatBirthday(dashboard.studentProfile.birthday))}</strong></div><div class="profile-fact"><span>Course</span><strong>${escapeHtml(dashboard.studentProfile.course || "Not assigned")}</strong></div><div class="profile-fact"><span>Section</span><strong>${escapeHtml(dashboard.studentProfile.section)}</strong></div><div class="profile-fact"><span>Account</span><strong>Active</strong></div><div class="profile-fact"><span>Student ID</span><strong>${escapeHtml(dashboard.studentProfile.accountId)}</strong></div><div class="profile-fact"><span>Phone</span><strong>${escapeHtml(dashboard.studentProfile.phone || "Not provided")}</strong></div><div class="profile-fact profile-fact-wide"><span>Email</span><strong>${escapeHtml(dashboard.studentProfile.email || "Not provided")}</strong></div></div><footer class="student-profile-actions"><button class="outline-button" type="button" id="checkStudentFines">Check attendance fines${fineCount ? ` (${fineCount})` : ""}</button></footer></article></div>`;
+    container.querySelector('.student-profile-details')?.insertAdjacentHTML('afterbegin', `<div class="profile-fact"><span>Gender</span><strong>${GenderPolicy.label(dashboard.studentProfile.gender)}</strong></div>`);
   }
   serviceRecordMarkup(fine) {
     const dashboard = this;
@@ -850,6 +852,7 @@ export class StudentDashboard {
     dashboard.document.querySelector("#profileMiddleName").value = dashboard.studentProfile.middleName || "";
     dashboard.document.querySelector("#profileLastName").value = dashboard.studentProfile.lastName || "";
     dashboard.document.querySelector("#profileBirthday").value = dashboard.studentProfile.birthday || "";
+    dashboard.document.querySelector("#profileGender").value = GenderPolicy.normalize(dashboard.studentProfile.gender);
     dashboard.document.querySelector("#profileCourse").value = CoursePolicy.normalize(dashboard.studentProfile.course);
     dashboard.document.querySelector("#profileSection").value = dashboard.studentProfile.section || "1A";
     dashboard.document.querySelector("#profileEmail").value = dashboard.studentProfile.email || "";
@@ -886,6 +889,7 @@ export class StudentDashboard {
         middleName: dashboard.document.querySelector("#profileMiddleName").value.trim(),
         lastName: dashboard.document.querySelector("#profileLastName").value.trim(),
         birthday: dashboard.document.querySelector("#profileBirthday").value,
+        gender: GenderPolicy.normalize(dashboard.document.querySelector("#profileGender").value),
         course: CoursePolicy.normalize(dashboard.document.querySelector("#profileCourse").value),
         section: dashboard.document.querySelector("#profileSection").value,
         email: dashboard.document.querySelector("#profileEmail").value.trim(),

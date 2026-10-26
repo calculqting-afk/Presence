@@ -15,6 +15,7 @@ async function fixture({ resubmit = false } = {}) {
   const context = vm.createContext({ FormData: class { constructor(form) { return Object.entries(form.values); } } });
   const entry = new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/controllers/RegistrationController.js'), 'utf8'), { context });
   await entry.link(specifier => {
+    if (specifier.endsWith('GenderPolicy.js')) return new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/core/GenderPolicy.js'), 'utf8'), { context });
     const exports = specifier.endsWith('CoursePolicy.js') ? { CoursePolicy: { normalize: value => value } } : sdk;
     return new vm.SyntheticModule(Object.keys(exports), function() { for (const [key, value] of Object.entries(exports)) this.setExport(key, value); }, { context });
   });

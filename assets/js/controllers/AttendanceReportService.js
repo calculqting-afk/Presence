@@ -2,6 +2,7 @@ import { AttendanceRecordProjectionService } from './AttendanceRecordProjectionS
 import { EventAudiencePolicy } from './EventAudiencePolicy.js';
 import { AttendanceSort } from './AttendanceSort.js';
 import { CoursePolicy } from '../core/CoursePolicy.js';
+import { GenderPolicy } from '../core/GenderPolicy.js';
 import { AttendanceViews } from './AttendanceViews.js';
 
 export class AttendanceReportService {
@@ -78,6 +79,8 @@ export class AttendanceReportService {
         studentId: AttendanceReportService.clean(student?.accountId || record.studentId || 'Unavailable'),
         name: AttendanceReportService.clean([student?.firstName, student?.middleName, student?.lastName].filter(Boolean).join(' ') || record.studentName || 'Deleted/missing student profile'),
         sortName: AttendanceReportService.clean(student?.lastName || record.studentName || ''),
+        exportName: AttendanceReportService.clean(student ? [student.lastName, [student.firstName, student.middleName].filter(Boolean).join(' ')].filter(Boolean).join(', ') : record.studentName || 'Deleted/missing student profile'),
+        sex: GenderPolicy.normalize(student?.gender ?? student?.sex),
         course: AttendanceReportService.clean(CoursePolicy.normalize(record.studentCourse || student?.course || 'Unavailable')),
         section: AttendanceReportService.clean(event.attendanceRoster?.[record.studentUid] ?? record.rosterSection ?? student?.section ?? record.section ?? 'Unavailable'),
         checkIn: AttendanceReportService.time(checkIn), checkOut: AttendanceReportService.time(record.checkedOutAt),

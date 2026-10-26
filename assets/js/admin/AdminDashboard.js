@@ -1,5 +1,6 @@
 import { ControllerScope } from '../core/ControllerScope.js';
 import { CoursePolicy } from '../core/CoursePolicy.js';
+import { GenderPolicy } from '../core/GenderPolicy.js';
 import { EventAudiencePolicy } from '../controllers/EventAudiencePolicy.js';
 import { EventAudienceController } from '../controllers/EventAudienceController.js';
 import { EventSessionController } from '../controllers/EventSessionController.js';
@@ -1313,6 +1314,7 @@ export class AdminDashboard {
     if (dashboard.can('viewAbsences')) profileActions?.insertAdjacentHTML("afterbegin", `<button class="outline-button" type="button" data-view-student-absences="${escapeHtml(student.uid)}">View absences${absenceCount ? ` (${absenceCount})` : ""}</button>`);
     dashboard.adminStudentDetail.querySelector(".student-info-boxes")?.insertAdjacentHTML("afterbegin", `<div class="student-info-box"><span>Birthday</span><strong>${escapeHtml(formatBirthday(student.birthday))}</strong></div>`);
     dashboard.adminStudentDetail.hidden = false;
+    dashboard.adminStudentDetail.querySelector('.student-info-boxes')?.insertAdjacentHTML('afterbegin', `<div class="student-info-box"><span>Gender</span><strong>${GenderPolicy.label(student.gender)}</strong></div>`);
     dashboard.applyActionPermissions();
   }
   getStudentAbsences(student) {
@@ -1585,6 +1587,7 @@ export class AdminDashboard {
     dashboard.document.querySelector("#managedFirstName").value = student.firstName;
     dashboard.document.querySelector("#managedMiddleName").value = student.middleName || "";
     dashboard.document.querySelector("#managedBirthday").value = student.birthday || "";
+    dashboard.document.querySelector("#managedGender").value = GenderPolicy.normalize(student.gender);
     dashboard.document.querySelector("#managedBirthday").required = false;
     dashboard.document.querySelector("#managedLastName").value = student.lastName;
     dashboard.document.querySelector("#managedSection").value = student.section;
@@ -2220,6 +2223,7 @@ export class AdminDashboard {
       middleName: dashboard.document.querySelector("#managedMiddleName").value.trim(),
       lastName: dashboard.document.querySelector("#managedLastName").value.trim(),
       birthday: dashboard.document.querySelector("#managedBirthday").value,
+      gender: GenderPolicy.normalize(dashboard.document.querySelector("#managedGender").value),
       course: CoursePolicy.normalize(dashboard.document.querySelector("#managedCourse").value),
       section: dashboard.document.querySelector("#managedSection").value,
       password: dashboard.document.querySelector("#managedPassword").value,

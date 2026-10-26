@@ -39,6 +39,14 @@ test('report filters the selected course including legacy course names and pendi
   assert.equal(snapshot(service, [], { students: mixed }).rows.length, 3);
 });
 
+test('report uses saved gender for Excel and keeps missing or explicitly unspecified values blank', async () => {
+  const profiles = students.map((student, index) => ({ ...student, ...(index === 0 ? { gender: 'Female' } : index === 1 ? { gender: '', sex: 'Male' } : {}) }));
+  const report = snapshot(await serviceAt(), [], { students: profiles });
+  assert.equal(report.rows.find(row => row.studentId === '2026-0').sex, 'Female');
+  assert.equal(report.rows.find(row => row.studentId === '2026-1').sex, '');
+  assert.equal(report.rows.find(row => row.studentId === '2026-2').sex, '');
+});
+
 test('live report moves pending to check-in to completed without premature absences', async () => {
   const service = await serviceAt();
   assert.deepEqual(snapshot(service).totals, { rows: 3, present: 0, late: 0, completed: 0, review: 0, absent: 0, pending: 3 });
@@ -151,10 +159,11 @@ async function isolated(relative, sdk = {}) {
     if (modules.has(filename)) return modules.get(filename);
     const module = new vm.SourceTextModule(fs.readFileSync(filename, 'utf8'), { context, identifier: filename, initializeImportMeta: meta => { meta.url = pathToFileURL(filename).href; } });
     modules.set(filename, module);
-    await module.link((specifier, parent) => specifier.startsWith('https:') ? remote : load(path.resolve(path.dirname(parent.identifier), specifier)));
     return module;
   }
-  const module = await load(path.join(root, relative)); await module.evaluate(); return module.namespace;
+  const module = await load(path.join(root, relative));
+  await module.link((specifier, parent) => specifier.startsWith('https:') ? remote : load(path.resolve(path.dirname(parent.identifier), specifier)));
+  await module.evaluate(); return module.namespace;
 }
 test('combined repository verifies both sessions, keeps duplicate-student records separate and cleans all listeners', async () => {
   const callbacks=[];let stopped=0;
@@ -197,6 +206,64 @@ function element() {
     showModal() { this.open = true; }, close() { this.open = false; }, dispatch(type, value) { listeners.get(type)?.(value); }
   };
 }
+
+test('multi-day workbook has ten chronological simple session sheets and safe printable headings', async () => {
+  const { AttendanceExcelExporter } = await import('../assets/js/controllers/AttendanceExcelExporter.js');
+  const base = snapshot(await serviceAt('2026-10-18T12:00:00Z'), [{ ...checkIn, checkedOutAt: stamp('2026-10-17T01:05:00Z') }]);
+  const reports = [];
+  for (let day = 1; day <= 5; day++) for (const session of ['Morning', 'Afternoon']) reports.unshift({ ...base,
+    event: { ...base.event, id: `${day}-${session}`, name: `Day ${day} Intramurals — ${session}`, date: `2026-10-${19 + day}` }, filters: { ...base.filters, session } });
+  const parts = excelParts(await new AttendanceExcelExporter().generateSessions(reports));
+  const names = [...parts.get('xl/workbook.xml').matchAll(/<sheet name="([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(names, Array.from({ length: 5 }, (_, index) => [`Day ${index + 1} Morning`, `Day ${index + 1} Afternoon`]).flat());
+  const xml = parts.get('xl/worksheets/sheet1.xml');
+  assert.match(xml, /LAST NAME, FIRST NAME MIDDLE NAME/); assert.match(xml, /Zulu, Ana/);
+  assert.match(xml, /MALE\/FEMALE/); assert.match(xml, />Yes</); assert.match(xml, />No</); assert.match(xml, />Late</); assert.match(xml, />Absent</);
+  assert.match(xml, /<c r="A7" s="1"/); assert.match(xml, /autoFilter ref="A7:G10"/);
+  assert.match(xml, /ySplit="7"/); assert.match(xml, /orientation="landscape"/); assert.match(xml, /fitToWidth="1" fitToHeight="0"/);
+  assert.match(xml, /CHECK-IN OPENS/); assert.match(xml, /CHECK-IN CUTOFF/);
+  assert.match(xml, /CHECK-OUT OPENS/); assert.match(xml, /CHECK-OUT CUTOFF/);
+  for (const value of Object.values(base.event.schedule)) assert.ok(xml.includes(value));
+  assert.doesNotMatch([...parts.values()].join(''), /SECRET-|studentUid|password|<f[ >]/);
+  assert.equal(parts.size, 15);
+});
+
+test('simple workbook preserves unknown outcomes and uses safe unique worksheet names', async () => {
+  const { AttendanceExcelExporter } = await import('../assets/js/controllers/AttendanceExcelExporter.js');
+  const pending = snapshot(await serviceAt()); pending.event.name = '=Test [event] / ? * : \\ '.repeat(3);
+  pending.rows[0].exportName = '=HYPERLINK("x","y")';
+  const parts = excelParts(await new AttendanceExcelExporter().generateSessions([pending, pending]));
+  const names = [...parts.get('xl/workbook.xml').matchAll(/<sheet name="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(new Set(names.map(name => name.toLowerCase())).size, 2);
+  assert.ok(names.every(name => name.length <= 31 && !/[\[\]:*?/\\]/.test(name)));
+  const xml = parts.get('xl/worksheets/sheet1.xml');
+  assert.match(xml, /Not yet recorded/); assert.doesNotMatch(xml, />No<|>Absent<|<f[ >]/);
+  assert.match(xml, /=HYPERLINK/);
+  await assert.rejects(new AttendanceExcelExporter().generateSessions([]), /Choose/);
+  await assert.rejects(new AttendanceExcelExporter().generateSessions(Array(31).fill(pending)), /Choose/);
+});
+
+test('multi-session selector gates on server verification, invalidates changes, and ignores closed callbacks', async () => {
+  const { AttendanceWorkbookController } = await import('../assets/js/controllers/AttendanceWorkbookController.js');
+  const document = element(); document.body = element(); document.createElement = element;
+  const context = { events: [event], students, studentsReady: true, filters: { event: event.id, status: 'late', search: 'Ana' } };
+  let receive, stopped = 0, online = true, captured, delivered = 0;
+  const controller = new AttendanceWorkbookController({ document, context: () => context, can: () => true, online: () => online, notify() {},
+    repository: { watchSessions: (_sessions, _ids, callback) => { receive = callback; return () => { stopped++; }; } },
+    service: await serviceAt(), exporter: { generateSessions: async reports => { captured = reports; return new Uint8Array([1]); } },
+    files: { deliver: async () => { delivered++; return {}; } } });
+  controller.open(); controller.preview(); await controller.save(); assert.equal(delivered, 0);
+  receive({ kind: 'event', events: [event], exists: true, verified: true });
+  receive({ kind: 'attendance', records: [], verified: false }); await controller.save(); assert.equal(delivered, 0);
+  receive({ kind: 'attendance', records: [], verified: true });
+  assert.equal(controller.reports[0].rows.length, 3); // Status/search must not remove absentees/pending students.
+  await controller.save(); assert.equal(delivered, 1); assert.equal(captured.length, 1);
+  online = false; await controller.save(); assert.equal(delivered, 1); online = true;
+  controller.invalidate(); assert.equal(controller.reports, null); assert.ok(stopped);
+  receive({ kind: 'attendance', records: [], verified: true }); assert.equal(controller.reports, null);
+  controller.preview(); controller.close(); receive({ kind: 'event', events: [event], exists: true, verified: true });
+  assert.equal(controller.dialog, null); assert.equal(controller.reports, null);
+});
 test('report controller blocks stale/offline export, freezes full snapshot and disposes late callbacks', async () => {
   const { AttendanceReportController } = await isolated('assets/js/controllers/AttendanceReportController.js');
   const document = element(); document.body = element(); document.createElement = element;

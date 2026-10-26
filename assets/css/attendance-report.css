@@ -1,3 +1,5 @@
+@import url('./attendance-workbook.css');
+
 .attendance-report-dialog {
   width: min(1200px, calc(100% - 24px));
   max-height: calc(100dvh - 24px);

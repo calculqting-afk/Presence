@@ -15,6 +15,7 @@ async function fixture() {
   const context = vm.createContext({});
   const controller = new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/controllers/AccountApprovalController.js'), 'utf8'), { context });
   await controller.link(specifier => {
+    if (specifier.endsWith('GenderPolicy.js')) return new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/core/GenderPolicy.js'), 'utf8'), { context });
     const exports = specifier.startsWith('https:') ? sdk : { CoursePolicy: { profile: value => value } };
     return new vm.SyntheticModule(Object.keys(exports), function() { for (const [key, value] of Object.entries(exports)) this.setExport(key, value); }, { context });
   });

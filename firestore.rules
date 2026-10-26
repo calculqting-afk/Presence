@@ -235,7 +235,7 @@ service cloud.firestore {
 
     function validStudent(data) {
       return data.keys().hasOnly([
-          "uid", "accountId", "accountIdKey", "authEmail", "firstName", "middleName", "lastName", "birthday",
+          "uid", "accountId", "accountIdKey", "authEmail", "firstName", "middleName", "lastName", "birthday", "gender",
           "course", "section", "email", "phone", "photoDataUrl", "profilePhotoStorage", "profilePhotoDriveFileId", "profilePhotoDriveFileName", "profilePhotoUpdatedAt", "active", "role", "roleUpdatedAt",
           "roleUpdatedBy", "mustChangePassword", "createdAt", "updatedAt"
         ])
@@ -243,6 +243,7 @@ service cloud.firestore {
         && optionalShortText(data, "accountIdKey", 64) && optionalShortText(data, "authEmail", 320)
         && optionalShortText(data, "firstName", 80) && optionalShortText(data, "middleName", 80)
         && optionalShortText(data, "lastName", 80) && optionalShortText(data, "birthday", 10)
+        && (!("gender" in data) || data.gender in ["", "Male", "Female"])
         && optionalShortText(data, "course", 120) && optionalShortText(data, "email", 320)
         && optionalShortText(data, "phone", 24)
         // The bootstrap Super Admin account must never be represented as a student.
@@ -273,23 +274,25 @@ service cloud.firestore {
     }
 
     function validRegistrationRequest(data, requestId) {
-      return data.keys().hasOnly(["uid", "accountId", "accountIdKey", "birthday", "firstName", "lastName", "course", "section", "status", "requestedAt", "updatedAt", "reviewedAt", "reviewedBy"])
+      return data.keys().hasOnly(["uid", "accountId", "accountIdKey", "birthday", "firstName", "lastName", "gender", "course", "section", "status", "requestedAt", "updatedAt", "reviewedAt", "reviewedBy"])
         && data.keys().hasAll(["uid", "accountId", "accountIdKey", "birthday", "firstName", "lastName", "course", "section", "status", "requestedAt", "updatedAt"])
         && request.auth.uid == data.uid && requestId == data.accountIdKey
         && shortText(data.accountId, 64) && shortText(data.accountIdKey, 64) && shortText(data.birthday, 10)
         && shortText(data.firstName, 80) && shortText(data.lastName, 80) && shortText(data.course, 120)
+        && (!("gender" in data) || data.gender in ["", "Male", "Female"])
         && data.section in ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"]
         && data.status == "pending" && data.requestedAt == request.time && data.updatedAt == request.time;
     }
 
     function validRegistrationReapplication(data) {
       return signedIn() && resource.data.uid == request.auth.uid && resource.data.status == "declined"
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["birthday", "firstName", "lastName", "course", "section", "status", "updatedAt"])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["birthday", "firstName", "lastName", "gender", "course", "section", "status", "updatedAt"])
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.accountId == resource.data.accountId
         && request.resource.data.accountIdKey == resource.data.accountIdKey
         && shortText(request.resource.data.birthday, 10)
         && shortText(request.resource.data.firstName, 80) && shortText(request.resource.data.lastName, 80)
+        && (!("gender" in data) || data.gender in ["", "Male", "Female"])
         && shortText(request.resource.data.course, 120)
         && request.resource.data.section in ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"]
         && request.resource.data.status == "pending" && request.resource.data.updatedAt == request.time;
@@ -514,14 +517,14 @@ service cloud.firestore {
         || (canManageStudents()
           && validStudent(request.resource.data)
           && (!isStudentManager() || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            "accountId", "accountIdKey", "firstName", "middleName", "lastName", "birthday", "course", "section", "email", "phone", "photoDataUrl", "updatedAt", "grade", "adviser"
+            "accountId", "accountIdKey", "firstName", "middleName", "lastName", "birthday", "gender", "course", "section", "email", "phone", "photoDataUrl", "updatedAt", "grade", "adviser"
           ]))
           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy"]))
         || (isStudent()
           && request.auth.uid == studentUid
           && validStudent(request.resource.data)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            "accountId", "accountIdKey", "firstName", "middleName", "lastName", "birthday", "course", "section", "email", "phone", "photoDataUrl", "updatedAt"
+            "accountId", "accountIdKey", "firstName", "middleName", "lastName", "birthday", "gender", "course", "section", "email", "phone", "photoDataUrl", "updatedAt"
           ])
           && request.resource.data.firstName is string
           && request.resource.data.lastName is string

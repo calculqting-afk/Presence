@@ -1,5 +1,6 @@
 import { collection, doc, onSnapshot, query, where, serverTimestamp, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 import { CoursePolicy } from '../core/CoursePolicy.js';
+import { GenderPolicy } from '../core/GenderPolicy.js';
 
 export class AccountApprovalController {
   constructor({ document = globalThis.document, db, user, canApprove, studentIdToEmail, onApprovedStudent = () => {}, notify = () => {} } = {}) {
@@ -46,7 +47,7 @@ export class AccountApprovalController {
     this.count.textContent = `${this.requests.length} pending`;
     this.renderNavigationCount(this.requests.length);
     if (!this.requests.length) { this.list.innerHTML = '<div class="empty-state"><h3>No pending account approvals</h3><p>New student registration requests will appear here.</p></div>'; return; }
-    this.list.innerHTML = this.requests.map(item => `<article class="approval-card"><div><h3>${this.escape(item.firstName)} ${this.escape(item.lastName)}</h3><p><strong>${this.escape(item.accountId)}</strong> · ${this.escape(item.course)} · Section ${this.escape(item.section)}</p><p>Birthday: ${this.escape(item.birthday)} · Awaiting approval</p></div>${this.canApprove() ? `<div class="button-row"><button class="outline-button" data-registration-decision="decline" data-request-id="${item.id}" type="button">Decline</button><button class="primary-button" data-registration-decision="approve" data-request-id="${item.id}" type="button">Approve</button></div>` : '<span class="badge gray">View only</span>'}</article>`).join('');
+    this.list.innerHTML = this.requests.map(item => `<article class="approval-card"><div><h3>${this.escape(item.firstName)} ${this.escape(item.lastName)}</h3><p><strong>${this.escape(item.accountId)}</strong> · ${this.escape(item.course)} · Section ${this.escape(item.section)}</p><p>Birthday: ${this.escape(item.birthday)} · Gender: ${GenderPolicy.label(item.gender)} · Awaiting approval</p></div>${this.canApprove() ? `<div class="button-row"><button class="outline-button" data-registration-decision="decline" data-request-id="${item.id}" type="button">Decline</button><button class="primary-button" data-registration-decision="approve" data-request-id="${item.id}" type="button">Approve</button></div>` : '<span class="badge gray">View only</span>'}</article>`).join('');
   }
   escape(value = '') { const node = this.document.createElement('span'); node.textContent = String(value); return node.innerHTML; }
   handleListClick(event) { const button = event.target.closest('[data-registration-decision]'); if (!button || !this.canApprove()) return; this.pending = { requestId: button.dataset.requestId, decision: button.dataset.registrationDecision }; const approved = this.pending.decision === 'approve'; this.modalTitle.textContent = approved ? 'Approve student account?' : 'Decline student account?'; this.modalMessage.textContent = approved ? 'This will activate the student profile and add it to Registered students immediately.' : 'The request will be declined. The student can correct their details and resubmit.'; this.confirm.textContent = approved ? 'Approve account' : 'Decline account'; this.confirm.className = approved ? 'primary-button' : 'danger-button'; this.modal.hidden = false; }
@@ -56,7 +57,7 @@ export class AccountApprovalController {
     return {
       uid: request.uid, accountId: request.accountId, accountIdKey,
       authEmail: this.studentIdToEmail(request.accountId), birthday: request.birthday,
-      firstName: request.firstName, middleName: '', lastName: request.lastName,
+      firstName: request.firstName, middleName: '', lastName: request.lastName, gender: GenderPolicy.normalize(request.gender),
       course: CoursePolicy.normalize(request.course), section: request.section, active: true, role: 'student',
       mustChangePassword: true,
       createdAt: serverTimestamp(), updatedAt: serverTimestamp()

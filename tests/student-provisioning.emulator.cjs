@@ -39,5 +39,19 @@ const profile = id => ({ uid:id,accountId:id,accountIdKey:id,authEmail:`${id}@ex
     const saved=await fetch(base+'/registrationRequests/'+id,{headers:{Authorization:'Bearer owner'}}).then(r=>r.json());
     assert.equal(saved.fields.status.stringValue,'approved');
   }
-  console.log('Student provisioning passed: admin creation, legacy no-role creation and atomic Super/Head approval accepted; privilege escalation, role metadata and unauthorized creation denied.');
+  for (const gender of ['', 'Male', 'Female', 'invalid']) {
+    const id = 'gender-' + (gender || 'blank');
+    await commit([write('students/'+id, { ...profile(id), gender })], 'head', gender !== 'invalid');
+    const request = { uid:id, accountId:id, accountIdKey:id, birthday:'2005-01-01', firstName:'Test', lastName:'Student', course:'BS Info Tech', section:'2A', gender, status:'pending', requestedAt:SERVER, updatedAt:SERVER };
+    await commit([write('registrationRequests/'+id, request)], id, gender !== 'invalid');
+  }
+  await commit([write('students/gender-self',profile('gender-self'))], 'owner');
+  await commit([write('students/gender-self',{gender:'Female',updatedAt:SERVER},['gender','updatedAt'])], 'gender-self');
+  await commit([write('students/gender-self',{gender:'invalid',updatedAt:SERVER},['gender','updatedAt'])], 'gender-self',false);
+  await commit([write('students/gender-self',{gender:'Male',updatedAt:SERVER},['gender','updatedAt'])], 'student',false);
+  await commit([write('students/gender-self',{gender:'Male',updatedAt:SERVER},['gender','updatedAt'])], 'manager');
+  await commit([write('registrationRequests/gender-reapply',{uid:'gender-reapply',accountId:'gender-reapply',accountIdKey:'gender-reapply',birthday:'2005-01-01',firstName:'Test',lastName:'Student',course:'BS Info Tech',section:'2A',status:'declined',requestedAt:SERVER,updatedAt:SERVER})], 'owner');
+  await commit([write('registrationRequests/gender-reapply',{gender:'invalid',status:'pending',updatedAt:SERVER},['gender','status','updatedAt'])], 'gender-reapply',false);
+  await commit([write('registrationRequests/gender-reapply',{gender:'Female',status:'pending',updatedAt:SERVER},['gender','status','updatedAt'])], 'gender-reapply');
+  console.log('Student provisioning and gender Rules passed: creation/approval/legacy, self and manager edits, registration/reapplication, invalid values and unauthorized edits.');
 })().catch(error=>{console.error(error.message);process.exitCode=1});

@@ -6,6 +6,7 @@ import { AttendanceReportFileService } from './AttendanceReportFileService.js';
 import { AttendanceViews } from './AttendanceViews.js';
 import { AttendanceExcelExporter } from './AttendanceExcelExporter.js';
 import { AttendanceExcelFileService } from './AttendanceExcelFileService.js';
+import { AttendanceWorkbookController } from './AttendanceWorkbookController.js';
 
 export class AttendanceReportController {
   constructor({ document, window, db, can, context, summary, checkoutCloseDate, notify,
@@ -45,7 +46,7 @@ export class AttendanceReportController {
     this.scope.listen(dialog, 'close', () => { if (!dialog.open) this.close(); });
     this.scope.listen(dialog.querySelector('[data-report-retry]'), 'click', () => { this.selectionKey = ''; this.refreshContext(); });
     this.scope.listen(dialog.querySelector('[data-report-download]'), 'click', () => this.export('save'));
-    this.scope.listen(dialog.querySelector('[data-report-excel]'), 'click', () => this.exportExcel());
+    this.scope.listen(dialog.querySelector('[data-report-excel]'), 'click', () => this.chooseWorkbook());
     this.scope.listen(dialog.querySelector('[data-report-share]'), 'click', () => this.export('share'));
     this.scope.listen(dialog.querySelector('[data-report-previous]'), 'click', () => { this.page = Math.max(0, this.page - 1); this.render(); });
     this.scope.listen(dialog.querySelector('[data-report-next]'), 'click', () => { this.page++; this.render(); });
@@ -178,8 +179,16 @@ export class AttendanceReportController {
     } catch (error) { if (this.active) this.notify('Unable to export Excel', error.message || 'Please retry.'); }
     finally { this.exporting = false; this.exportKind = null; this.render(); }
   }
+  chooseWorkbook() {
+    if (this.exporting || !this.active || !this.can()) return;
+    this.workbook ||= new AttendanceWorkbookController({ document: this.document, window: this.window, context: this.context,
+      repository: this.repository, service: this.service, exporter: this.excelExporter, files: this.excelFiles,
+      can: () => this.active && this.can(), online: this.online, notify: this.notify });
+    this.workbook.open();
+  }
   stopWatch() { this.generation++; this.window.clearTimeout(this.timeout); this.unsubscribe?.(); this.unsubscribe = null; this.selectionKey = ''; }
   close() {
+    this.workbook?.close();
     this.active = false; this.window.clearInterval(this.clock); this.stopWatch(); this.report = null; this.records = [];
     this.dialog?.querySelector('[data-report-rows]')?.replaceChildren();
     if (this.dialog?.open) this.dialog.close();

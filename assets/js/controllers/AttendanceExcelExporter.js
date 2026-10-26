@@ -35,16 +35,43 @@ const dateCell = (value, offset = 0, dateOnly = false) => {
   const milliseconds = value ? Date.parse(value) : NaN;
   return Number.isFinite(milliseconds) ? { serial: (milliseconds + offset) / 86400000 + 25569, dateOnly } : 'Not recorded';
 };
-function worksheet(rows, widths, filter = false) {
+function worksheet(rows, widths, filter = false, headerRow = 1) {
   const data = rows.map((row, index) => `<row r="${index + 1}"${index === 0 ? ' ht="30" customHeight="1"' : ''}>${row.map((value, col) => {
-    const reference = `${column(col)}${index + 1}`, style = index === 0 ? 1 : value?.serial !== undefined ? value.dateOnly ? 3 : 2 : 0;
+    const reference = `${column(col)}${index + 1}`, style = index === 0 || index === headerRow - 1 ? 1 : value?.serial !== undefined ? value.dateOnly ? 3 : 2 : 0;
     if (value?.serial !== undefined) return `<c r="${reference}" s="${style}"><v>${value.serial}</v></c>`;
     if (typeof value === 'number' && Number.isFinite(value)) return `<c r="${reference}" s="${style}"><v>${value}</v></c>`;
     return `<c r="${reference}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${escape(value)}</t></is></c>`;
   }).join('')}</row>`).join('');
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="${XML}"><dimension ref="A1:${column(widths.length - 1)}${rows.length}"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="30"/><cols>${widths.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join('')}</cols><sheetData>${data}</sheetData>${filter ? `<autoFilter ref="A1:${column(widths.length - 1)}${rows.length}"/>` : ''}<pageSetup orientation="landscape" paperSize="9"/></worksheet>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="${XML}"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:${column(widths.length - 1)}${rows.length}"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="${headerRow}" topLeftCell="A${headerRow + 1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="30"/><cols>${widths.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join('')}</cols><sheetData>${data}</sheetData>${filter ? `<autoFilter ref="A${headerRow}:${column(widths.length - 1)}${rows.length}"/>` : ''}<pageMargins left="0.25" right="0.25" top="0.5" bottom="0.5" header="0.2" footer="0.2"/><pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="0"/></worksheet>`;
 }
 export class AttendanceExcelExporter {
+  async generateSessions(reports) {
+    if (!Array.isArray(reports) || !reports.length || reports.length > 30 || reports.reduce((count, report) => count + report.rows.length, 0) > 5000) throw new Error('Choose 1–30 sessions with at most 5,000 student rows in total.');
+    const used = new Set();
+    const ordered = [...reports].sort((a, b) => a.event.date.localeCompare(b.event.date) || (a.filters.session === 'Afternoon') - (b.filters.session === 'Afternoon') || a.event.id.localeCompare(b.event.id));
+    const sheets = ordered.map(report => {
+      const day = /\bday\s*\d+/i.exec(report.event.name)?.[0];
+      const base = `${day || report.event.name} ${report.filters.session}`.replace(/[\[\]:*?/\\\u0000-\u001f]/g, ' ').replace(/^'+|'+$/g, '').trim() || 'Attendance';
+      let name = base.slice(0, 31).replace(/'+$/g, ''), suffix = 1;
+      while (used.has(name.toLowerCase())) { const tail = ` (${++suffix})`; name = base.slice(0, 31 - tail.length) + tail; }
+      used.add(name.toLowerCase());
+      const time = iso => iso ? new Date(iso).toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' }) : 'Not recorded';
+      const headers = ['LAST NAME, FIRST NAME MIDDLE NAME', 'COURSE/YEAR', 'MALE/FEMALE', 'ATTENDED', 'ARRIVAL', 'TIME IN', 'TIME OUT'];
+      const schedule = report.event.schedule || {};
+      const rows = [[report.event.name, report.filters.session], [report.event.date, report.event.location, 'Philippine time (UTC+08:00)'],
+        ['CHECK-IN OPENS', schedule.checkIn || 'Not set', 'CHECK-IN CUTOFF', schedule.checkInCutoff || 'Not set'],
+        ['CHECK-OUT OPENS', schedule.checkOut || 'Not set', 'CHECK-OUT CUTOFF', schedule.checkOutCutoff || 'Not set'],
+        [`Course: ${report.filters.course} | Section: ${report.filters.section}`], ['Pending/unverified records are not confirmed absences. Names and sex use current profiles.'], headers,
+        ...[...report.rows].sort((a, b) => (a.exportName || a.name).localeCompare(b.exportName || b.name) || a.studentId.localeCompare(b.studentId)).map(row => [
+          row.exportName || row.name, [row.course, /^([1-4])[AB]$/.exec(row.section || '')?.[1]].filter(Boolean).join(' / '), row.sex || '',
+          row.checkInIso ? 'Yes' : row.status === 'absent' ? 'No' : row.status === 'pending' ? 'Not yet recorded' : 'Needs review',
+          row.checkInIso ? row.late ? 'Late' : 'On time' : row.status === 'absent' ? 'Absent' : row.status === 'pending' ? 'Not yet recorded' : 'Needs review',
+          time(row.checkInIso), time(row.checkOutIso)
+        ])];
+      return { name, rows, widths: [43, 23, 16, 20, 20, 18, 18], filter: true, headerRow: 7 };
+    });
+    return this.workbook(sheets);
+  }
   async generate(report) {
     if (!Array.isArray(report?.rows) || report.rows.length > 5000) throw new Error('Select a verified attendance report with at most 5,000 rows.');
     const headers = ['Student ID', 'Name', 'Course', 'Year level', 'Section', 'Event', 'Event date', 'Session', 'Check-in (PH)', 'Check-out (PH)', 'Arrival', 'Attendance status'];
@@ -66,13 +93,16 @@ export class AttendanceExcelExporter {
     if (report.filters.session === 'Both sessions') {
       for (const name of ['Morning', 'Afternoon']) sheets.push({ name, rows: values(report.rows.filter(row => row.sessionLabel === name)), widths, filter: true });
     } else sheets.push({ name: 'Attendance', rows: values(report.rows), widths, filter: true });
+    return this.workbook(sheets);
+  }
+  workbook(sheets) {
     const files = [
       ['[Content_Types].xml', `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`],
       ['_rels/.rels', `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${REL}/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
-      ['xl/workbook.xml', `<workbook xmlns="${XML}" xmlns:r="${REL}"><bookViews><workbookView/></bookViews><sheets>${sheets.map((sheet, i) => `<sheet name="${sheet.name}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>`],
+      ['xl/workbook.xml', `<workbook xmlns="${XML}" xmlns:r="${REL}"><bookViews><workbookView/></bookViews><sheets>${sheets.map((sheet, i) => `<sheet name="${escape(sheet.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>`],
       ['xl/_rels/workbook.xml.rels', `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="${REL}/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}<Relationship Id="rId${sheets.length + 1}" Type="${REL}/styles" Target="styles.xml"/></Relationships>`],
       ['xl/styles.xml', `<styleSheet xmlns="${XML}"><numFmts count="2"><numFmt numFmtId="164" formatCode="yyyy-mm-dd hh:mm:ss"/><numFmt numFmtId="165" formatCode="yyyy-mm-dd"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1F5CB5"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`],
-      ...sheets.map((sheet, i) => [`xl/worksheets/sheet${i + 1}.xml`, worksheet(sheet.rows, sheet.widths, sheet.filter)])
+      ...sheets.map((sheet, i) => [`xl/worksheets/sheet${i + 1}.xml`, worksheet(sheet.rows, sheet.widths, sheet.filter, sheet.headerRow)])
     ];
     return zip(files);
   }
