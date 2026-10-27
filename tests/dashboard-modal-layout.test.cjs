@@ -15,6 +15,6 @@ test('mobile dashboard modals stay centered with viewport-bounded internal scrol
   assert.match(css, /\.dashboard-modal\s*\{\s*max-height:\s*calc\(100dvh - 24px\)/);
   for (const role of ['student', 'admin']) {
     const html = fs.readFileSync(path.join(root, `pages/${role}-dashboard.html`), 'utf8');
-    assert.match(html, /dashboard\.css\?v=20261024-(?:approval-badge|attendance-alerts)/);
+    assert.match(html, /dashboard\.css\?v=20261027-help-placement/);
   }
 });

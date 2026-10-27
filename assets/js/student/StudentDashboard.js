@@ -1,6 +1,8 @@
 import { ControllerScope } from '../core/ControllerScope.js';
 import { CoursePolicy } from '../core/CoursePolicy.js';
 import { GenderPolicy } from '../core/GenderPolicy.js';
+import { PasswordResetApi } from '../controllers/PasswordResetApi.js';
+import { signInWithEmailAndPassword as signInAfterPasswordReset } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
 import { EventAudiencePolicy } from '../controllers/EventAudiencePolicy.js';
 import { StudentPasswordPolicy } from '../core/StudentPasswordPolicy.js';
 import { StudentHistoryPresenter } from '../controllers/StudentHistoryPresenter.js';
@@ -109,7 +111,7 @@ export class StudentDashboard {
     this.scope.addCleanup(() => this.studentSummary.dispose());
     this.attendanceAlerts = new AttendanceAlertsController({ uid: currentUser.uid, document: this.document, window: this.window,
       getState: () => ({ student: { ...this.studentProfile, uid: currentUser.uid }, events: this.events, attendance: this.attendance,
-        ready: this.eventsConfirmed && this.attendanceConfirmed }) });
+        ready: this.studentProfile?.passwordResetRequired !== true && this.eventsConfirmed && this.attendanceConfirmed }) });
     this.attendanceAlerts.initialize();
     this.scope.addCleanup(() => this.attendanceAlerts.dispose());
     this.scope.addCleanup(onAuthStateChanged(auth, user => {
@@ -119,16 +121,18 @@ export class StudentDashboard {
     void this.initializeCorrectionRequests().catch(() => {});
   }
   async initializeCorrectionRequests() {
+    if ((this.studentProfile || currentUserProfile)?.passwordResetRequired === true) return;
     const { CorrectionRequestsController } = await import('../controllers/CorrectionRequestsController.js');
-    if (!this.scope.initialized || this.correctionRequests) return;
+    if (!this.scope.initialized || this.correctionRequests || this.studentProfile?.passwordResetRequired === true) return;
     this.correctionRequests = new CorrectionRequestsController({ root: this.document.querySelector('#studentCorrectionRequests'),
       db, user: currentUser, getEvents: () => this.events, getStudent: () => ({ ...this.studentProfile, uid: currentUser.uid }), escapeHtml, notify: showDashboardToast });
     this.correctionRequests.initialize();
-    this.scope.addCleanup(() => this.correctionRequests.dispose());
+    this.scope.addCleanup(() => this.correctionRequests?.dispose());
   }
   initializeState() {
     const dashboard = this;
     dashboard.subscriptions = new ScopedSubscriptions({
+      isEnabled: key => key === 'profile' || (dashboard.studentProfile || currentUserProfile)?.passwordResetRequired !== true,
       onError: (error, key) => {
         if (key === 'events') dashboard.eventsConfirmed = false;
         if (key === 'attendance') dashboard.attendanceConfirmed = false;
@@ -252,7 +256,7 @@ export class StudentDashboard {
   }
   wireAttendanceActions() {
     const dashboard = this;
-    dashboard.scope.mount(dashboard.document.body, "beforeend", `<div class="dashboard-modal-backdrop" id="geofenceErrorModal" hidden><section class="dashboard-modal" role="alertdialog" aria-modal="true" aria-labelledby="geofenceErrorTitle" aria-describedby="geofenceErrorMessage"><button class="modal-close" type="button" data-close-geofence-error aria-label="Close">×</button><span class="modal-icon danger">!</span><h2 id="geofenceErrorTitle">Attendance unavailable</h2><p id="geofenceErrorMessage"></p><div class="modal-actions"><button class="primary-button" type="button" data-close-geofence-error>Okay</button></div></section></div>`);
+    dashboard.scope.mount(dashboard.document.body, "beforeend", `<div class="dashboard-modal-backdrop" id="geofenceErrorModal" hidden><section class="dashboard-modal" role="alertdialog" aria-modal="true" aria-labelledby="geofenceErrorTitle" aria-describedby="geofenceErrorMessage"><button class="modal-close" type="button" data-close-geofence-error aria-label="Close">×</button><span class="modal-icon danger presence-modal-logo" aria-hidden="true"></span><h2 id="geofenceErrorTitle">Attendance unavailable</h2><p id="geofenceErrorMessage"></p><div class="modal-actions"><button class="primary-button" type="button" data-close-geofence-error>Okay</button></div></section></div>`);
     dashboard.geofenceErrorModal = dashboard.document.querySelector("#geofenceErrorModal");
     dashboard.document.querySelectorAll("[data-close-geofence-error]").forEach(element => dashboard.scope.listen(element, "click", dashboard.closeGeofenceError));
     dashboard.scope.listen(dashboard.geofenceErrorModal, "click", dashboard.handleGeofenceErrorModalClick);
@@ -362,13 +366,19 @@ export class StudentDashboard {
   applyProfile(profile) {
     if (!this.scope.initialized || !profile || !Object.keys(profile).length) return;
     this.studentProfile = CoursePolicy.profile(profile);
+    // Keep only the readable profile listener while the reset lock is active.
+    if (this.subscriptions?.view != null) this.subscriptions.setView(this.subscriptions.view);
+    if (this.studentProfile.passwordResetRequired === true && this.correctionRequests) {
+      this.correctionRequests.dispose();
+      this.correctionRequests = undefined;
+    }
     this.studentSummary?.render();
     this.attendanceAlerts?.update();
     this.correctionRequests?.refreshEvents();
     this.identity.save(currentUser.uid, profile);
     this.renderProfile();
     this.scheduleEventRender();
-    if (this.studentProfile.mustChangePassword === true) this.openRequiredPasswordChangeModal();
+    if (this.studentProfile.mustChangePassword === true || this.studentProfile.passwordResetRequired === true) this.openRequiredPasswordChangeModal();
     else this.closeRequiredPasswordChangeModal();
   }
   listen(key, views, reference, callback) {
@@ -388,6 +398,7 @@ export class StudentDashboard {
   }
   async updatePresence(status = "online", silent = false) {
     const dashboard = this;
+    if ((dashboard.studentProfile || currentUserProfile)?.passwordResetRequired === true) return;
     const online = status === "online";
     const statusPayload = {
       online,
@@ -977,14 +988,20 @@ export class StudentDashboard {
     dashboard.completeRequiredPasswordChange.textContent = "Saving password…";
     let passwordUpdated = false;
     try {
-      await updatePassword(currentUser, newPassword);
-      passwordUpdated = true;
-      await setDoc(doc(db, "students", currentUser.uid), {
-        mustChangePassword: false,
-        updatedAt: serverTimestamp()
-      }, {
-        merge: true
-      });
+      if (dashboard.studentProfile.passwordResetRequired === true) {
+        const email = auth.currentUser.email;
+        dashboard.passwordResetApi ||= new PasswordResetApi();
+        const result = await dashboard.passwordResetApi.complete(auth.currentUser, newPassword);
+        passwordUpdated = true;
+        await new Promise(resolve => dashboard.window.setTimeout(resolve, Math.max(0, result.signInAfter * 1000 + 200 - Date.now())));
+        await signInAfterPasswordReset(auth, email, newPassword);
+        dashboard.window.location.reload();
+        return;
+      } else {
+        await updatePassword(currentUser, newPassword);
+        passwordUpdated = true;
+        await setDoc(doc(db, "students", currentUser.uid), { mustChangePassword: false, updatedAt: serverTimestamp() }, { merge: true });
+      }
       dashboard.closeRequiredPasswordChangeModal();
       showDashboardToast("Password changed", "Your new password is now active.");
     } catch (error) {

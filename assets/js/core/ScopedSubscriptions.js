@@ -1,9 +1,10 @@
 // Owns listener lifetimes and ignores callbacks from a previous view.
 export class ScopedSubscriptions {
-  constructor({ onError = console.error } = {}) {
+  constructor({ onError = console.error, isEnabled = () => true } = {}) {
     this.entries = new Map();
     this.view = null;
     this.onError = onError;
+    this.isEnabled = isEnabled;
   }
 
   register(key, views, subscribe) {
@@ -15,7 +16,7 @@ export class ScopedSubscriptions {
   setView(view) {
     this.view = view;
     for (const [key, entry] of this.entries) {
-      const needed = entry.views.includes('*') || entry.views.includes(view);
+      const needed = this.isEnabled(key) && (entry.views.includes('*') || entry.views.includes(view));
       if (needed && !entry.unsubscribe) {
         const generation = ++entry.generation;
         const guard = callback => (...args) => {

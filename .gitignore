@@ -17,3 +17,6 @@ android/app/src/main/assets/public/
 firebase-debug.log*
 firestore-debug.log*
 ui-debug.log*
+.wrangler/
+.dev.vars*
+.env*

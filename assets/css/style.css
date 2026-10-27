@@ -512,6 +512,12 @@ footer {
 .dialog p { margin: 12px 0 24px; color: var(--muted); font-size: .86rem; line-height: 1.6; }
 .dialog-close { position: absolute; top: 12px; right: 12px; width: 34px; height: 34px; background: none; border: 0; color: #7d8a9d; font-size: 1.25rem; }
 .dialog-action { padding: 11px 24px; color: white; background: var(--blue-700); border: 0; border-radius: 10px; font-size: .78rem; font-weight: 700; }
+.password-help-dialog { max-height: calc(100dvh - 40px); overflow-y: auto; }
+.dialog-icon.presence-modal-logo { background: transparent url('../images/presence-logo.png') center / contain no-repeat; border-radius: 12px; }
+.password-help-contact { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; text-decoration: none; line-height: 1.5; }
+.password-help-contact:hover { filter: brightness(1.1); }
+.password-help-contact:focus-visible { outline: 3px solid var(--blue-700); outline-offset: 4px; }
+.dialog .password-help-note { margin: 18px 0; font-size: .76rem; }
 .registration-dialog .text-button, .registration-dialog .dialog-action { transition: transform .16s ease, box-shadow .16s ease, background-color .16s ease; }
 .registration-dialog .dialog-action:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(21, 85, 193, .24); }
 .registration-dialog .text-button:active, .registration-dialog .dialog-action:active { transform: translateY(1px) scale(.98); }

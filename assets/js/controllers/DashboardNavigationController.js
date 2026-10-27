@@ -41,7 +41,7 @@ export class DashboardNavigationController {
     <div class="dashboard-modal-backdrop" id="logoutModal" hidden>
       <section class="dashboard-modal logout-modal" role="dialog" aria-modal="true" aria-labelledby="logoutModalTitle">
         <button class="modal-close" type="button" data-close-logout aria-label="Close">×</button>
-        <span class="modal-icon">↙</span>
+        <span class="modal-icon presence-modal-logo" aria-hidden="true"></span>
         <h2 id="logoutModalTitle">Log out of Presence?</h2>
         <p>You will return to the sign-in page and need your credentials to access your account again.</p>
         <div class="modal-actions">

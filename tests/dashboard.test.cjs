@@ -324,6 +324,9 @@ async function isolatedModule(relative, shared = {}, globals = {}) {
     if (specifier.includes('dashboard.js')) return mock('shared', shared);
     if (specifier.includes('firebase-config.js')) return mock('config', { db: {} });
     if (specifier.startsWith('https:')) return mock('sdk', {
+      EmailAuthProvider: { credential: (email, password) => ({ email, password }) },
+      reauthenticateWithCredential: shared.reauthenticateWithCredential || (async () => {}),
+      signInWithEmailAndPassword: shared.signInWithEmailAndPassword || (async () => {}),
       collection: (...args) => ({ path: args.join('/') }), doc: (...args) => ({ path: args.join('/'), id: args.length === 1 ? 'audit-1' : args.at(-1) }),
       Timestamp: { fromDate: date => date }, serverTimestamp: () => 'server-time', runTransaction: async () => {},
       query: (...args) => args, where: (...args) => args, orderBy: (...args) => args, limit: size => ({ limit: size }), startAfter: cursor => ({ cursor }),
@@ -1103,6 +1106,7 @@ for (const role of ['admin', 'student']) test(`the real ${role} bootstrap evalua
   const history = { state: null, replaceState() {}, pushState() {}, go() {} };
   const context = vm.createContext({ ...browser, history, console, URL, setTimeout, clearTimeout, CustomEvent: class { constructor(type, options) { this.type = type; Object.assign(this, options); } }, fetch: async () => ({}) });
   const sdk = { Timestamp: { now: () => new Date(), fromMillis: n => new Date(n), fromDate: n => n }, onAuthStateChanged: (_, next) => { queueMicrotask(() => next({ uid: role, email: role === 'admin' ? 'owner@test.local' : 'student@test.local' })); return () => {}; }, signOut: async () => {}, collection: (_, name) => name, doc: (_, name, uid) => `${name}/${uid}`, query: x => x, where() {}, orderBy() {}, serverTimestamp: () => 'server', onSnapshot: () => () => {}, getDoc: async () => ({ exists: () => true, data: () => ({ role: 'student', active: true }) }), getDocFromServer: async () => ({ exists: () => false, data: () => ({}) }), getDocs: async () => ({ docs: [] }), getDocsFromServer: async () => ({ docs: [] }), setDoc: async () => {}, writeBatch: () => ({ set() {}, delete() {}, commit: async () => {} }), limit() {}, startAfter() {}, runTransaction() {}, addDoc: async () => ({ id: 'test' }), deleteDoc: async () => {}, deleteField() {}, createUserWithEmailAndPassword() {}, deleteUser() {}, signInWithEmailAndPassword() {}, updatePassword() {}, updateProfile() {} };
+  Object.assign(sdk, { EmailAuthProvider: { credential: () => ({}) }, reauthenticateWithCredential: async () => {} });
   const modules = new Map(); const synthetic = (key, values) => {
     if (!modules.has(key)) modules.set(key, new vm.SyntheticModule(Object.keys(values), function() { for(const [name,value] of Object.entries(values)) this.setExport(name,value); }, { context, identifier: key }));
     return modules.get(key);
@@ -1970,6 +1974,59 @@ test('editing an existing student never changes Auth password or resets the firs
   const state={document:browser.document,can:()=>true,students:[{uid:'existing',accountId:'12345678'}],resetStudentForm(){}};
   await AdminDashboard.prototype.handleStudentFormSubmit.call(state,{preventDefault(){}});
   assert.equal(authChanges,0);assert.equal('mustChangePassword' in writes[0].data,false);assert.equal('password' in writes[0].data,false);
+});
+
+test('admin reset reauthenticates the admin, blocks duplicate submits and shows a one-time temporary password', async () => {
+  const browser=fakeBrowser();let verified,finish,calls=0,studentAuthChanges=0;
+  const actor={uid:'head',email:'head@example.test'};
+  const shared=birthdayOnboardingShared({auth:{currentUser:actor},reauthenticateWithCredential:async(user,credential)=>{verified={user,credential};},updatePassword:async()=>studentAuthChanges++});
+  const {AdminDashboard}=await isolatedModule('assets/js/admin/AdminDashboard.js',shared,browser);
+  browser.document.querySelector('#currentStudentPassword').value='AdminTestSecret!';
+  browser.document.querySelector('#studentPasswordResetReason').value='Student forgot password';
+  browser.document.querySelector('#temporaryPasswordResult').hidden=true;
+  const state={document:browser.document,scope:{initialized:true},can:()=>true,selectedPasswordStudent:{uid:'student-1'},
+    passwordResetApi:{reset:async(user,uid,reason)=>{calls++;assert.equal(user,actor);assert.equal(uid,'student-1');assert.equal(reason,'Student forgot password');return new Promise(resolve=>finish=resolve);}}};
+  const pending=AdminDashboard.prototype.handlePasswordChangeFormSubmit.call(state,{preventDefault(){}});
+  await AdminDashboard.prototype.handlePasswordChangeFormSubmit.call(state,{preventDefault(){}});
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(calls,1);assert.equal(verified.user,actor);assert.equal(verified.credential.password,'AdminTestSecret!');
+  finish({temporaryPassword:'Temporary!test-password'});await pending;
+  assert.equal(browser.document.querySelector('#temporaryStudentPassword').value,'Temporary!test-password');
+  assert.equal(browser.document.querySelector('#temporaryPasswordResult').hidden,false);
+  assert.equal(browser.document.querySelector('#currentStudentPassword').value,'');assert.equal(studentAuthChanges,0);
+  await AdminDashboard.prototype.handlePasswordChangeFormSubmit.call(state,{preventDefault(){}});assert.equal(calls,1);
+});
+
+test('reset-locked students keep only profile sync and skip presence writes until unlocked', async()=>{
+  const { ScopedSubscriptions } = await import(pathToFileURL(path.join(root, 'assets/js/core/ScopedSubscriptions.js')));
+  let locked=true; const started=[], stopped=[], callbacks=[];
+  const subscriptions=new ScopedSubscriptions({isEnabled:key=>key==='profile'||!locked});
+  for(const key of ['profile','events','attendance','fines']) subscriptions.register(key,['*'],guard=>{
+    started.push(key);callbacks.push(guard(()=>started.push('stale-'+key)));return ()=>stopped.push(key);
+  });
+  subscriptions.setView('dashboard');assert.deepEqual(started,['profile']);
+  locked=false;subscriptions.setView('dashboard');assert.deepEqual(started,['profile','events','attendance','fines']);
+  locked=true;subscriptions.setView('dashboard');assert.deepEqual(stopped,['events','attendance','fines']);
+  callbacks[1]();assert.ok(!started.includes('stale-events'));
+  const browser=fakeBrowser();let writes=0;
+  const shared=birthdayOnboardingShared({currentUserProfile:{passwordResetRequired:true},setDoc:async()=>writes++});
+  const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
+  await StudentDashboard.prototype.updatePresence.call({});
+  await StudentDashboard.prototype.updatePresence.call({studentProfile:{passwordResetRequired:true}},'offline');
+  await StudentDashboard.prototype.initializeCorrectionRequests.call({studentProfile:{passwordResetRequired:true}});
+  assert.equal(writes,0);
+  subscriptions.stop();
+});
+
+test('protected student completion uses the Worker and fresh sign-in instead of clearing server flags directly', async()=>{
+  const browser=fakeBrowser();let authChanges=0,profileWrites=0,signedIn,reloaded=0;
+  const actor={uid:'student-1',email:'student-1@students.presence.local'};
+  const shared=birthdayOnboardingShared({auth:{currentUser:actor},updatePassword:async()=>authChanges++,setDoc:async()=>profileWrites++,signInWithEmailAndPassword:async(...args)=>{signedIn=args;}});
+  const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
+  browser.document.querySelector('#requiredNewPassword').value='Personal!test-password';browser.document.querySelector('#requiredConfirmPassword').value='Personal!test-password';
+  const state={document:browser.document,window:{setTimeout:callback=>callback(),location:{reload(){reloaded++;}}},studentProfile:{...shared.currentUserProfile,passwordResetRequired:true},completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),
+    passwordResetApi:{complete:async(user,password)=>{assert.equal(user,actor);assert.equal(password,'Personal!test-password');return {signInAfter:0};}},closeRequiredPasswordChangeModal(){}};
+  await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});
+  assert.equal(authChanges,0);assert.equal(profileWrites,0);assert.equal(signedIn[1],actor.email);assert.equal(signedIn[2],'Personal!test-password');assert.equal(reloaded,1);
 });
 
 test('first-login password change rejects reuse, updates Auth before profile and handles duplicate submits', async () => {

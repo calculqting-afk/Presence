@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261024-approval-badge">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261027-help-placement">
   <link rel="stylesheet" href="../assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261024-transparent-toast">
   <link rel="stylesheet" href="../assets/css/button-loading.css?v=20261010-auth-progress">
@@ -251,20 +251,31 @@
   <div class="dashboard-modal-backdrop" id="passwordModal" hidden>
     <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="passwordModalTitle">
       <button class="modal-close" type="button" data-close-password aria-label="Close">×</button>
-      <span class="modal-icon">◇</span>
-      <h2 id="passwordModalTitle">Change student password</h2>
-      <p id="passwordStudentName">Enter the current password before setting a new one.</p>
+      <span class="modal-icon presence-modal-logo" aria-hidden="true"></span>
+      <h2 id="passwordModalTitle">Reset student password</h2>
+      <p id="passwordStudentName">Confirm your admin password to generate a temporary student password.</p>
       <form id="passwordChangeForm">
-        <div class="field"><label for="currentStudentPassword">Current password</label><input id="currentStudentPassword" type="text" required minlength="6" autocomplete="off"></div>
-        <div class="field"><label for="newStudentPassword">New password</label><input id="newStudentPassword" type="text" required minlength="6" maxlength="15" autocomplete="off"><small>Use 6–15 characters. Letters, numbers, and symbols are allowed. The password is visible while you type.</small></div>
-        <div class="modal-actions"><button class="outline-button" type="button" data-close-password>Cancel</button><button class="primary-button" type="submit">Change password</button></div>
+        <div class="field"><label for="currentStudentPassword">Your admin password</label><input id="currentStudentPassword" type="password" required autocomplete="current-password"></div>
+        <div class="field"><label for="studentPasswordResetReason">Reset reason</label><textarea id="studentPasswordResetReason" required minlength="5" maxlength="500"></textarea></div>
+        <div class="modal-actions"><button class="outline-button" type="button" data-close-password>Close</button><button class="primary-button" id="passwordResetSubmit" type="submit">Generate temporary password</button></div>
       </form>
+      <div id="temporaryPasswordResult" class="password-reset-result" hidden>
+        <div class="password-reset-success" role="status"><span aria-hidden="true">✓</span><strong>Temporary password ready</strong></div>
+        <div class="password-reset-credential field">
+          <label for="temporaryStudentPassword">Temporary student password</label>
+          <input id="temporaryStudentPassword" type="text" readonly autocomplete="off" spellcheck="false" aria-describedby="temporaryPasswordHelp">
+          <button class="primary-button" id="copyTemporaryStudentPassword" type="button">Copy temporary password</button>
+        </div>
+        <p id="temporaryPasswordHelp">Copy and deliver privately. The student must create a new password when signing in.</p>
+        <p class="password-reset-once">Shown once. Closing clears this password; issue another reset if it is lost.</p>
+        <div class="modal-actions"><button class="outline-button" type="button" data-close-password>Done</button></div>
+      </div>
     </section>
   </div>
   <div class="dashboard-modal-backdrop" id="removeStudentModal" hidden>
     <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="removeStudentTitle">
       <button class="modal-close" type="button" data-close-remove aria-label="Close">×</button>
-      <span class="modal-icon danger">!</span>
+      <span class="modal-icon danger presence-modal-logo" aria-hidden="true"></span>
       <h2 id="removeStudentTitle">Clear student account?</h2>
       <p id="removeStudentMessage">This permanently removes the student account and its attendance records.</p>
       <div class="field"><label for="removeStudentPassword">Current student password</label><input id="removeStudentPassword" type="text" minlength="6" autocomplete="off" required><small>This action will remove the student's account and all associated data.</small></div>
@@ -275,7 +286,7 @@
   <div class="dashboard-modal-backdrop" id="resetFaceModal" hidden>
     <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="resetFaceTitle" aria-describedby="resetFaceMessage">
       <button class="modal-close" type="button" data-close-reset-face aria-label="Close">×</button>
-      <span class="modal-icon danger">!</span>
+      <span class="modal-icon danger presence-modal-logo" aria-hidden="true"></span>
       <h2 id="resetFaceTitle">Reset face registration?</h2>
       <p id="resetFaceMessage">This removes the student's current face photo from Drive and allows them to register one new photo.</p>
       <div id="faceMissingRecovery" class="face-recovery-box" hidden>
@@ -296,7 +307,7 @@
   <div class="dashboard-modal-backdrop" id="adminFineModal" hidden>
     <section class="dashboard-modal community-service-modal" role="dialog" aria-modal="true" aria-labelledby="adminFineModalTitle" aria-describedby="adminFineModalDescription">
       <button class="modal-close" type="button" data-close-admin-fines aria-label="Close attendance fines">×</button>
-      <span class="modal-icon">!</span>
+      <span class="modal-icon presence-modal-logo" aria-hidden="true"></span>
       <h2 id="adminFineModalTitle">Attendance fines</h2>
       <p id="adminFineModalDescription">Review this student's attendance-fine records.</p>
       <div id="adminFineModalContent"></div>
@@ -306,7 +317,7 @@
   <div class="dashboard-modal-backdrop" id="adminAbsenceModal" hidden>
     <section class="dashboard-modal community-service-modal" role="dialog" aria-modal="true" aria-labelledby="adminAbsenceModalTitle" aria-describedby="adminAbsenceModalDescription">
       <button class="modal-close" type="button" data-close-admin-absences aria-label="Close absence records">×</button>
-      <span class="modal-icon danger">−</span>
+      <span class="modal-icon danger presence-modal-logo" aria-hidden="true"></span>
       <h2 id="adminAbsenceModalTitle">Student absences</h2>
       <p id="adminAbsenceModalDescription">Review completed events without an attendance record.</p>
       <div id="adminAbsenceModalContent"></div>
@@ -316,7 +327,7 @@
   <div class="dashboard-modal-backdrop" id="pastEventRemovalModal" hidden>
     <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="pastEventRemovalTitle" aria-describedby="pastEventRemovalMessage">
       <button class="modal-close" type="button" data-close-past-event-removal aria-label="Close">×</button>
-      <span class="modal-icon danger">!</span>
+      <span class="modal-icon danger presence-modal-logo" aria-hidden="true"></span>
       <h2 id="pastEventRemovalTitle">Remove event?</h2>
       <p id="pastEventRemovalMessage"></p>
       <div class="modal-actions"><button class="outline-button" type="button" data-close-past-event-removal>Cancel</button><button class="small-button danger modal-danger-button" id="confirmPastEventRemoval" type="button">Remove event</button></div>
@@ -325,7 +336,7 @@
   <div class="dashboard-modal-backdrop" id="dataCleanupModal" hidden>
     <section class="dashboard-modal data-cleanup-modal" role="dialog" aria-modal="true" aria-labelledby="dataCleanupTitle" aria-describedby="dataCleanupMessage">
       <button class="modal-close" type="button" data-close-data-cleanup aria-label="Close">×</button>
-      <span class="modal-icon danger">!</span>
+      <span class="modal-icon danger presence-modal-logo" aria-hidden="true"></span>
       <h2 id="dataCleanupTitle">Reset operational data?</h2>
       <p id="dataCleanupMessage">This permanently removes the selected records. Student accounts, administrator profiles, passwords, face registrations, and settings will remain unchanged.</p>
       <div class="cleanup-counts" id="dataCleanupCounts"></div>
@@ -337,7 +348,7 @@
   <div class="dashboard-modal-backdrop" id="roleChangeModal" hidden>
     <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="roleChangeTitle" aria-describedby="roleChangeMessage">
       <button class="modal-close" type="button" data-close-role-change aria-label="Close">×</button>
-      <span class="modal-icon">◇</span>
+      <span class="modal-icon presence-modal-logo" aria-hidden="true"></span>
       <h2 id="roleChangeTitle">Confirm role change</h2>
       <p id="roleChangeMessage"></p>
       <div class="modal-actions"><button class="outline-button" type="button" data-close-role-change>Cancel</button><button class="primary-button" id="confirmRoleChange" type="button">Update role</button></div>
@@ -346,7 +357,7 @@
   <div class="dashboard-modal-backdrop" id="accountApprovalModal" hidden>
     <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="accountApprovalModalTitle" aria-describedby="accountApprovalModalMessage">
       <button class="modal-close" type="button" data-close-account-approval aria-label="Close">×</button>
-      <span class="modal-icon">✓</span><h2 id="accountApprovalModalTitle">Approve student account?</h2><p id="accountApprovalModalMessage"></p>
+      <span class="modal-icon presence-modal-logo" aria-hidden="true"></span><h2 id="accountApprovalModalTitle">Approve student account?</h2><p id="accountApprovalModalMessage"></p>
       <div class="modal-actions"><button class="outline-button" type="button" data-close-account-approval>Cancel</button><button class="primary-button" id="confirmAccountApproval" type="button">Approve account</button></div>
     </section>
   </div>

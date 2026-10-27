@@ -1,6 +1,8 @@
 import { ControllerScope } from '../core/ControllerScope.js';
 import { CoursePolicy } from '../core/CoursePolicy.js';
 import { GenderPolicy } from '../core/GenderPolicy.js';
+import { PasswordResetApi } from '../controllers/PasswordResetApi.js';
+import { EmailAuthProvider, reauthenticateWithCredential } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
 import { EventAudiencePolicy } from '../controllers/EventAudiencePolicy.js';
 import { EventAudienceController } from '../controllers/EventAudienceController.js';
 import { EventSessionController } from '../controllers/EventSessionController.js';
@@ -149,6 +151,8 @@ export class AdminDashboard {
     this.handleWireDirectoryFiltersPresenceViewchange = this.handleWireDirectoryFiltersPresenceViewchange.bind(this);
   }
   dispose() {
+    const temporary = this.document.querySelector('#temporaryStudentPassword'); if (temporary) temporary.value = '';
+    const adminPassword = this.document.querySelector('#currentStudentPassword'); if (adminPassword) adminPassword.value = '';
     this.window.clearInterval(this.removalCountdownTimer);
     this.adminFineModalController?.dispose?.();
     this.adminAbsenceModalController?.dispose?.();
@@ -531,6 +535,11 @@ export class AdminDashboard {
     dashboard.scope.listen(dashboard.document, "keydown", dashboard.handleWireStudentAccountActionsKeydown);
     dashboard.scope.listen(dashboard.document, "keydown", dashboard.handleWireStudentAccountActionsKeydown2);
     dashboard.scope.listen(dashboard.document.querySelector("#passwordChangeForm"), "submit", dashboard.handlePasswordChangeFormSubmit);
+    dashboard.scope.listen(dashboard.document.querySelector('#copyTemporaryStudentPassword'), 'click', async () => {
+      const input = dashboard.document.querySelector('#temporaryStudentPassword');
+      try { await dashboard.window.navigator.clipboard.writeText(input.value); showDashboardToast('Copied', 'Deliver the temporary password privately to the student.'); }
+      catch { input.focus(); input.select(); showDashboardToast('Copy password', 'Select and copy the temporary password.'); }
+    });
     dashboard.scope.listen(dashboard.document.querySelector("#confirmRemoveStudent"), "click", dashboard.handleConfirmRemoveStudentClick);
     dashboard.scope.listen(dashboard.document.querySelector("#confirmResetFace"), "click", dashboard.handleConfirmResetFaceClick);
     dashboard.document.querySelectorAll("[data-close-password]").forEach(button => dashboard.scope.listen(button, "click", dashboard.closePasswordModal));
@@ -1606,9 +1615,13 @@ export class AdminDashboard {
   }
   closePasswordModal() {
     const dashboard = this;
+    if (dashboard.studentPasswordResetBusy) return;
     dashboard.passwordModal.hidden = true;
     dashboard.selectedPasswordStudent = undefined;
     dashboard.document.querySelector("#passwordChangeForm").reset();
+    dashboard.document.querySelector('#temporaryStudentPassword').value = '';
+    dashboard.document.querySelector('#temporaryPasswordResult').hidden = true;
+    dashboard.document.querySelector('#passwordResetSubmit').disabled = false;
   }
   closeRemoveModal() {
     const dashboard = this;
@@ -1628,10 +1641,15 @@ export class AdminDashboard {
   }
   openPasswordModal(student) {
     const dashboard = this;
-    if (!dashboard.can('changePasswords')) return;
+    if (!dashboard.can('changePasswords') || dashboard.studentPasswordResetBusy) return;
+    if (student?.role && student.role !== 'student') { showDashboardToast('Student accounts only', 'Privileged accounts must use a separate recovery process.'); return; }
     dashboard.selectedPasswordStudent = student;
     if (!dashboard.selectedPasswordStudent) return;
-    dashboard.document.querySelector("#passwordStudentName").textContent = `Change the password for ${dashboard.selectedPasswordStudent.firstName} ${dashboard.selectedPasswordStudent.lastName}. Enter the current password to continue.`;
+    dashboard.document.querySelector('#passwordChangeForm').reset();
+    dashboard.document.querySelector('#temporaryStudentPassword').value = '';
+    dashboard.document.querySelector('#temporaryPasswordResult').hidden = true;
+    dashboard.document.querySelector('#passwordResetSubmit').disabled = false;
+    dashboard.document.querySelector("#passwordStudentName").textContent = `Reset ${student.firstName} ${student.lastName} (${student.accountId}). This replaces their password and restricts existing sessions. Confirm YOUR admin password and enter a reason.`;
     dashboard.passwordModal.hidden = false;
     dashboard.document.querySelector("#currentStudentPassword").focus();
   }
@@ -2507,21 +2525,29 @@ export class AdminDashboard {
     }
     submitEvent.preventDefault();
     if (!dashboard.selectedPasswordStudent) return;
-    const currentPassword = dashboard.document.querySelector("#currentStudentPassword").value;
-    const newPassword = dashboard.document.querySelector("#newStudentPassword").value;
+    if (dashboard.studentPasswordResetBusy || !dashboard.document.querySelector('#temporaryPasswordResult').hidden) return;
+    const student = dashboard.selectedPasswordStudent;
+    const currentPassword = dashboard.document.querySelector('#currentStudentPassword').value;
+    const reason = dashboard.document.querySelector('#studentPasswordResetReason').value.trim();
+    if (reason.length < 5) { showDashboardToast('Reason required', 'Enter at least 5 characters.'); return; }
+    dashboard.studentPasswordResetBusy = true;
+    const submit = dashboard.document.querySelector('#passwordResetSubmit'); submit.disabled = true; submit.textContent = 'Resetting…';
     try {
-      await signOut(studentProvisioningAuth).catch(() => {});
-      const credential = await signInWithEmailAndPassword(studentProvisioningAuth, dashboard.selectedPasswordStudent.authEmail || studentIdToEmail(dashboard.selectedPasswordStudent.accountId), currentPassword);
-      if (credential.user.uid !== dashboard.selectedPasswordStudent.uid) throw new Error("The current password does not match this student.");
-      await updatePassword(credential.user, newPassword);
-      await signOut(studentProvisioningAuth);
-      const accountId = dashboard.selectedPasswordStudent.accountId;
-      dashboard.closePasswordModal();
-      showDashboardToast("Password changed", `${accountId} can now use the new password.`);
+      await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(auth.currentUser.email, currentPassword));
+      dashboard.document.querySelector('#currentStudentPassword').value = '';
+      dashboard.passwordResetApi ||= new PasswordResetApi();
+      const result = await dashboard.passwordResetApi.reset(auth.currentUser, student.uid, reason);
+      if (!dashboard.scope.initialized || dashboard.selectedPasswordStudent?.uid !== student.uid) return;
+      dashboard.document.querySelector('#temporaryStudentPassword').value = result.temporaryPassword;
+      dashboard.document.querySelector('#temporaryPasswordResult').hidden = false;
+      dashboard.document.querySelector('#passwordStudentName').textContent = `Password reset for ${student.firstName} ${student.lastName} (${student.accountId}).`;
+      showDashboardToast('Student password reset', 'Copy the temporary password now and deliver it privately. The student must change it at login.');
     } catch (error) {
-      await signOut(studentProvisioningAuth).catch(() => {});
-      const message = error.code === "auth/invalid-credential" ? "The current password is incorrect." : error.code === "auth/weak-password" ? "The new password must contain at least 6 characters." : error.message || "The password could not be changed.";
-      showDashboardToast("Unable to change password", message);
+      submit.disabled = false;
+      showDashboardToast('Unable to confirm reset', error.code?.startsWith('auth/') ? 'Your admin password could not be verified. Sign in again if needed.' : error.message || 'Retry later.');
+    } finally {
+      dashboard.studentPasswordResetBusy = false; submit.textContent = 'Generate temporary password';
+      dashboard.document.querySelector('#currentStudentPassword').value = '';
     }
   }
   async handleConfirmRemoveStudentClick() {

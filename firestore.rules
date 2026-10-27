@@ -68,7 +68,10 @@ service cloud.firestore {
     function isStudent() {
       return signedIn()
         && exists(/databases/$(database)/documents/students/$(request.auth.uid))
-        && get(/databases/$(database)/documents/students/$(request.auth.uid)).data.active == true;
+        && get(/databases/$(database)/documents/students/$(request.auth.uid)).data.active == true
+        && get(/databases/$(database)/documents/students/$(request.auth.uid)).data.get("passwordResetRequired", false) == false
+        && (!("passwordResetValidAfter" in get(/databases/$(database)/documents/students/$(request.auth.uid)).data)
+          || request.auth.token.auth_time > get(/databases/$(database)/documents/students/$(request.auth.uid)).data.passwordResetValidAfter);
     }
 
     function shortText(value, maximum) {
@@ -237,7 +240,7 @@ service cloud.firestore {
       return data.keys().hasOnly([
           "uid", "accountId", "accountIdKey", "authEmail", "firstName", "middleName", "lastName", "birthday", "gender",
           "course", "section", "email", "phone", "photoDataUrl", "profilePhotoStorage", "profilePhotoDriveFileId", "profilePhotoDriveFileName", "profilePhotoUpdatedAt", "active", "role", "roleUpdatedAt",
-          "roleUpdatedBy", "mustChangePassword", "createdAt", "updatedAt"
+          "roleUpdatedBy", "mustChangePassword", "passwordResetRequired", "passwordResetValidAfter", "createdAt", "updatedAt"
         ])
         && optionalShortText(data, "uid", 128) && optionalShortText(data, "accountId", 64)
         && optionalShortText(data, "accountIdKey", 64) && optionalShortText(data, "authEmail", 320)
@@ -262,6 +265,8 @@ service cloud.firestore {
         && (!("roleUpdatedAt" in data) || data.roleUpdatedAt is timestamp)
         && optionalShortText(data, "roleUpdatedBy", 128)
         && (!("mustChangePassword" in data) || data.mustChangePassword is bool)
+        && (!("passwordResetRequired" in data) || data.passwordResetRequired is bool)
+        && (!("passwordResetValidAfter" in data) || (data.passwordResetValidAfter is int && data.passwordResetValidAfter >= 0))
         && (!("createdAt" in data) || data.createdAt is timestamp)
         && (!("updatedAt" in data) || data.updatedAt is timestamp);
     }
@@ -502,14 +507,17 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if (canManageStudents()
           && validStudent(request.resource.data)
+          && !request.resource.data.keys().hasAny(["passwordResetRequired", "passwordResetValidAfter"])
           && (!request.resource.data.keys().hasAny(["role"]) || request.resource.data.role == "student")
           && !request.resource.data.keys().hasAny(["roleUpdatedAt", "roleUpdatedBy"]))
         || (validStudent(request.resource.data)
+          && !request.resource.data.keys().hasAny(["passwordResetRequired", "passwordResetValidAfter"])
           && approvedRegistration(request.resource.data.accountIdKey, request.resource.data.uid)
           && request.resource.data.uid == studentUid
           && request.resource.data.role == "student" && request.resource.data.active == true);
       allow delete: if isSuperAdmin();
       allow update: if (isSuperAdmin()
+          && resource.data.get("passwordResetRequired", false) == false
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["role", "roleUpdatedAt", "roleUpdatedBy"])
           && request.resource.data.role in ["head_admin", "attendance_admin", "student_manager", "student"]
           && request.resource.data.roleUpdatedAt is timestamp
@@ -519,7 +527,7 @@ service cloud.firestore {
           && (!isStudentManager() || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             "accountId", "accountIdKey", "firstName", "middleName", "lastName", "birthday", "gender", "course", "section", "email", "phone", "photoDataUrl", "updatedAt", "grade", "adviser"
           ]))
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy"]))
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy", "passwordResetRequired", "passwordResetValidAfter"]))
         || (isStudent()
           && request.auth.uid == studentUid
           && validStudent(request.resource.data)

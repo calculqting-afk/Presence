@@ -42,7 +42,14 @@ export class LoginController {
       this.scope.listen(this.document.querySelector(selector), 'click', () => this.closeHelp());
     }
     this.scope.listen(this.helpDialog, 'click', event => { if (event.target === this.helpDialog) this.closeHelp(); });
-    this.scope.listen(this.document, 'keydown', event => { if (event.key === 'Escape' && !this.helpDialog.hidden) this.closeHelp(); });
+    this.scope.listen(this.document, 'keydown', event => {
+      if (this.helpDialog.hidden) return;
+      if (event.key === 'Escape') this.closeHelp();
+      if (event.key !== 'Tab') return;
+      const first = this.document.querySelector('#dialogClose'), last = this.document.querySelector('#dialogOkay');
+      if (event.shiftKey && this.document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && this.document.activeElement === last) { event.preventDefault(); first.focus(); }
+    });
     this.scope.listen(this.document.querySelector('#toastClose'), 'click', () => this.hideToast());
     this.scope.listen(this.window, 'pagehide', () => this.dispose(), { once: true });
     this.registration.initialize();
@@ -75,7 +82,7 @@ export class LoginController {
     this.toastTimer = null;
     this.toast?.classList.remove('show');
   }
-  openHelp() { this.helpDialog.hidden = false; this.document.querySelector('#dialogOkay').focus(); }
+  openHelp() { this.helpDialog.hidden = false; this.document.querySelector('#passwordHelpContact').focus(); }
   closeHelp() { this.helpDialog.hidden = true; this.document.querySelector('#helpButton').focus(); }
 
   async submit(event) {

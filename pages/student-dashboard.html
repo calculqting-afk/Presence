@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261024-attendance-alerts">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261027-help-placement">
   <link rel="stylesheet" href="../assets/css/student-attendance-summary.css?v=20261025-grouped">
   <link rel="stylesheet" href="../assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261024-transparent-toast">
@@ -149,7 +149,7 @@
   </div>
   <div class="dashboard-modal-backdrop" id="lateCheckInModal" hidden>
     <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="lateCheckInTitle" aria-describedby="lateCheckInMessage">
-      <span class="modal-icon danger">!</span>
+      <span class="modal-icon danger presence-modal-logo" aria-hidden="true"></span>
       <h2 id="lateCheckInTitle">Late check-in</h2>
       <p id="lateCheckInMessage"></p>
       <div class="modal-actions"><button class="outline-button" type="button" data-cancel-late-check-in>Cancel</button><button class="primary-button" id="confirmLateCheckIn" type="button">Check in as Late</button></div>
@@ -158,7 +158,7 @@
   <div class="dashboard-modal-backdrop" id="studentCommunityServiceModal" hidden>
     <section class="dashboard-modal community-service-modal" role="dialog" aria-modal="true" aria-labelledby="studentCommunityServiceModalTitle" aria-describedby="studentCommunityServiceModalDescription">
       <button class="modal-close" type="button" data-close-community-service aria-label="Close community service details">×</button>
-      <span class="modal-icon">!</span>
+      <span class="modal-icon presence-modal-logo" aria-hidden="true"></span>
       <h2 id="studentCommunityServiceModalTitle">Attendance fines</h2>
       <p id="studentCommunityServiceModalDescription">Review attendance-fine records assigned to your profile.</p>
       <div id="studentCommunityServiceModalContent"></div>
@@ -168,7 +168,7 @@
   <div class="dashboard-modal-backdrop" id="studentProfileModal" hidden>
     <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="studentProfileModalTitle">
       <button class="modal-close" type="button" data-close-student-profile aria-label="Close">×</button>
-      <span class="modal-icon">○</span>
+      <span class="modal-icon presence-modal-logo" aria-hidden="true"></span>
       <h2 id="studentProfileModalTitle">Edit profile</h2>
       <p>Update your personal information, Student ID, and section.</p>
       <form id="studentProfileForm">
@@ -191,7 +191,7 @@
   </div>
   <div class="dashboard-modal-backdrop" id="requiredPasswordChangeModal" hidden>
     <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="requiredPasswordChangeTitle" aria-describedby="requiredPasswordChangeMessage">
-      <span class="modal-icon">◇</span>
+      <span class="modal-icon presence-modal-logo" aria-hidden="true"></span>
       <h2 id="requiredPasswordChangeTitle">Create your new password</h2>
       <p id="requiredPasswordChangeMessage">You signed in with a temporary password. Create a new password before continuing.</p>
       <form id="requiredPasswordChangeForm">
