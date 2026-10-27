@@ -219,7 +219,7 @@ test('admin session form permits ongoing time edits while retaining date/mode an
   assert.equal(mounts.some(html=>html.includes('event-card')),false);
 });
 
-test('real admin save publishes both session events and geofences in one batch; afternoon off creates only morning', async () => {
+test('real admin save atomically publishes session events, geofences and push outbox; afternoon off creates only morning', async () => {
   const names=fs.readFileSync(path.join(root,'assets/js/dashboard.js'),'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
   const shared=Object.fromEntries(names.map(name=>[name,()=> ''])),browser=fakeBrowser(),writes=[],notifications=[];
   let commits=0,enabled=true,mode;
@@ -231,20 +231,22 @@ test('real admin save publishes both session events and geofences in one batch; 
   for(const [id,value] of Object.entries({editingEventId:'',eventName:'Intramurals',eventDate:'2099-10-20',eventTimeIn:'07:00',eventCheckInCutoff:'09:00',eventTimeOut:'11:00',eventCheckOutCutoff:'12:10',eventType:'Assembly',eventLocation:'Hall',eventAudience:'Selected sections',eventNotes:''})) browser.document.querySelector('#'+id).value=value;
   const state={document:browser.document,can:()=>true,studentsLoaded:true,students:[{uid:'a',active:true,section:'2A'}],events:[],eventForm:{dataset:{}},
     eventAudienceEditor:{read:()=>['2A']},eventSessionEditor:{read:()=>({enabled,mode,times:['13:00','14:00','16:00','17:00']})},eventGeofenceEditor:{validate:()=>({enabled:false})},
-    duplicateEventSignature:AdminDashboard.prototype.duplicateEventSignature,stageAfternoonSession:AdminDashboard.prototype.stageAfternoonSession,notifyAfternoonSession:AdminDashboard.prototype.notifyAfternoonSession,notifyRoles:async()=>{},resetEventForm(){}};
+    duplicateEventSignature:AdminDashboard.prototype.duplicateEventSignature,stageAfternoonSession:AdminDashboard.prototype.stageAfternoonSession,stagePushOutbox:AdminDashboard.prototype.stagePushOutbox,notifyAfternoonSession:AdminDashboard.prototype.notifyAfternoonSession,notifyRoles:async()=>{},resetEventForm(){}};
   await AdminDashboard.prototype.handleEventFormSubmit.call(state,{preventDefault(){}});
-  assert.equal(commits,1);assert.equal(writes.length,4);
+  assert.equal(commits,1);assert.equal(writes.length,6);
+  const queued=writes.filter(item=>item.reference.collection==='eventPushOutbox');
+  assert.equal(queued.length,2);assert.equal(queued.every(item=>item.data.pending===true&&item.data.requestedAt.server===true),true);
   assert.equal(writes.find(item=>item.reference.id==='group'&&item.reference.collection==='events').data.sessionPeriod,'morning');
   const afternoon=writes.find(item=>item.reference.id==='group_afternoon'&&item.reference.collection==='events').data;
   assert.equal(afternoon.sessionPeriod,'afternoon');assert.equal(afternoon.timeIn,'13:00');assert.equal(afternoon.attendanceRoster.a,'2A');
   assert.ok(notifications.some(item=>item.eventId==='group_afternoon'));
   writes.length=0;enabled=false;
   await AdminDashboard.prototype.handleEventFormSubmit.call(state,{preventDefault(){}});
-  assert.equal(writes.length,2);assert.equal(writes.some(item=>item.reference.id==='group_afternoon'),false);
+  assert.equal(writes.length,3);assert.equal(writes.some(item=>item.reference.id==='group_afternoon'),false);
   writes.length=0;mode='afternoon';
   for(const [id,value] of Object.entries({eventTimeIn:'13:00',eventCheckInCutoff:'14:00',eventTimeOut:'16:00',eventCheckOutCutoff:'17:00'}))browser.document.querySelector('#'+id).value=value;
   await AdminDashboard.prototype.handleEventFormSubmit.call(state,{preventDefault(){}});
-  assert.equal(writes.length,2);assert.equal(writes.find(item=>item.reference.collection==='events').data.sessionPeriod,'afternoon');
+  assert.equal(writes.length,3);assert.equal(writes.find(item=>item.reference.collection==='events').data.sessionPeriod,'afternoon');
   assert.equal(writes.some(item=>item.reference.id==='group_afternoon'),false,'afternoon-only must not create a second attendance requirement');
 });
 

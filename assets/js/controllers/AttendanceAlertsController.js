@@ -22,6 +22,11 @@ export class AttendanceAlertsController {
   }
   update() {
     if (this.stopped || !this.initialized) return;
+    if (globalThis.PresenceNative?.pushActive) {
+      this.banner.hidden = true;
+      void this.syncPhone([]);
+      return;
+    }
     const now = Date.now(), state = this.getState();
     // A temporary cache/offline transition must not erase previously synced
     // phone alarms.
@@ -57,7 +62,7 @@ export class AttendanceAlertsController {
         if (this.stopped) return;
         // APK foreground only. Ask once for an eligible future reminder.
         // Denied/rationale states never trigger repeated permission prompts.
-        if (permission === 'prompt' && !this.prompted && !this.document.hidden && this.pendingReminders.length) {
+        if (permission === 'prompt' && !globalThis.PresenceNative?.pushNotifications && !this.prompted && !this.document.hidden && this.pendingReminders.length) {
           this.prompted = true;
           try { this.storage?.setItem('presenceAttendancePhonePrompted', '1'); } catch {}
           permission = await requestPhoneReminders() ? 'granted' : 'denied';

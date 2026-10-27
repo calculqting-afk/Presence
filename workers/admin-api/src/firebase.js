@@ -34,9 +34,9 @@ const decode = value => 'booleanValue' in value ? value.booleanValue : 'integerV
   : 'timestampValue' in value ? value.timestampValue : value.stringValue;
 let cachedAccess;
 export class FirebaseGateway {
-  constructor(secret, fetcher = globalThis.fetch.bind(globalThis)) {
+  constructor(secret, fetcher = globalThis.fetch.bind(globalThis), expectedEmail = `presence-password-reset@${PROJECT}.iam.gserviceaccount.com`) {
     try { this.key = JSON.parse(secret); } catch { throw new SafeError(503, 'Reset service is not configured.'); }
-    if (this.key.project_id !== PROJECT || this.key.client_email !== `presence-password-reset@${PROJECT}.iam.gserviceaccount.com`) throw new SafeError(503, 'Reset service is not configured.');
+    if (this.key.project_id !== PROJECT || this.key.client_email !== expectedEmail) throw new SafeError(503, 'Reset service is not configured.');
     this.fetcher = fetcher;
     this.base = `https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/documents`;
   }
@@ -56,8 +56,8 @@ export class FirebaseGateway {
     const response = await this.fetcher(url, { method: body === undefined ? 'GET' : 'POST',
       headers: { Authorization: `Bearer ${await this.access()}`, 'Content-Type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(15000) });
-    if (allowMissing && response.status === 404) return null;
-    if (!response.ok) throw new SafeError(response.status === 409 ? 409 : 503, response.status === 409 ? 'Another request changed this account. Retry.' : 'Firebase operation failed. Retry or contact the administrator.');
+    if (allowMissing && response.status === 404) { await response.body?.cancel();return null; }
+    if (!response.ok) { await response.body?.cancel();throw new SafeError(response.status === 409 ? 409 : 503, response.status === 409 ? 'Another request changed this account. Retry.' : 'Firebase operation failed. Retry or contact the administrator.'); }
     return response.json();
   }
   async user(uid) {

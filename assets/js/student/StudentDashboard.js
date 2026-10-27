@@ -20,6 +20,7 @@ import { AttendanceViews } from '../controllers/AttendanceViews.js';
 import { AttendanceAlertsController } from '../controllers/AttendanceAlertsController.js';
 import { onAuthStateChanged } from '../dashboard.js?v=20261011-optimized';
 import { StudentAttendanceSummaryController } from '../controllers/StudentAttendanceSummaryController.js';
+import { PushAttendanceNotifications, stopAttendancePush } from '../controllers/PushAttendanceNotifications.js';
 export class StudentDashboard {
   constructor({
     document = globalThis.document,
@@ -114,8 +115,15 @@ export class StudentDashboard {
         ready: this.studentProfile?.passwordResetRequired !== true && this.eventsConfirmed && this.attendanceConfirmed }) });
     this.attendanceAlerts.initialize();
     this.scope.addCleanup(() => this.attendanceAlerts.dispose());
+    this.attendancePush = new PushAttendanceNotifications({getUser:()=>auth.currentUser,getStudent:()=>this.studentProfile,
+      notify:showDashboardToast,onOpen:eventId=>{this.pushEventId=eventId;openView('events');this.openPushEvent();this.scheduleEventRender();}});
+    void this.attendancePush.initialize().catch(()=>{});
+    this.scope.addCleanup(()=>this.attendancePush.dispose());
     this.scope.addCleanup(onAuthStateChanged(auth, user => {
-      if (!user || user.uid !== this.attendanceAlerts.uid) void this.attendanceAlerts.stop().catch(() => {});
+      if (!user || user.uid !== this.attendanceAlerts.uid) {
+        void this.attendanceAlerts.stop().catch(() => {});
+        void stopAttendancePush().catch(()=>{});
+      }
     }));
     this.startSubscriptions();
     void this.initializeCorrectionRequests().catch(() => {});
@@ -224,7 +232,7 @@ export class StudentDashboard {
     dashboard.scope.listen(dashboard.document, "keydown", dashboard.handleWireProfileActionsKeydown);
     dashboard.scope.listen(dashboard.requiredPasswordChangeForm, "submit", dashboard.handleRequiredPasswordChangeFormSubmit);
     dashboard.scope.listen(dashboard.document.querySelector('#requiredPasswordSignOut'), 'click', async () => {
-      try { await signOut(auth); dashboard.window.location.replace('../index.html'); }
+      try { await stopAttendancePush(auth.currentUser); await signOut(auth); dashboard.window.location.replace('../index.html'); }
       catch { showDashboardToast('Unable to sign out', 'Please try again.'); }
     });
     dashboard.scope.listen(dashboard.requiredPasswordChangeModal, 'keydown', event => {
@@ -323,6 +331,7 @@ export class StudentDashboard {
         ...item.data()
       }));
       dashboard.eventsById = new Map(dashboard.events.map(event => [event.id, event]));
+      dashboard.openPushEvent?.();
       dashboard.correctionRequests?.render();
       dashboard.metrics?.finish('events-first-data');
       dashboard.scheduleEventRender();
@@ -366,6 +375,7 @@ export class StudentDashboard {
   applyProfile(profile) {
     if (!this.scope.initialized || !profile || !Object.keys(profile).length) return;
     this.studentProfile = CoursePolicy.profile(profile);
+    if (this.studentProfile.passwordResetRequired === true) void stopAttendancePush(auth.currentUser).catch(()=>{});
     // Keep only the readable profile listener while the reset lock is active.
     if (this.subscriptions?.view != null) this.subscriptions.setView(this.subscriptions.view);
     if (this.studentProfile.passwordResetRequired === true && this.correctionRequests) {
@@ -494,12 +504,26 @@ export class StudentDashboard {
     return AttendanceViews.groups(dashboard.events).filter(sessions => !AttendanceViews.state(sessions).closed)
       .map(sessions => AttendanceViews.state(sessions).selected);
   }
+  openPushEvent() {
+    const event=this.eventsById?.get(this.pushEventId);
+    if (!event || !AttendanceViews.state(AttendanceViews.related(event,this.events)).closed) return;
+    this.pushEventId=undefined;
+    openView('attendances');
+    const summary=this.studentSummary;
+    if (!summary?.month) return;
+    summary.selectTab('summary');summary.month.value='';summary.render();
+    summary.event.value=event.sessionGroupId||event.id;
+    summary.session.value=AttendanceViews.label(event).toLowerCase();summary.page=0;summary.render();
+  }
   renderEvents() {
     const dashboard = this;
     if (!['dashboard', 'events', 'history'].includes(dashboard.view)) return;
     if (dashboard.view === 'history') { dashboard.renderAttendanceSummary(); return; }
     const attendanceByEventId = new Map(dashboard.attendance.map(record => [record.eventId, record]));
     const activeEvents = dashboard.currentEventsForStudent();
+    const pushEvent=dashboard.eventsById?.get(dashboard.pushEventId);
+    const pushGroup=pushEvent?.sessionGroupId||pushEvent?.id;
+    if (pushGroup) activeEvents.sort((a,b)=>Number((b.sessionGroupId||b.id)===pushGroup)-Number((a.sessionGroupId||a.id)===pushGroup));
     const eventGrid = dashboard.document.querySelector("#studentEventGrid");
     const timeline = dashboard.document.querySelector("#studentEventTimeline");
     if (!activeEvents.length) {
@@ -527,8 +551,12 @@ export class StudentDashboard {
         if (!eligible && !attended) actionButtons = `<button class="outline-button attendance-action-button" type="button" disabled>View only - attendance for ${escapeHtml(EventAudiencePolicy.label(event))}</button>`;
         if (event.checkoutOnlyReopened && !completed && !checkoutOpen && eligible) actionButtons = '<button class="outline-button attendance-action-button" type="button" disabled>Reopened checkout requires a saved check-in</button>';
         if (!view.current && view.upcoming) actionButtons = `<button class="outline-button attendance-action-button" type="button" disabled>${AttendanceViews.label(view.upcoming)} not open yet — opens at ${escapeHtml(formatEventTime(view.upcoming.timeIn))}</button>`;
-        return `<article class="event-card"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(AttendanceViews.title(event))}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div>${dashboard.schedulePresenter.render(event, dashboard.events)}<p class="event-card-notice">Participants: ${escapeHtml(EventAudiencePolicy.label(event))}</p>${actionNotice}${eligible && event.hasSurvey && !event.surveyArchived ? `<div class="survey-student-tools"><button class="outline-button" type="button" data-survey-event="${escapeHtml(event.id)}">Open / resume survey</button></div>` : ""}<div class="event-card-actions">${!eligible && !attended ? '<span class="badge blue">View only</span>' : attendanceBadge}<div class="event-card-attendance-actions">${actionButtons}</div></div></div></article>`;
+        return `<article class="event-card" data-event-group="${escapeHtml(event.sessionGroupId||event.id)}"><div class="event-accent"></div><div class="event-body"><div class="event-card-kicker"><span class="event-type-badge">${escapeHtml(event.type || "School Event")}</span><span class="event-date">${escapeHtml(formatEventDate(event.date))}</span></div><h3>${escapeHtml(AttendanceViews.title(event))}</h3><div class="event-description"><strong>Description</strong>${escapeHtml(description)}</div>${dashboard.schedulePresenter.render(event, dashboard.events)}<p class="event-card-notice">Participants: ${escapeHtml(EventAudiencePolicy.label(event))}</p>${actionNotice}${eligible && event.hasSurvey && !event.surveyArchived ? `<div class="survey-student-tools"><button class="outline-button" type="button" data-survey-event="${escapeHtml(event.id)}">Open / resume survey</button></div>` : ""}<div class="event-card-actions">${!eligible && !attended ? '<span class="badge blue">View only</span>' : attendanceBadge}<div class="event-card-attendance-actions">${actionButtons}</div></div></div></article>`;
       }).join(""));
+      if (dashboard.view==='events' && pushGroup) {
+        const card=[...eventGrid.querySelectorAll('[data-event-group]')].find(node=>node.dataset.eventGroup===pushGroup);
+        if(card) {card.setAttribute('tabindex','-1');card.scrollIntoView?.({block:'center'});card.focus?.({preventScroll:true});dashboard.pushEventId=undefined;}
+      }
       if (dashboard.view === 'dashboard') dashboard.updateMarkup(timeline, `<div class="timeline">${activeEvents.slice(0, 4).map(event => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(AttendanceViews.title(event))}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${attendanceByEventId.has(event.id) ? '<span class="badge green">Attended</span>' : eventStatusBadge(getEventStatus(event))}</div>`).join("")}</div>`);
     }
     if (dashboard.view === 'events') dashboard.attendanceController.syncLoadingButtons();

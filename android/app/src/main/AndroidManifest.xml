@@ -8,6 +8,8 @@
         android:roundIcon="@drawable/presence_logo"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
+        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_stat_attendance" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="attendance-updates" />
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"

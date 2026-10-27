@@ -8,7 +8,7 @@ export function replacePhoneReminders(uid, reminders) {
   const run = async () => {
     const native = plugin();
     if (!native || (uid && owner !== uid)) return;
-    const desired = uid ? reminders.slice(0, 60) : [];
+    const desired = uid && !globalThis.PresenceNative?.pushActive ? reminders.slice(0, 60) : [];
     const pending = (await native.getPending()).notifications.filter(item => item.extra?.presenceAttendance === true);
     const keys = new Set(desired.map(item => item.key));
     const obsolete = pending.filter(item => !keys.has(item.extra.key));

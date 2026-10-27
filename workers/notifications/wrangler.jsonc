@@ -1,0 +1,15 @@
+{
+  "name": "presence-notifications",
+  "account_id": "45269598cbf34d1b9141607a0d8e19a8",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-27",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": false },
+  "services": [{ "binding": "SELF", "service": "presence-notifications" }],
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": {
+    "PUSH_ENABLED": "true",
+    "ALLOWED_ORIGINS": "https://localhost"
+  }
+}

@@ -548,6 +548,18 @@ service cloud.firestore {
           && request.resource.data.updatedAt is timestamp);
     }
 
+    // An event and its push outbox request are saved in one client batch. Only
+    // the backend reads jobs, device tokens, delivery cursors and schedules.
+    match /eventPushOutbox/{eventId} {
+      allow create, update: if canManageAttendance()
+        && request.resource.data.keys().hasOnly(["eventId", "pending", "requestedAt"])
+        && request.resource.data.eventId == eventId
+        && request.resource.data.pending == true
+        && request.resource.data.requestedAt == request.time
+        && existsAfter(/databases/$(database)/documents/events/$(eventId));
+      allow read, delete: if false;
+    }
+
     match /adminProfiles/{adminUid} {
       allow read, create, update: if isSuperAdmin() && request.auth.uid == adminUid;
       allow delete: if false;

@@ -3,6 +3,7 @@ service-account*.json
 firebase-service-account*.json
 *firebase-adminsdk-*.json
 *.firebase-admin.json
+presence-a873f-*.json
 functions/node_modules/
 node_modules/
 mobile-web/

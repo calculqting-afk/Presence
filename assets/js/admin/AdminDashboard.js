@@ -2103,6 +2103,7 @@ export class AdminDashboard {
           mergeFields: Object.keys(record)
         });
         batch.set(doc(db, "eventGeofences", id), geofence);
+        dashboard.stagePushOutbox?.(batch, id);
         dashboard.stageAfternoonSession?.(batch, id, sessionPlan, afternoonPrevious, geofence);
         await batch.commit();
         linkedRecordsSynced = (await dashboard.syncEventRecordsAfterSave(id, record)).synced;
@@ -2139,6 +2140,7 @@ export class AdminDashboard {
           createdBy: currentUser.uid
         });
         batch.set(doc(db, "eventGeofences", eventReference.id), geofence);
+        dashboard.stagePushOutbox?.(batch, eventReference.id);
         dashboard.stageAfternoonSession?.(batch, eventReference.id, sessionPlan, afternoonPrevious, geofence);
         await batch.commit();
         dashboard.notifyAfternoonSession?.(eventReference.id, sessionPlan, afternoonPrevious);
@@ -2185,6 +2187,10 @@ export class AdminDashboard {
     if (previous) batch.set(reference, plan.afternoon, { mergeFields: Object.keys(plan.afternoon) });
     else batch.set(reference, { ...plan.afternoon, createdAt: serverTimestamp(), createdBy: currentUser.uid });
     batch.set(doc(db, 'eventGeofences', reference.id), geofence);
+    this.stagePushOutbox?.(batch, reference.id);
+  }
+  stagePushOutbox(batch, eventId) {
+    batch.set(doc(db, 'eventPushOutbox', eventId), {eventId, pending:true, requestedAt:serverTimestamp()});
   }
   notifyAfternoonSession(id, plan, previous) {
     const event = plan?.afternoon;
