@@ -10,14 +10,11 @@ service cloud.firestore {
       return isSuperAdmin() || isHeadAdmin() || isAttendanceAdmin() || isStudentManager();
     }
 
-    // The bootstrap email is the protected Super Admin account. Other roles are kept
+    // The pinned authenticated UID is the protected Super Admin account. Other roles are kept
     // on each user's student profile so this works without Cloud Functions.
     function isSuperAdmin() {
       return signedIn()
-        && (
-          request.auth.uid == "8uEjAk72BLWKjvnQJEatBdeVAi02"
-          || request.auth.token.email == "mikhailovna2007@gmail.com"
-        );
+        && request.auth.uid == "8uEjAk72BLWKjvnQJEatBdeVAi02";
     }
 
     function hasStoredRole(role) {
@@ -196,17 +193,24 @@ service cloud.firestore {
     function validCheckoutExtension(data, before) {
       return data.checkoutOnlyReopened == true
         && !data.diff(before).affectedKeys().hasAny([
-          "date", "timeIn", "checkInCutoff", "timeOut", "openAt", "checkInClosesAt", "closeAt", "lateAfterAt", "checkInClose"])
+          "date", "timeIn", "timeOut", "openAt", "closeAt"])
+        && validSavedLateCutoff(data,before)
         && (data.checkOutClosesAt > before.checkOutClosesAt && data.checkOutClosesAt > request.time
           || ('checkoutOnlyReopened' in before && data.checkOutClosesAt == before.checkOutClosesAt && data.checkOutCutoff == before.checkOutCutoff));
+    }
+    function validSavedLateCutoff(data,before) {
+      return !data.diff(before).affectedKeys().hasAny(["checkInCutoff","checkInClosesAt","lateAfterAt","checkInClose"])
+        || (data.checkInClosesAt >= before.checkInClosesAt && data.checkInClosesAt <= data.closeAt
+        && (!('lateAfterAt' in data) || data.lateAfterAt == data.checkInClosesAt)
+        && (!('checkInClose' in data) || data.checkInClose == data.checkInCutoff));
     }
     function validScheduleEdit(data, before) {
       return (before.openAt > request.time || data.date == before.date)
         && ('checkoutOnlyReopened' in before ? validCheckoutExtension(data, before)
           : before.checkOutClosesAt > request.time ? !('checkoutOnlyReopened' in data)
           : ('checkoutOnlyReopened' in data ? validCheckoutExtension(data, before)
-            : !data.diff(before).affectedKeys().hasAny([
-              "date", "timeIn", "checkInCutoff", "timeOut", "checkOutCutoff", "openAt", "checkInClosesAt", "closeAt", "checkOutClosesAt", "lateAfterAt", "checkInClose"])));
+            : (validSavedLateCutoff(data,before) && !data.diff(before).affectedKeys().hasAny([
+              "date", "timeIn", "timeOut", "checkOutCutoff", "openAt", "closeAt", "checkOutClosesAt"]))));
     }
     function validSession(data, eventId) {
       // This helper is used only by the event write rule; resource already
@@ -250,8 +254,7 @@ service cloud.firestore {
         && optionalShortText(data, "course", 120) && optionalShortText(data, "email", 320)
         && optionalShortText(data, "phone", 24)
         // The bootstrap Super Admin account must never be represented as a student.
-        && (!("email" in data) || !data.email.matches("(?i)^mikhailovna2007@gmail\\.com$"))
-        && (!("authEmail" in data) || !data.authEmail.matches("(?i)^mikhailovna2007@gmail\\.com$"))
+        && data.get("uid","") != "8uEjAk72BLWKjvnQJEatBdeVAi02"
         && (!("photoDataUrl" in data) || (shortText(data.photoDataUrl, 350000) && data.photoDataUrl.matches('^data:image/(jpeg|png|webp);base64,.+$')))
         // Kept for existing records created before the Google Drive photo feature
         // was rolled back. Students cannot modify these fields from this version.
@@ -351,7 +354,8 @@ service cloud.firestore {
       return data.keys().hasOnly([
           "studentUid", "studentId", "eventId", "eventName", "eventType", "eventDescription", "eventDate",
           "timeIn", "timeOut", "location", "audience", "checkInLocation", "checkOutLocation", "attendedAt", "arrivalStatus",
-          "checkedInAt", "checkedOutAt", "status", "recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason"
+          "checkedInAt", "checkedOutAt", "status", "recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason",
+          "arrivalRecalculatedAt", "arrivalRecalculatedBy", "arrivalRecalculationId", "arrivalRecalculationReason"
         ])
         && data.keys().hasAll(["studentUid", "studentId", "eventId", "eventName", "eventType", "eventDescription", "eventDate", "timeIn", "timeOut", "location", "audience", "status"])
         && shortText(data.studentUid, 128) && shortText(data.studentId, 64) && shortText(data.eventId, 128)
@@ -437,7 +441,7 @@ service cloud.firestore {
           || (request.time >= (("lateAfterAt" in event) ? event.lateAfterAt : event.checkInClosesAt)
             && data.arrivalStatus == "late"))
         && data.status == "checked-in"
-        && !data.keys().hasAny(["recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason"])
+        && !data.keys().hasAny(["recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason", "arrivalRecalculatedAt", "arrivalRecalculatedBy", "arrivalRecalculationId", "arrivalRecalculationReason"])
         && !data.keys().hasAny(["checkedOutAt", "checkOutLocation"])
         && withinSparkGeofence(data, data.eventId, event);
     }
@@ -473,7 +477,7 @@ service cloud.firestore {
         && attendanceMatchesEvent(data, event) && eligibleForAttendance(event, student, request.auth.uid)
         && data.status == "checkout-only" && data.arrivalStatus == "absent" && data.checkedOutAt == request.time
         && request.time >= event.closeAt && request.time <= event.checkOutClosesAt
-        && !data.keys().hasAny(["attendedAt", "checkedInAt", "checkInLocation", "recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason"])
+        && !data.keys().hasAny(["attendedAt", "checkedInAt", "checkInLocation", "recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason", "arrivalRecalculatedAt", "arrivalRecalculatedBy", "arrivalRecalculationId", "arrivalRecalculationReason"])
         && (!data.keys().hasAny(["checkOutLocation"]) || validLocation(data.checkOutLocation))
         && (event.requiresGeofence != true || data.keys().hasAll(["checkOutLocation"]))
         && (!event.requiresGeofence || withinSparkGeofence({ "checkInLocation": data.checkOutLocation }, data.eventId, event));
@@ -505,7 +509,8 @@ service cloud.firestore {
     match /students/{studentUid} {
       allow get: if isAdmin() || (signedIn() && request.auth.uid == studentUid);
       allow list: if isAdmin();
-      allow create: if (canManageStudents()
+      allow create: if studentUid != "8uEjAk72BLWKjvnQJEatBdeVAi02"
+        && ((canManageStudents()
           && validStudent(request.resource.data)
           && !request.resource.data.keys().hasAny(["passwordResetRequired", "passwordResetValidAfter"])
           && (!request.resource.data.keys().hasAny(["role"]) || request.resource.data.role == "student")
@@ -514,9 +519,12 @@ service cloud.firestore {
           && !request.resource.data.keys().hasAny(["passwordResetRequired", "passwordResetValidAfter"])
           && approvedRegistration(request.resource.data.accountIdKey, request.resource.data.uid)
           && request.resource.data.uid == studentUid
-          && request.resource.data.role == "student" && request.resource.data.active == true);
-      allow delete: if isSuperAdmin();
-      allow update: if (isSuperAdmin()
+          && request.resource.data.role == "student" && request.resource.data.active == true));
+      allow delete: if isSuperAdmin() && !exists(/databases/$(database)/documents/studentIdCorrectionLocks/$(studentUid));
+      allow update: if studentUid != "8uEjAk72BLWKjvnQJEatBdeVAi02"
+        && !exists(/databases/$(database)/documents/studentIdCorrectionLocks/$(studentUid))
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["accountId", "accountIdKey", "authEmail", "uid"])
+        && ((isSuperAdmin()
           && resource.data.get("passwordResetRequired", false) == false
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["role", "roleUpdatedAt", "roleUpdatedBy"])
           && request.resource.data.role in ["head_admin", "attendance_admin", "student_manager", "student"]
@@ -545,7 +553,7 @@ service cloud.firestore {
           && resource.data.mustChangePassword == true
           && request.resource.data.mustChangePassword == false
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["mustChangePassword", "updatedAt"])
-          && request.resource.data.updatedAt is timestamp);
+          && request.resource.data.updatedAt is timestamp));
     }
 
     // An event and its push outbox request are saved in one client batch. Only
@@ -573,7 +581,8 @@ service cloud.firestore {
         && !exists(/databases/$(database)/documents/studentIds/$(studentIdKey))
         && (canManageStudents() || request.resource.data.uid == request.auth.uid);
       allow update: if false;
-      allow delete: if canManageStudents() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow delete: if !exists(/databases/$(database)/documents/studentIdCorrectionLocks/$(resource.data.uid))
+        && (canManageStudents() || (signedIn() && resource.data.uid == request.auth.uid));
     }
 
     match /registrationRequests/{requestId} {
@@ -907,6 +916,9 @@ service cloud.firestore {
         || (validAttendance(request.resource.data) && studentCanCheckIn(attendanceId, request.resource.data))
         || (validAttendance(request.resource.data) && studentCanRecordCheckoutOnly(attendanceId, request.resource.data));
       allow update: if (canManageAttendance()
+          && request.resource.data.keys().hasAll(["arrivalRecalculatedAt","arrivalRecalculatedBy","arrivalRecalculationId","arrivalRecalculationReason"])
+          && validArrivalRecalculation(attendanceId,request.resource.data,resource.data))
+        || (canManageAttendance()
           && request.resource.data.keys().hasAll(["correctionId", "recordSource", "correctedBy", "correctedAt", "correctionReason"])
           && request.resource.data.studentUid == resource.data.studentUid
           && request.resource.data.eventId == resource.data.eventId
@@ -1062,6 +1074,86 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    function eventActivitySnapshot(data) {
+      return {"name":data.get("name",""),"date":data.get("date",""),"timeIn":data.get("timeIn",""),"checkInCutoff":data.get("checkInCutoff",""),
+        "timeOut":data.get("timeOut",""),"checkOutCutoff":data.get("checkOutCutoff",""),"location":data.get("location",""),"audience":data.get("audience",""),
+        "description":data.get("description",""),"audienceSections":data.get("audienceSections",[])};
+    }
+    function attendanceActivitySnapshot(data) {
+      return {"checkedInAt":data.get("checkedInAt",data.get("attendedAt",null)),"checkedOutAt":data.get("checkedOutAt",null),"arrivalStatus":data.get("arrivalStatus",""),"status":data.get("status","")};
+    }
+    function validActivityEntry(data,activityId) {
+      return data.keys().hasOnly(["action","actorUid","subjectUid","subjectId","subjectName","eventId","eventName","reason","before","after","createdAt"])
+        && data.keys().hasAll(["action","actorUid","subjectUid","subjectId","subjectName","eventId","eventName","reason","before","after","createdAt"])
+        && signedIn() && data.actorUid == request.auth.uid && data.createdAt == request.time
+        && shortText(data.reason,1000) && data.reason.size() >= 5
+        && optionalShortText(data,"subjectUid",128) && optionalShortText(data,"subjectId",64) && optionalShortText(data,"subjectName",256)
+        && optionalShortText(data,"eventId",128) && optionalShortText(data,"eventName",160)
+        && ((data.action in ["event-created","event-updated"] && validEventActivity(data))
+          || (data.action == "role-changed" && validRoleActivity(data))
+          || (data.action == "attendance-corrected" && validAttendanceActivity(data,activityId))
+          || (data.action == "arrival-recalculated" && validArrivalActivity(data,activityId)));
+    }
+    function validArrivalRecalculation(attendanceId,data,before) {
+      let event=get(/databases/$(database)/documents/events/$(before.eventId)).data;
+      let audit=getAfter(/databases/$(database)/documents/activityLogs/$("arrival_" + data.arrivalRecalculationId)).data;
+      let checkedIn=before.get("checkedInAt",before.get("attendedAt",null));
+      return canManageAttendance() && before.get("recordSource","") != "admin-corrected"
+        && !before.keys().hasAny(["correctionId","correctedBy","correctedAt"])
+        && checkedIn is timestamp && before.arrivalStatus in ["present","late"]
+        && data.diff(before).affectedKeys().hasOnly(["arrivalStatus","arrivalRecalculatedAt","arrivalRecalculatedBy","arrivalRecalculationId","arrivalRecalculationReason"])
+        && data.arrivalStatus != before.arrivalStatus
+        && data.arrivalStatus == (checkedIn <= event.checkInClosesAt ? "present" : "late")
+        && data.arrivalRecalculatedAt == request.time && data.arrivalRecalculatedBy == request.auth.uid
+        && data.arrivalRecalculationId.matches('^[A-Za-z0-9_-]{1,128}$')
+        && shortText(data.arrivalRecalculationReason,1000) && data.arrivalRecalculationReason.size() >= 5
+        && attendanceId == before.studentUid + "_" + before.eventId
+        && audit.action == "arrival-recalculated" && audit.actorUid == request.auth.uid && audit.createdAt == request.time
+        && audit.subjectUid == before.studentUid && audit.eventId == before.eventId && audit.reason == data.arrivalRecalculationReason
+        && audit.before == attendanceActivitySnapshot(before) && audit.after == attendanceActivitySnapshot(data);
+    }
+    function validArrivalActivity(data,activityId) {
+      let path=/databases/$(database)/documents/attendance/$(data.subjectUid + "_" + data.eventId);
+      let before=get(path).data;
+      let after=getAfter(path).data;
+      return canManageAttendance() && before.arrivalStatus != after.arrivalStatus
+        && activityId == "arrival_" + after.arrivalRecalculationId
+        && after.arrivalRecalculatedAt == request.time && after.arrivalRecalculatedBy == request.auth.uid
+        && data.reason == after.arrivalRecalculationReason && data.subjectId == after.studentId
+        && data.eventName == get(/databases/$(database)/documents/events/$(data.eventId)).data.name
+        && data.before == attendanceActivitySnapshot(before) && data.after == attendanceActivitySnapshot(after);
+    }
+    function validEventActivity(data) {
+      let path = /databases/$(database)/documents/events/$(data.eventId);
+      let after = getAfter(path).data;
+      return canManageAttendance() && existsAfter(path) && data.subjectUid == "" && data.subjectId == "" && data.subjectName == ""
+        && data.eventName == after.name && after.updatedAt == request.time && data.after == eventActivitySnapshot(after)
+        && ((data.action == "event-created" && !exists(path) && data.before == null)
+          || (data.action == "event-updated" && exists(path) && data.before == eventActivitySnapshot(get(path).data) && get(path).data != after));
+    }
+    function validRoleActivity(data) {
+      let path = /databases/$(database)/documents/students/$(data.subjectUid);
+      let before = get(path).data;
+      let after = getAfter(path).data;
+      return isSuperAdmin() && exists(path) && existsAfter(path) && before.get("role","student") != after.role
+        && after.roleUpdatedAt == request.time && after.roleUpdatedBy == request.auth.uid
+        && data.before == {"role":before.get("role","student")} && data.after == {"role":after.role}
+        && data.subjectId == before.accountId && data.eventId == "" && data.eventName == "";
+    }
+    function validAttendanceActivity(data,activityId) {
+      let path = /databases/$(database)/documents/attendance/$(data.subjectUid + "_" + data.eventId);
+      let after = getAfter(path).data;
+      return canManageAttendance() && existsAfter(path) && after.correctedAt == request.time && after.correctedBy == request.auth.uid
+        && activityId == "attendance_" + after.correctionId && data.reason == after.correctionReason
+        && data.subjectId == after.studentId && data.eventName == after.eventName
+        && data.after == attendanceActivitySnapshot(after)
+        && ((!exists(path) && data.before == null) || (exists(path) && data.before == attendanceActivitySnapshot(get(path).data)));
+    }
+    match /activityLogs/{activityId} {
+      allow read: if isSuperAdmin();
+      allow create: if validActivityEntry(request.resource.data,activityId);
+      allow update,delete: if false;
+    }
     match /auditLogs/{auditId} {
       allow read: if isSuperAdmin();
       allow write: if false;

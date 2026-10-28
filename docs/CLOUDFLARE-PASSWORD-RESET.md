@@ -1,5 +1,7 @@
 # Cloudflare admin password reset
 
+The same Worker also supports protected dashboard Student ID corrections. See [ID correction and activity history](ADMIN-ID-AND-ACTIVITY.md) for the two additional IAM permissions, preview-signing secret and independent feature flag. Password resets refuse accounts with a pending ID correction lock.
+
 Worker: `https://presence-admin-api.mikhailovna2007.workers.dev`. Configuration and server code live in `workers/admin-api/` and are excluded from Firebase Hosting and Android assets. No paid Firebase Functions are used. The dedicated service account has only `firebaseauth.users.get`, `firebaseauth.users.update`, `datastore.entities.get/create/update` and `datastore.databases.get`. IAM permissions are database/project scoped, not per student document; Worker authorization is essential. Keep the JSON key outside the project. The existing Cloudflare secret is named `FIREBASE_SERVICE_ACCOUNT`. Never commit it or paste it into chat.
 
 ## Admin flow

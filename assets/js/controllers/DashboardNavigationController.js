@@ -1,3 +1,4 @@
+import { endPresenceSession, bestEffortCleanup } from '../core/PresenceSession.js';
 import { ControllerScope } from '../core/ControllerScope.js';
 import { StudentIdentityController } from './StudentIdentityController.js';
 import { AuthActionController } from './AuthActionController.js';
@@ -74,30 +75,17 @@ export class DashboardNavigationController {
         successLabel: 'Logged out',
         action: async () => {
           try {
-            await stopAttendancePush(auth.currentUser);
-            await clearPhoneReminders();
+            if (dashboardRole === "student") await endPresenceSession({
+              user: currentUser, state: sessionState, window: dashboard.window, storage: dashboard.sessionStorage,
+              write: (collectionName, id, fields) => setDoc(doc(db, collectionName, id), {
+                ...fields, online: false, status: 'logged-out', lastSeen: serverTimestamp(), offlineAt: serverTimestamp()
+              }, { merge: true })
+            });
+            await bestEffortCleanup(() => Promise.allSettled([
+              Promise.resolve().then(() => stopAttendancePush(auth.currentUser)),
+              Promise.resolve().then(() => clearPhoneReminders())
+            ]));
             if (sessionState.mediaStream) sessionState.mediaStream.getTracks().forEach(track => track.stop());
-            dashboard.window.clearInterval(sessionState.presenceHeartbeatTimer);
-            if (dashboardRole === "student" && currentUser && sessionState.presenceSessionId) {
-              sessionState.studentLoggedOut = true;
-              await Promise.allSettled([setDoc(doc(db, "presenceSessions", sessionState.presenceSessionId), {
-                studentUid: currentUser.uid,
-                sessionId: sessionState.presenceSessionId,
-                online: false,
-                status: "logged-out",
-                lastSeen: serverTimestamp(),
-                offlineAt: serverTimestamp()
-              }, {
-                merge: true
-              }), setDoc(doc(db, "presence", currentUser.uid), {
-                online: false,
-                status: "logged-out",
-                lastSeen: serverTimestamp(),
-                offlineAt: serverTimestamp()
-              }, {
-                merge: true
-              })]);
-            }
             await signOut(auth);
             try {
               dashboard.sessionStorage.removeItem("presenceSession");

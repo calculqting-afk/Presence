@@ -10,6 +10,7 @@ export class DashboardState {
     this.mediaStream = null;
     this.presenceHeartbeatTimer = null;
     this.presenceSessionId = null;
+    this.presenceWrite = null;
     this.studentLoggedOut = false;
     this.dashboard = null;
   }

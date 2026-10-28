@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261027-help-placement">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261028-arrival-recalculation">
   <link rel="stylesheet" href="../assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261024-transparent-toast">
   <link rel="stylesheet" href="../assets/css/button-loading.css?v=20261010-auth-progress">
@@ -43,6 +43,7 @@
         <button class="nav-button" data-view="account-approvals" type="button"><span class="nav-icon">✓</span><span>Account Approvals</span><span class="account-approval-nav-count" id="accountApprovalNavCount" aria-hidden="true" hidden></span></button>
         <button class="nav-button" data-view="correction-requests" type="button"><span class="nav-icon">✎</span><span>Correction Requests</span><span class="account-approval-nav-count" id="correctionRequestNavCount" aria-hidden="true" hidden></span></button>
         <button class="nav-button" data-view="profile" type="button"><span class="nav-icon">○</span><span>Profile</span></button>
+        <button class="nav-button" data-view="activity-history" type="button"><span class="nav-icon">▤</span><span>Activity History</span></button>
         <button class="nav-button logout-button" data-logout type="button"><span class="nav-icon">↙</span><span>Logout</span></button>
       </nav>
       <div class="sidebar-spacer"></div>
@@ -87,6 +88,22 @@
           <article class="panel live-attendance-panel"><div class="panel-head"><div><h3>Live attendance</h3><p>Students checking in and out right now.</p></div><button class="link-button" type="button" data-go-view="attendance-line">View attendance line</button></div><div class="attendance-line" id="adminDashboardAttendanceLine"><div class="empty-state">No attendance activity yet.</div></div></article>
         </section>
 
+        <section class="view-section" data-section="activity-history" hidden>
+          <div class="section-head"><div><p class="eyebrow">Super Admin</p><h2>Admin Activity History</h2><p>Review who changed what, when, and why.</p></div></div>
+          <article class="panel" id="adminActivityHistory">
+            <form class="activity-history-filters">
+              <label>Admin<input type="search" data-activity-admin placeholder="Search admin name or UID"></label>
+              <label>Student / event<input type="search" data-activity-subject placeholder="Name, Student ID, or event"></label>
+              <label>Action<select data-activity-action><option value="">All actions</option></select></label>
+              <label>From<input type="date" data-activity-from></label><label>To<input type="date" data-activity-to></label>
+              <button class="primary-button" type="submit">Apply dates</button><button class="outline-button" type="button" data-activity-clear>Clear</button>
+            </form>
+            <p class="activity-history-note">Event, role and attendance changes are recorded from this update forward. Earlier password-reset records are included where available. Password values are never shown.</p>
+            <div class="button-row"><button class="outline-button" type="button" data-activity-refresh>Refresh</button><span data-activity-status role="status"></span></div>
+            <div class="activity-history-list" data-activity-list></div>
+            <button class="outline-button" type="button" data-activity-more hidden>Load older activity</button>
+          </article>
+        </section>
         <section class="view-section" data-section="attendance-line" hidden>
           <div class="section-head attendance-section-head"><h2>Attendance records</h2><div class="button-row attendance-header-actions">
             <span class="badge gray" id="attendanceSyncStatus" role="status" aria-live="polite">Connecting…</span>
@@ -248,6 +265,27 @@
       </div>
     </main>
   </div>
+  <div class="dashboard-modal-backdrop" id="studentIdCorrectionModal" hidden>
+    <section class="dashboard-modal student-id-modal" role="dialog" aria-modal="true" aria-labelledby="studentIdCorrectionTitle" aria-describedby="studentIdCorrectionStatus">
+      <button class="modal-close" type="button" data-close-student-id aria-label="Close">×</button>
+      <span class="modal-icon presence-modal-logo" aria-hidden="true"></span><h2 id="studentIdCorrectionTitle">Correct Student ID</h2>
+      <p id="studentIdCorrectionName"></p>
+      <form id="studentIdCorrectionForm">
+        <div class="field"><label>Current login ID</label><strong id="studentIdCurrentValue"></strong></div>
+        <div class="field"><label for="correctedStudentId">Correct Student ID</label><input id="correctedStudentId" required maxlength="64" pattern="[A-Za-z0-9._\-]+" autocomplete="off"></div>
+        <div class="field"><label for="studentIdCorrectionReason">Reason for correction</label><textarea id="studentIdCorrectionReason" required minlength="5" maxlength="500" rows="3"></textarea></div>
+        <button class="outline-button" id="studentIdPreviewButton" type="submit">Preview correction</button>
+      </form>
+      <p class="activity-history-note" id="studentIdCorrectionStatus" role="status" aria-live="polite"></p>
+      <div id="studentIdPreview" class="student-id-preview" hidden>
+        <strong id="studentIdPreviewName"></strong><div class="student-id-comparison"><div><small>Old login ID</small><strong id="studentIdPreviewOld"></strong></div><span aria-hidden="true">→</span><div><small>Corrected login ID</small><strong id="studentIdPreviewNew"></strong></div></div>
+        <div class="field"><label for="studentIdAdminPassword">Your admin password</label><input id="studentIdAdminPassword" type="password" autocomplete="current-password"></div>
+        <div class="field"><label for="studentIdConfirmValue">Type the corrected ID to confirm</label><input id="studentIdConfirmValue" maxlength="64" autocomplete="off"></div>
+        <button class="primary-button" id="confirmStudentIdCorrection" type="button">Confirm correction</button>
+      </div>
+      <div class="modal-actions"><button class="outline-button" type="button" data-close-student-id>Close</button></div>
+    </section>
+  </div>
   <div class="dashboard-modal-backdrop" id="passwordModal" hidden>
     <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="passwordModalTitle">
       <button class="modal-close" type="button" data-close-password aria-label="Close">×</button>
@@ -351,6 +389,7 @@
       <span class="modal-icon presence-modal-logo" aria-hidden="true"></span>
       <h2 id="roleChangeTitle">Confirm role change</h2>
       <p id="roleChangeMessage"></p>
+      <div class="field"><label for="roleChangeReason">Reason for role change</label><textarea id="roleChangeReason" rows="3" minlength="5" maxlength="1000"></textarea></div>
       <div class="modal-actions"><button class="outline-button" type="button" data-close-role-change>Cancel</button><button class="primary-button" id="confirmRoleChange" type="button">Update role</button></div>
     </section>
   </div>

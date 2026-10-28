@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 function files(directory) {
-  return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]);
+  return fs.readdirSync(directory, { withFileTypes: true }).filter(entry => !['.wrangler', 'node_modules'].includes(entry.name)).flatMap(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]);
 }
 const scripts = [...files('assets/js'), ...files('assets/vendor'), ...files('config'), ...files('workers'), 'functions/index.js', 'functions/recover-student-password.cjs'];
 let failed = false;

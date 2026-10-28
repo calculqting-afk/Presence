@@ -90,6 +90,15 @@ test('legacy cutoff aliases follow edited primary and afternoon schedules, never
   assert.equal(previous.checkInClose,'09:00');
 });
 
+test('finished sessions can extend the late cutoff without reopening attendance or changing checkout times',async()=>{
+  const {EventSessionPolicy:Policy}=await load(),previous=record(),at=new Date('2026-10-20T18:00:00');
+  const changed={...record(),checkInCutoff:'09:10',checkInClosesAt:stamp(new Date('2026-10-20T09:10:00'))};
+  const plan=Policy.prepare({...options(),mode:'morning',enabled:false,previous,record:changed,now:at});
+  assert.equal(plan.primary.checkInCutoff,'09:10');assert.equal(plan.primary.checkoutOnlyReopened,undefined);assert.equal(plan.primary.checkOutCutoff,previous.checkOutCutoff);
+  assert.throws(()=>Policy.prepare({...options(),mode:'morning',enabled:false,previous,record:{...changed,checkInCutoff:'08:50',checkInClosesAt:stamp(new Date('2026-10-20T08:50:00'))},now:at}),/only be extended/);
+  assert.throws(()=>Policy.prepare({...options(),mode:'morning',enabled:false,previous,record:{...changed,checkInCutoff:'11:10',checkInClosesAt:stamp(new Date('2026-10-20T11:10:00'))},now:at}),/checkout opens/);
+});
+
 test('report scopes keep morning and afternoon separate instead of consolidating their students', async () => {
   const {EventSessionPolicy:Policy}=await load();
   const {AttendanceReportService}=await import(pathToFileURL(path.resolve(__dirname,'../assets/js/controllers/AttendanceReportService.js')));

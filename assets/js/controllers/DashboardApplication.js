@@ -1,6 +1,7 @@
+import { endPresenceSession } from '../core/PresenceSession.js';
 import { ControllerScope } from '../core/ControllerScope.js';
 import { StudentIdentityController } from './StudentIdentityController.js';
-import { waitForUser, verifyRole, auth, signOut, wireCommonNavigation, wireNotificationCenter, applyRoleNavigation, dashboardRole, currentUserProfile, currentUserRole, updateDashboardGreeting, sessionState, db, escapeHtml, openView, showDashboardToast, initializeDashboardHistory } from '../dashboard.js?v=20261011-optimized';
+import { waitForUser, verifyRole, auth, signOut, wireCommonNavigation, wireNotificationCenter, applyRoleNavigation, dashboardRole, currentUserProfile, currentUserRole, updateDashboardGreeting, sessionState, db, setDoc, doc, serverTimestamp, escapeHtml, openView, showDashboardToast, initializeDashboardHistory } from '../dashboard.js?v=20261011-optimized';
 import { hasPermission } from '../core/permissions.js?v=20261011-optimized';
 import { LazySurveyController } from './LazySurveyController.js';
 import { DashboardPerformanceController } from './DashboardPerformanceController.js';
@@ -41,7 +42,14 @@ export class DashboardApplication {
     if (!isCurrent()) return;
     if (!authorized) {
       this.identity.clear();
-      if (currentUser) await signOut(auth);
+      if (currentUser) {
+        await endPresenceSession({ user: currentUser, state: sessionState, window: this.window,
+          storage: this.window.sessionStorage,
+          write: (collectionName, id, fields) => setDoc(doc(db, collectionName, id), {
+            ...fields, online: false, status: 'logged-out', lastSeen: serverTimestamp(), offlineAt: serverTimestamp()
+          }, { merge: true }) });
+        await signOut(auth);
+      }
       this.window.location.replace("../index.html");
       return;
     }

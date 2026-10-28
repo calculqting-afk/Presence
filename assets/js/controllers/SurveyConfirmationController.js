@@ -18,6 +18,12 @@ export class SurveyConfirmationController {
     }
     this.dialog.querySelector('h2').textContent = options.title || (enabled ? 'Reopen survey?' : 'Pause survey?');
     this.dialog.querySelector('p').textContent = options.message || (enabled ? 'Students can answer within the original survey window. The deadline will not change.' : 'New answers will be blocked. Existing responses and saved progress will be kept.');
+    this.items?.remove();this.items=null;
+    if(options.items?.length){
+      this.items=this.document.createElement('ul');this.items.className='arrival-recalculation-preview';
+      for(const text of options.items){const item=this.document.createElement('li');item.textContent=text;this.items.append(item);}
+      this.dialog.querySelector('p').after(this.items);
+    }
     this.confirmLabel = options.label || (enabled ? 'Reopen survey' : 'Pause survey');
     this.readyAt = this.now() + (options.countdown || 0) * 1000;
     const confirm = this.dialog.querySelector('[data-confirm]');

@@ -27,11 +27,15 @@ export class EventSessionPolicy {
     if (this.opened(previous, now) && record.date !== previous.date) throw new Error('Keep the event date unchanged after attendance opens. You can still edit its time windows.');
     const end = EventAudiencePolicy.date(previous.checkOutClosesAt);
     if ((previous.checkoutOnlyReopened || (end && end <= now)) && this.scheduleChanged(record, previous)) {
-      const locked = this.scheduleFields.filter(key => !['checkOutCutoff','checkOutClosesAt'].includes(key));
-      if (this.scheduleChanged(record, previous, locked)) throw new Error('Closed-session schedules can only extend the checkout cutoff. Keep the date and all other times unchanged.');
+      const locked = this.scheduleFields.filter(key => !['checkOutCutoff','checkOutClosesAt','checkInCutoff','checkInClosesAt','lateAfterAt','checkInClose'].includes(key));
+      if (this.scheduleChanged(record, previous, locked)) throw new Error('Closed-session schedules can only extend the late cutoff or checkout cutoff. Keep the date and opening times unchanged.');
+      const oldLate=EventAudiencePolicy.date(previous.checkInClosesAt),nextLate=EventAudiencePolicy.date(record.checkInClosesAt),checkoutOpens=EventAudiencePolicy.date(record.closeAt);
+      if(!oldLate||!nextLate||nextLate<oldLate||!checkoutOpens||nextLate>checkoutOpens)throw new Error('A closed session’s late cutoff can only be extended, no later than checkout opens.');
       const next = EventAudiencePolicy.date(record.checkOutClosesAt);
-      if (!end || !next || next <= end || next <= now) throw new Error('Extend the checkout cutoff beyond its previous value and the current time, on the same event date.');
-      record.checkoutOnlyReopened = true;
+      if(this.scheduleChanged(record,previous,['checkOutCutoff','checkOutClosesAt'])){
+        if (!end || !next || next <= end || next <= now) throw new Error('Extend the checkout cutoff beyond its previous value and the current time, on the same event date.');
+        record.checkoutOnlyReopened = true;
+      }
     }
   }
   static scheduleChanged(record, previous, fields = this.scheduleFields) {

@@ -22,7 +22,9 @@ export const studentProvisioningAuth = getAuth(studentProvisioningApp);
 // A separate Firebase app lets a new applicant authenticate and create only their
 // own pending request without replacing the person currently using the login app.
 export const studentProvisioningDb = getFirestore(studentProvisioningApp);
-export const SUPER_ADMIN_EMAIL = "mikhailovna2007@gmail.com";
+// Public account identifier, never a credential. Rules and backend services verify
+// the authenticated UID independently; an email address grants no privileges.
+export const SUPER_ADMIN_UID = "8uEjAk72BLWKjvnQJEatBdeVAi02";
 
 window.addEventListener("load", () => {
   import("https://www.gstatic.com/firebasejs/12.16.0/firebase-analytics.js")

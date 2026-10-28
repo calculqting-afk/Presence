@@ -9,6 +9,21 @@
       "firebase.audience-test.json",
       "AGENTS.md",
       "firestore.rules",
+      "**/.*",
+      ".android-tools/**",
+      "android/**",
+      "mobile/**",
+      "mobile-web/**",
+      "**/*.log",
+      "**/*firebase-adminsdk-*.json",
+      "**/presence-a873f-*.json",
+      "**/service-account*.json",
+      "**/firebase-service-account*.json",
+      "**/*.firebase-admin.json",
+      "**/*.pem",
+      "**/*.key",
+      "**/*.jks",
+      "**/*.keystore",
       "docs/**",
       "tests/**",
       "tools/**",
@@ -23,6 +38,13 @@
       ".codex/**"
     ],
     "headers": [
+      {
+        "source": "**",
+        "headers": [
+          { "key": "X-Content-Type-Options", "value": "nosniff" },
+          { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+        ]
+      },
       {
         "source": "**/*.@(js|css)",
         "headers": [

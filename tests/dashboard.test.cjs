@@ -14,6 +14,7 @@ test('student action presentation omits forbidden controls for every role and pr
     for (const profile of [false, true]) {
       const html = presenter.render({ uid: 'student"1', hasFaceRegistration: true, profile });
       assert.equal(html.includes('data-password-student'), hasPermission(role, 'changePasswords'), role);
+      assert.equal(html.includes('data-correct-student-id'), hasPermission(role, 'correctStudentId'), role);
       assert.equal(html.includes('data-delete-student'), hasPermission(role, 'deleteStudents'), role);
       assert.equal(html.includes('data-reset-face'), hasPermission(role, 'resetFace'), role);
       assert.equal(html.includes(profile ? 'data-edit-student' : 'data-view-student'), hasPermission(role, profile ? 'editStudents' : 'viewStudents'), role);
@@ -24,6 +25,70 @@ test('student action presentation omits forbidden controls for every role and pr
   const admin = fs.readFileSync(path.join(root, 'assets/js/admin/AdminDashboard.js'), 'utf8');
   assert.equal((admin.match(/studentActions.render\(/g) || []).length, 2);
   assert.match(fs.readFileSync(path.join(root, 'assets/js/controllers/DashboardNavigationController.js'), 'utf8'), /Manage student details and face registration/);
+});
+
+test('activity history normalizes legacy reset entries and searches actor, student IDs, event and action', async()=>{
+  const {normalizeActivity,filterActivity}=await isolatedModule('assets/js/controllers/ActivityHistoryController.js');
+  const reset=normalizeActivity({action:'student-password-reset',actorUid:'head',studentUid:'a',studentId:'2510004-1',studentName:'Alex Student',createdAt:{toMillis:()=>123}},'reset','auditLogs');
+  const corrected=normalizeActivity({action:'student-id-corrected',actorUid:'head',studentUid:'a',studentId:'old-id',before:{accountId:'old-id'},after:{accountId:'new-id'},createdAt:{toMillis:()=>124}},'id','auditLogs');
+  const event=normalizeActivity({action:'event-updated',actorUid:'head',eventName:'Intramurals',createdAt:{toMillis:()=>125}},'event','activityLogs');
+  const rows=[reset,corrected,event],names=new Map([['head','Test Reviewer']]);
+  assert.equal(reset.subjectUid,'a');assert.equal(reset.createdAt,123);
+  assert.equal(filterActivity(rows,{admin:'reviewer'},names).length,3);
+  assert.equal(filterActivity(rows,{subject:'2510004-1'}).length,1);
+  assert.equal(filterActivity(rows,{subject:'new-id'}).length,1);
+  assert.equal(filterActivity(rows,{subject:'intramurals',action:'event-updated'}).length,1);
+  assert.equal(filterActivity(rows,{action:'role-changed'}).length,0);
+});
+
+test('activity snapshots whitelist changed fields and never retain arbitrary password data',async()=>{
+  const {activitySnapshot}=await isolatedModule('assets/js/controllers/ActivityRecordPolicy.js');
+  assert.equal(activitySnapshot('event',null),null);
+  for(const kind of ['event','role','attendance']){
+    const snapshot=activitySnapshot(kind,{password:'secret',temporaryPassword:'secret',passwordHash:'secret',role:'student',name:'Event'});
+    assert.ok(!JSON.stringify(snapshot).includes('secret'));
+  }
+  const {hasPermission}=await isolatedModule('assets/js/core/permissions.js');
+  assert.equal(hasPermission('head_admin','correctStudentId'),true);
+  assert.equal(hasPermission('super_admin','viewActivityHistory'),true);
+  for(const role of ['head_admin','attendance_admin','student_manager','student'])assert.equal(hasPermission(role,'viewActivityHistory'),false);
+});
+
+test('arrival recalculation uses the inclusive cutoff and protects manual, absent and missing check-ins',async()=>{
+  const {recalculatedArrival}=await isolatedModule('assets/js/controllers/ArrivalRecalculationController.js');
+  const cutoff=new Date('2026-10-28T15:10:00+08:00'),record={checkedInAt:new Date('2026-10-28T15:05:00+08:00'),arrivalStatus:'late'};
+  assert.equal(recalculatedArrival(record,cutoff),'present');
+  assert.equal(recalculatedArrival({...record,checkedInAt:cutoff},cutoff),'present');
+  assert.equal(recalculatedArrival({...record,checkedInAt:new Date(+cutoff+1)},cutoff),'late');
+  for(const patch of [{recordSource:'admin-corrected'},{correctionId:'audit'},{correctedBy:'head'},{checkedInAt:null},{arrivalStatus:'absent'}])assert.equal(recalculatedArrival({...record,...patch},cutoff),null);
+});
+
+test('recalculation preview writes nothing, isolates sessions and cancel returns no plan',async()=>{
+  const {ArrivalRecalculationController}=await isolatedModule('assets/js/controllers/ArrivalRecalculationController.js');
+  const cutoff=new Date('2026-10-28T15:10:00+08:00'),time=new Date('2026-10-28T15:05:00+08:00');let dialog,accept=false,loads=0;
+  const controller=new ArrivalRecalculationController({db:{},getRole:()=> 'head_admin',getStudents:()=>[{uid:'a',accountId:'123',firstName:'Alex',lastName:'Test'}],
+    confirmation:{open:async(_enabled,options)=>{dialog=options;return accept;}},load:async()=>{loads++;return {docs:[{id:'a_event',data:()=>({studentUid:'a',studentId:'123',checkedInAt:time,arrivalStatus:'late'})},{id:'b_event',data:()=>({studentUid:'b',checkedInAt:time,arrivalStatus:'late',recordSource:'admin-corrected'})}]};}});
+  const sessions=[{id:'event',event:{name:'Afternoon',checkInClosesAt:cutoff}}];
+  assert.equal(await controller.preview(sessions),null);assert.match(dialog.message,/1 Late → Present/);assert.match(dialog.message,/1 manually corrected/);assert.match(dialog.items[0],/Alex Test/);
+  accept=true;const plans=await controller.preview(sessions);assert.equal(plans.length,1);assert.equal(plans[0].id,'event');assert.equal(plans[0].changes.length,1);assert.equal(loads,2);
+});
+
+test('arrival transactions preserve current checkout and location, skip intervening corrections, retry safely and audit atomically',async()=>{
+  let sequence=0;const writes=[];
+  const shared={doc:(...args)=>{if(args.length===1)return {id:'op'+(++sequence)};return {id:args.at(-1),path:args.slice(1).join('/')};},collection:()=>({}),serverTimestamp:()=> 'server-time'};
+  const {ArrivalRecalculationController}=await isolatedModule('assets/js/controllers/ArrivalRecalculationController.js',shared);
+  const time=new Date('2026-10-28T15:05:00+08:00'),cutoff=new Date('2026-10-28T15:10:00+08:00'),checkout=new Date('2026-10-28T16:05:00+08:00');
+  let current={studentUid:'a',studentId:'123',eventId:'event',checkedInAt:time,checkedOutAt:checkout,status:'completed',arrivalStatus:'late',checkInLocation:{latitude:1},checkOutLocation:{latitude:2}};
+  const controller=new ArrivalRecalculationController({db:{},getRole:()=> 'head_admin',getUser:()=>({uid:'head'}),getStudents:()=>[],
+    transaction:async(_db,fn)=>{const pending=[];const saved=await fn({get:async ref=>({exists:()=>true,data:()=>ref.path.endsWith('events/event')?{name:'Event',checkInClosesAt:cutoff}:current}),update:(ref,data)=>pending.push({ref,data,patch:true}),set:(ref,data)=>pending.push({ref,data})});for(const w of pending){writes.push(w);if(w.patch)current={...current,...w.data};}return saved;}});
+  const plans=[{id:'event',cutoff:+cutoff,changes:[{id:'a_event',studentUid:'a',studentId:'123',before:'late',after:'present',checkedInAt:+time}]}];
+  const first=await controller.apply(plans,'Extended the check-in cutoff');assert.equal(first.updated,1);assert.equal(writes.length,2);
+  assert.equal(current.checkedInAt,time);assert.equal(current.checkedOutAt,checkout);assert.equal(current.status,'completed');assert.equal(current.checkOutLocation.latitude,2);
+  assert.equal('checkedInAt' in writes[0].data,false);assert.equal(writes[1].data.action,'arrival-recalculated');assert.equal(writes[1].data.before.arrivalStatus,'late');assert.equal(writes[1].data.after.arrivalStatus,'present');
+  assert.equal((await controller.apply(plans,'Extended the check-in cutoff')).skipped,1);assert.equal(writes.length,2);
+  current={...current,arrivalStatus:'late',recordSource:'admin-corrected'};assert.equal((await controller.apply(plans,'Extended the check-in cutoff')).skipped,1);assert.equal(writes.length,2);
+  controller.transaction=async()=>{throw Error('Connection lost');};assert.equal((await controller.apply(plans,'Extended the check-in cutoff')).failed,1);
+  controller.getRole=()=> 'student_manager';await assert.rejects(controller.apply(plans,'Extended the check-in cutoff'),/cannot perform/);
 });
 
 test('authentication progress blocks duplicates, restores failures and remains locked for redirect', async () => {
@@ -169,14 +234,19 @@ test('saving an ongoing event refreshes section assignment, targets matching not
     getDocFromServer:async()=>({exists:()=>true,data:()=>previous}),doc:(_db,collection,id)=>({collection,id}),
     writeBatch:()=>({set:(reference,data,options)=>writes.push({reference,data,options}),commit:async()=>{}}),createNotification:async data=>recipients.push(data.recipientUid),showDashboardToast:(...args)=>messages.push(args)});
   const {AdminDashboard}=await isolatedModule('assets/js/admin/AdminDashboard.js',shared,browser);
-  for(const [id,value] of Object.entries({editingEventId:'event',eventName:'Assembly',eventDate:'2026-10-20',eventTimeIn:'07:00',eventCheckInCutoff:'09:00',eventTimeOut:'11:00',eventCheckOutCutoff:'12:10',eventType:'Assembly',eventLocation:'Hall',eventAudience:'Selected sections',eventNotes:''}))browser.document.querySelector('#'+id).value=value;
+  for(const [id,value] of Object.entries({editingEventId:'event',eventName:'Assembly',eventDate:'2026-10-20',eventTimeIn:'07:00',eventCheckInCutoff:'09:00',eventTimeOut:'11:00',eventCheckOutCutoff:'12:10',eventType:'Assembly',eventLocation:'Hall',eventAudience:'Selected sections',eventNotes:'',eventChangeReason:'Correct schedule and participant list'}))browser.document.querySelector('#'+id).value=value;
   const state={document:browser.document,can:()=>true,studentsLoaded:true,students:[{uid:'a',active:true,section:'2A'},{uid:'b',active:true,section:'2B'},{uid:'c',active:true,section:'1A'}],events:[previous],eventForm:{dataset:{rosterVersion:'0'}},eventAudienceEditor:{read:()=>['2A','2B']},eventGeofenceEditor:{validate:()=>({enabled:false})},scheduleConfirmation:{open:async()=>true},duplicateEventSignature:AdminDashboard.prototype.duplicateEventSignature,syncEventRecordsAfterSave:async()=>({synced:true}),notifyRoles:async()=>{},resetEventForm(){}};
   state.scheduleConfirmation={open:async()=>{confirmationCalls++;return allowScheduleChange;}};
   await AdminDashboard.prototype.handleEventFormSubmit.call(state,{preventDefault(){}});
   assert.equal(writes.length,0,'canceling the ongoing schedule dialog must not save any event or attendance');assert.equal(recipients.length,0);
   allowScheduleChange=true;
+  browser.document.querySelector('#eventRecalculateArrivals').checked=true;
+  state.arrivalRecalculation={preview:async()=>null};
   await AdminDashboard.prototype.handleEventFormSubmit.call(state,{preventDefault(){}});
-  assert.equal(confirmationCalls,2);
+  assert.equal(writes.length,0,'canceling the arrival preview saves neither event changes nor attendance');
+  browser.document.querySelector('#eventRecalculateArrivals').checked=false;
+  await AdminDashboard.prototype.handleEventFormSubmit.call(state,{preventDefault(){}});
+  assert.equal(confirmationCalls,3);
   const saved=writes.find(write=>write.reference.collection==='events').data;
   assert.equal(JSON.stringify(writes.find(write=>write.reference.collection==='events').options.mergeFields),JSON.stringify(Object.keys(saved)));
   assert.deepEqual(Object.keys(saved.attendanceRoster),['a','b']); assert.equal(saved.rosterVersion,1); assert.equal(saved.audience,'Selected sections');
@@ -228,7 +298,7 @@ test('real admin save atomically publishes session events, geofences and push ou
     writeBatch:()=>({set:(reference,data,options)=>writes.push({reference,data,options}),commit:async()=>{commits++;}}),
     createNotification:async data=>notifications.push(data),showDashboardToast:()=>{}});
   const {AdminDashboard}=await isolatedModule('assets/js/admin/AdminDashboard.js',shared,browser);
-  for(const [id,value] of Object.entries({editingEventId:'',eventName:'Intramurals',eventDate:'2099-10-20',eventTimeIn:'07:00',eventCheckInCutoff:'09:00',eventTimeOut:'11:00',eventCheckOutCutoff:'12:10',eventType:'Assembly',eventLocation:'Hall',eventAudience:'Selected sections',eventNotes:''})) browser.document.querySelector('#'+id).value=value;
+  for(const [id,value] of Object.entries({editingEventId:'',eventName:'Intramurals',eventDate:'2099-10-20',eventTimeIn:'07:00',eventCheckInCutoff:'09:00',eventTimeOut:'11:00',eventCheckOutCutoff:'12:10',eventType:'Assembly',eventLocation:'Hall',eventAudience:'Selected sections',eventNotes:'',eventChangeReason:'Correct schedule and participant list'})) browser.document.querySelector('#'+id).value=value;
   const state={document:browser.document,can:()=>true,studentsLoaded:true,students:[{uid:'a',active:true,section:'2A'}],events:[],eventForm:{dataset:{}},
     eventAudienceEditor:{read:()=>['2A']},eventSessionEditor:{read:()=>({enabled,mode,times:['13:00','14:00','16:00','17:00']})},eventGeofenceEditor:{validate:()=>({enabled:false})},
     duplicateEventSignature:AdminDashboard.prototype.duplicateEventSignature,stageAfternoonSession:AdminDashboard.prototype.stageAfternoonSession,stagePushOutbox:AdminDashboard.prototype.stagePushOutbox,notifyAfternoonSession:AdminDashboard.prototype.notifyAfternoonSession,notifyRoles:async()=>{},resetEventForm(){}};
@@ -925,7 +995,7 @@ test('dashboard session service verifies each role and discards late authenticat
   const { DashboardSessionService } = await isolatedModule('assets/js/controllers/DashboardSessionService.js');
   let unsubscribed = 0, published = 0, callback, resolveProfile;
   const user = { uid: 'student', email: 'student@test.local' };
-  const service = new DashboardSessionService({ auth: {}, dashboardRole: 'admin', superAdminEmail: 'owner@test.local', subscribe: (_, next) => { callback = next; return () => unsubscribed++; }, loadStudent: () => new Promise(resolve => { resolveProfile = resolve; }), onState: () => published++ });
+  const service = new DashboardSessionService({ auth: {}, dashboardRole: 'admin', superAdminUid: 'owner', subscribe: (_, next) => { callback = next; return () => unsubscribed++; }, loadStudent: () => new Promise(resolve => { resolveProfile = resolve; }), onState: () => published++ });
   const waiting = service.waitForUser(); callback(user); assert.equal(await waiting, user); assert.equal(unsubscribed, 1);
   const verification = service.verifyRole(user); service.dispose(); resolveProfile({ data: () => ({ role: 'head_admin', active: true }), exists: () => true });
   assert.equal(await verification, false); assert.equal(published, 0);
@@ -937,6 +1007,13 @@ test('dashboard session service verifies each role and discards late authenticat
   }
   service.loadStudent = () => { throw Error('super admin must not need a student record'); }; service.dashboardRole = 'admin';
   assert.equal(await service.verifyRole({ uid: 'owner', email: 'owner@test.local' }), true);
+  assert.equal(await service.verifyRole({ uid: 'owner', email: 'changed@example.test' }), true);
+  service.loadStudent=async()=>({exists:()=>true,data:()=>({active:true,role:'student'})});
+  assert.equal(await service.verifyRole({uid:'impostor',email:'owner@test.local'}),false);
+  service.loadStudent=async()=>({exists:()=>true,data:()=>({active:false,role:'head_admin'})});
+  assert.equal(await service.verifyRole(user),false);
+  service.loadStudent=async()=>({exists:()=>true,data:()=>({active:true,role:'super_admin'})});
+  assert.equal(await service.verifyRole(user),false);
 });
 
 test('face registration service preserves authenticated upload/reset payloads and polls acknowledgement', async () => {
@@ -1071,6 +1148,7 @@ test('application boot is idempotent and disposes its role controller without la
   const browser = fakeBrowser(); browser.window.location = { replace() {} };
   let created = 0, initialized = 0, disposed = 0, sharedCleanups = 0;
   const shared = { waitForUser: async () => ({ uid: 'manager' }), verifyRole: async () => true, auth: {}, signOut() {}, wireCommonNavigation() {}, wireNotificationCenter() {}, applyRoleNavigation() {}, dashboardRole: 'admin', currentUserProfile: {}, currentUserRole: 'student_manager', updateDashboardGreeting() {}, sessionState: {}, db: {}, escapeHtml: String, openView() {}, showDashboardToast() {}, initializeDashboardHistory() {} };
+  Object.assign(shared, { setDoc() {}, doc() {}, serverTimestamp() {} });
   const { DashboardApplication } = await isolatedModule('assets/js/controllers/DashboardApplication.js', shared, browser);
   const AdminDashboard = class { constructor() { created++; } initialize() { initialized++; } dispose() { disposed++; } };
   const application = new DashboardApplication({ ...browser, loadDashboard: async () => ({ AdminDashboard }), cleanupShared: () => sharedCleanups++ });
@@ -1088,7 +1166,7 @@ test('dashboard module loads during authentication but does not initialize befor
   const browser = fakeBrowser(); browser.window.location = { replace() {} };
   let resolveUser, loaded = 0, initialized = 0, verified = 0;
   const shared = { waitForUser: () => new Promise(resolve => { resolveUser = resolve; }), verifyRole: async () => { verified++; return true; }, wireCommonNavigation() {}, wireNotificationCenter() {}, applyRoleNavigation() {}, dashboardRole: 'admin', currentUserProfile: {}, currentUserRole: 'student_manager', updateDashboardGreeting() {}, sessionState: {}, initializeDashboardHistory() {} };
-  Object.assign(shared, { auth: {}, signOut() {}, db: {}, escapeHtml: String, openView() {}, showDashboardToast() {} });
+  Object.assign(shared, { auth: {}, signOut() {}, db: {}, setDoc() {}, doc() {}, serverTimestamp() {}, escapeHtml: String, openView() {}, showDashboardToast() {} });
   const { DashboardApplication } = await isolatedModule('assets/js/controllers/DashboardApplication.js', shared, browser);
   const application = new DashboardApplication({ ...browser, loadDashboard: async () => { loaded++; return { AdminDashboard: class { initialize() { initialized++; } dispose() {} } }; } });
   const pending = application.initialize(); await new Promise(resolve => setImmediate(resolve));
@@ -1107,7 +1185,7 @@ for (const role of ['admin', 'student']) test(`the real ${role} bootstrap evalua
   browser.window.dispatchEvent = event => browser.window.emit(event.detail.viewName);
   const history = { state: null, replaceState() {}, pushState() {}, go() {} };
   const context = vm.createContext({ ...browser, history, console, URL, setTimeout, clearTimeout, CustomEvent: class { constructor(type, options) { this.type = type; Object.assign(this, options); } }, fetch: async () => ({}) });
-  const sdk = { Timestamp: { now: () => new Date(), fromMillis: n => new Date(n), fromDate: n => n }, onAuthStateChanged: (_, next) => { queueMicrotask(() => next({ uid: role, email: role === 'admin' ? 'owner@test.local' : 'student@test.local' })); return () => {}; }, signOut: async () => {}, collection: (_, name) => name, doc: (_, name, uid) => `${name}/${uid}`, query: x => x, where() {}, orderBy() {}, serverTimestamp: () => 'server', onSnapshot: () => () => {}, getDoc: async () => ({ exists: () => true, data: () => ({ role: 'student', active: true }) }), getDocFromServer: async () => ({ exists: () => false, data: () => ({}) }), getDocs: async () => ({ docs: [] }), getDocsFromServer: async () => ({ docs: [] }), setDoc: async () => {}, writeBatch: () => ({ set() {}, delete() {}, commit: async () => {} }), limit() {}, startAfter() {}, runTransaction() {}, addDoc: async () => ({ id: 'test' }), deleteDoc: async () => {}, deleteField() {}, createUserWithEmailAndPassword() {}, deleteUser() {}, signInWithEmailAndPassword() {}, updatePassword() {}, updateProfile() {} };
+  const sdk = { Timestamp: { now: () => new Date(), fromMillis: n => new Date(n), fromDate: n => n }, onAuthStateChanged: (_, next) => { queueMicrotask(() => next({ uid: role, email: role === 'admin' ? 'owner@test.local' : 'student@test.local' })); return () => {}; }, signOut: async () => {}, collection: (_, name) => name, doc: (_, name, uid) => `${name}/${uid}`, query: x => x, where() {}, orderBy() {}, serverTimestamp: () => 'server', onSnapshot: () => () => {}, getDoc: async () => ({ exists: () => true, data: () => ({ role: 'student', active: true }) }), getDocFromServer: async ref => ({ exists: () => String(ref).startsWith('students/'), data: () => String(ref).startsWith('students/') ? {role:'student',active:true} : {} }), getDocs: async () => ({ docs: [] }), getDocsFromServer: async () => ({ docs: [] }), setDoc: async () => {}, writeBatch: () => ({ set() {}, delete() {}, commit: async () => {} }), limit() {}, startAfter() {}, runTransaction() {}, addDoc: async () => ({ id: 'test' }), deleteDoc: async () => {}, deleteField() {}, createUserWithEmailAndPassword() {}, deleteUser() {}, signInWithEmailAndPassword() {}, updatePassword() {}, updateProfile() {} };
   Object.assign(sdk, { EmailAuthProvider: { credential: () => ({}) }, reauthenticateWithCredential: async () => {} });
   const modules = new Map(); const synthetic = (key, values) => {
     if (!modules.has(key)) modules.set(key, new vm.SyntheticModule(Object.keys(values), function() { for(const [name,value] of Object.entries(values)) this.setExport(name,value); }, { context, identifier: key }));
@@ -1119,7 +1197,7 @@ for (const role of ['admin', 'student']) test(`the real ${role} bootstrap evalua
   };
   const resolve = (specifier, parent) => {
     if(specifier.startsWith('https:')) return synthetic('sdk',sdk);
-    if(specifier.includes('firebase-config.js')) return synthetic('config',{ SUPER_ADMIN_EMAIL: 'owner@test.local', auth: {}, db: {}, studentIdToEmail: x => x, studentProvisioningAuth: {} });
+    if(specifier.includes('firebase-config.js')) return synthetic('config',{ SUPER_ADMIN_UID: 'admin', auth: {}, db: {}, studentIdToEmail: x => x, studentProvisioningAuth: {} });
     return load(path.resolve(path.dirname(parent.identifier),specifier.split('?')[0]));
   };
   const entry = load(path.join(root,'assets/js/dashboard.js')); await entry.link(resolve); await entry.evaluate();
@@ -1278,14 +1356,14 @@ test('attendance corrections atomically preserve the previous record and identif
     transaction: async (_, run) => run({ get: async () => ({ exists: () => true, data: () => before }), set: (ref, data) => writes.push({ ref, data }) }) });
   const input = { studentUid: 'student-1', eventId: 'event-1', checkIn: '2026-10-01T09:00', checkOut: '', arrival: 'present', reason: 'Verified with event staff' };
   await controller.save(input);
-  assert.equal(writes.length, 2); assert.equal(writes[0].data.correctedBy, 'manager-1'); assert.equal(writes[0].data.recordSource, 'admin-corrected');
+  assert.equal(writes.length, 3); assert.equal(writes[0].data.correctedBy, 'manager-1'); assert.equal(writes[0].data.recordSource, 'admin-corrected');
   assert.equal(writes[1].data.before, before); assert.equal(writes[1].data.after, writes[0].data);
   assert.equal(writes[1].data.reason, input.reason); assert.equal(writes[1].data.at, 'server-time');
   assert.equal('checkedOutAt' in writes[0].data, false); assert.equal('checkOutLocation' in writes[0].data, false);
   controller.role = 'student_manager'; await assert.rejects(controller.save(input), { code: 'permission-denied' });
-  assert.equal(writes.length, 2);
+  assert.equal(writes.length, 3);
   controller.role = 'attendance_admin'; controller.getEvents = () => [{ id: 'event-1', audience: 'Section 1A' }];
-  await assert.rejects(controller.save(input), /not assigned/); assert.equal(writes.length, 2);
+  await assert.rejects(controller.save(input), /not assigned/); assert.equal(writes.length, 3);
 });
 
 test('admin event cards show linked schedules once with separately targeted session actions', async () => {
@@ -1328,7 +1406,7 @@ test('correcting a roster-only absence creates real attendance and an audit with
     getEvents:()=>[{id:'morning',name:'Morning',type:'Activity',date:'2026-10-01',timeIn:'07:00',timeOut:'11:00',location:'School',audience:'All students',attendanceRoster:{a:'2A'}}],
     transaction:async(_,run)=>run({get:async()=>({exists:()=>false}),set:(ref,data)=>writes.push(data)})});
   await controller.save({studentUid:'a',eventId:'morning',checkIn:'2026-10-01T07:30',checkOut:'2026-10-01T11:00',arrival:'present',reason:'Verified attendance with event staff'});
-  assert.equal(writes.length,2);assert.equal(writes[0].eventId,'morning');assert.equal(writes[0].studentUid,'a');
+  assert.equal(writes.length,3);assert.equal(writes[0].eventId,'morning');assert.equal(writes[0].studentUid,'a');
   assert.equal(writes[0].status,'completed');assert.equal(writes[0].recordSource,'admin-corrected');
   assert.equal(writes[1].before,null);assert.equal(writes[1].after,writes[0]);
   assert.equal(writes[1].reason,writes[0].correctionReason);
@@ -2059,4 +2137,78 @@ test('failed Auth password change does not clear setup; failed profile save expl
     assert.equal(profileWrites,failAt==='auth'?0:1);assert.equal(closed,0);assert.equal(state.completeRequiredPasswordChange.disabled,false);
     if(failAt==='profile')assert.match(toasts.at(-1)[1],/Sign in with the new password/);
   }
+});
+
+test('presence logout drains an in-flight heartbeat and closes only the current user device', async () => {
+  const { endPresenceSession } = await import(pathToFileURL(path.join(root, 'assets/js/core/PresenceSession.js')));
+  let finish; const writes = [], cleared = [];
+  const state = { presenceHeartbeatTimer: 7, presenceWrite: new Promise(resolve => { finish = resolve; }) };
+  const pending = endPresenceSession({ user: { uid: 'student-1' }, state,
+    window: { clearInterval: id => cleared.push(id) }, storage: { getItem: () => 'student-1_device' },
+    write: async (...args) => writes.push(args) });
+  assert.equal(state.studentLoggedOut, true); assert.deepEqual(cleared, [7]);
+  assert.equal(writes.length, 0); finish(); await pending;
+  assert.deepEqual(writes.map(row => row.slice(0, 2)), [['presenceSessions', 'student-1_device'], ['presence', 'student-1']]);
+  writes.length = 0;
+  await endPresenceSession({ user: { uid: 'other-user' }, state, window: { clearInterval() {} },
+    storage: { getItem: () => 'student-1_device' }, write: async (...args) => writes.push(args) });
+  assert.equal(writes.length, 0);
+});
+
+test('student focus cannot resurrect presence after logout, auth loss or disposal', async () => {
+  const browser = fakeBrowser(); const user = { uid: 'student-1' };
+  const shared = birthdayOnboardingShared({ currentUser: user, auth: { currentUser: user } });
+  shared.sessionState.studentLoggedOut = true; shared.sessionState.presenceSessionId = 'student-1_device';
+  const { StudentDashboard } = await isolatedModule('assets/js/student/StudentDashboard.js', shared, browser);
+  let writes = 0; const dashboard = { writePresence: async () => writes++ };
+  await StudentDashboard.prototype.updatePresence.call(dashboard); assert.equal(writes, 0);
+  shared.sessionState.studentLoggedOut = false;
+  await StudentDashboard.prototype.updatePresence.call(dashboard); assert.equal(writes, 1);
+  shared.auth.currentUser = null;
+  await StudentDashboard.prototype.updatePresence.call(dashboard); assert.equal(writes, 1);
+  shared.auth.currentUser = user; dashboard.presenceDisposed = true;
+  await StudentDashboard.prototype.updatePresence.call(dashboard); assert.equal(writes, 1);
+});
+
+test('presence expires without another write while another recent device remains online', async () => {
+  const names = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared = Object.fromEntries(names.map(name => [name, () => '']));
+  const { AdminDashboard } = await isolatedModule('assets/js/admin/AdminDashboard.js', shared);
+  const stamp = milliseconds => ({ toMillis: () => milliseconds, toDate: () => new Date(milliseconds) });
+  const state = { presenceByUid: new Map([['s', [{ online: true, lastSeen: stamp(Date.now() - 150000) }]]]), legacyPresenceByUid: new Map() };
+  assert.equal(AdminDashboard.prototype.getStudentPresence.call(state, 's').isOnline, false);
+  state.presenceByUid.get('s').push({ online: true, lastSeen: stamp(Date.now()) });
+  state.presenceByUid.get('s').push({ online: false, status: 'logged-out', lastSeen: stamp(Date.now()) });
+  assert.equal(AdminDashboard.prototype.getStudentPresence.call(state, 's').isOnline, true);
+});
+
+test('rejecting student access to admin ends local presence before signing out', async () => {
+  const browser = fakeBrowser(); const events = [];
+  browser.window.sessionStorage = { getItem: () => 'student-1_device' };
+  browser.window.location = { replace: () => events.push('redirect') };
+  const shared = { waitForUser: async () => ({ uid: 'student-1' }), verifyRole: async () => false,
+    auth: {}, signOut: async () => events.push('signOut'), wireCommonNavigation() {}, wireNotificationCenter() {},
+    applyRoleNavigation() {}, dashboardRole: 'admin', currentUserProfile: {}, currentUserRole: 'student',
+    updateDashboardGreeting() {}, sessionState: {}, db: {}, escapeHtml: String, openView() {},
+    showDashboardToast() {}, initializeDashboardHistory() {}, doc: (_, name, id) => `${name}/${id}`,
+    setDoc: async (ref, fields) => { assert.equal(fields.online, false); assert.equal(fields.status, 'logged-out'); events.push(ref); },
+    serverTimestamp: () => 'now' };
+  const { DashboardApplication } = await isolatedModule('assets/js/controllers/DashboardApplication.js', shared, browser);
+  const app = new DashboardApplication({ ...browser, loadDashboard: async () => { throw Error('must not initialize'); } });
+  await app.initialize();
+  assert.deepEqual(events, ['presenceSessions/student-1_device', 'presence/student-1', 'signOut', 'redirect']);
+  app.dispose();
+});
+
+test('student directory refreshes expiring presence without snapshots and cleans its timer', async () => {
+  const names = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared = Object.fromEntries(names.map(name => [name, () => ''])); shared.activeView = 'modify-students';
+  const { AdminDashboard } = await isolatedModule('assets/js/admin/AdminDashboard.js', shared);
+  let tick, cleanup, renders = 0, cleared, cancelled; const listeners = new Map();
+  const state = { window: { setInterval: (callback, delay) => { tick = callback; assert.equal(delay, 15000); return 42; }, clearInterval: id => { cleared = id; }, cancelAnimationFrame(id) { cancelled = id; }, requestAnimationFrame() { throw Error('background animation frames are suspended'); } },
+    scope: { listen: (_, event, callback) => listeners.set(event, callback), addCleanup: callback => { cleanup = callback; } }, renderStudents: () => renders++ };
+  AdminDashboard.prototype.initializePresenceExpiry.call(state); tick(); tick();
+  assert.equal(renders, 2); state.studentRenderFrame = 99; listeners.get('focus')();
+  assert.equal(cancelled, 99); assert.equal(state.studentRenderFrame, undefined);
+  listeners.get('visibilitychange')(); assert.equal(renders, 4); cleanup(); assert.equal(cleared, 42);
 });

@@ -1,4 +1,4 @@
-const SUPER_ADMIN_EMAIL = "mikhailovna2007@gmail.com";
+const SUPER_ADMIN_UID = "8uEjAk72BLWKjvnQJEatBdeVAi02";
 const FIREBASE_PROJECT_ID = "presence-a873f";
 
 function getConfig_(key) {
@@ -51,7 +51,7 @@ function getFaceRegistration_(studentUid, idToken) {
 }
 
 function canResetFace_(requester, idToken) {
-  if (requester.localId === "8uEjAk72BLWKjvnQJEatBdeVAi02" || requester.email?.toLowerCase() === SUPER_ADMIN_EMAIL) return true;
+  if (requester.localId === SUPER_ADMIN_UID) return true;
   // Never trust a role supplied by the browser. Read the authenticated caller's
   // stored role through Firestore, which also applies its deployed rules.
   const profile = firestoreRequest_("get", `students/${encodeURIComponent(requester.localId)}`, idToken);
@@ -165,7 +165,7 @@ class FaceResetService {
 }
 
 function canRecoverMissingFace_(requester, idToken) {
-  if (requester.localId === "8uEjAk72BLWKjvnQJEatBdeVAi02" || requester.email?.toLowerCase() === SUPER_ADMIN_EMAIL) return true;
+  if (requester.localId === SUPER_ADMIN_UID) return true;
   const profile = firestoreRequest_("get", `students/${encodeURIComponent(requester.localId)}`, idToken);
   return profile?.fields?.active?.booleanValue === true && profile?.fields?.role?.stringValue === "head_admin";
 }

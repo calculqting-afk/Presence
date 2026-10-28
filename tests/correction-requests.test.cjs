@@ -93,7 +93,7 @@ test('invalid, ineligible, inactive, and still-open requests fail without writes
 });
 test('approval atomically creates attendance, before-after audit, request decision, and decision history', async () => {
   const f = await fixture(); await f.service.create(submission); await f.correction.save(correction);
-  assert.equal(f.writes.length, 4);
+  assert.equal(f.writes.length, 5);
   const attendance = f.stored.get('attendance/student_morning'), request = f.stored.get('attendanceCorrectionRequests/student_morning');
   assert.equal(attendance.status, 'completed'); assert.equal(attendance.correctionId, 'audit-1');
   assert.equal(request.status, 'approved'); assert.equal(request.correctionId, attendance.correctionId);

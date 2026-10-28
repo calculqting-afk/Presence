@@ -776,6 +776,32 @@ body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
 .modal-close { position: absolute; top: 14px; right: 14px; width: 32px; height: 32px; border: 0; border-radius: 9px; color: var(--muted); background: #f1f5fb; font-size: 1rem; }
 .modal-icon { width: 40px; height: 40px; display: grid; place-items: center; color: var(--blue); background: var(--blue-soft); border-radius: 12px; font-weight: 800; }
 .modal-icon.danger { color: var(--red); background: var(--red-soft); }
+.activity-history-filters { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; align-items: end; margin-bottom: 18px; }
+.activity-history-filters label { display: grid; gap: 7px; color: var(--muted); font-size: .78rem; font-weight: 700; }
+.activity-history-filters :is(input,select),.student-id-preview input { box-sizing: border-box; width: 100%; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--surface-soft,var(--sky)); font: inherit; }
+.activity-history-note { color: var(--muted); font-size: .76rem; line-height: 1.65; }
+.arrival-recalculation-preview { max-height: 240px; overflow-y: auto; padding-left: 22px; font-size: .78rem; line-height: 1.65; overflow-wrap: anywhere; }
+.arrival-recalculation-preview li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+#eventRecalculationField label { display: flex; align-items: center; gap: 9px; }
+#eventRecalculationField input { width: 18px; height: 18px; flex: 0 0 auto; }
+#eventRecalculationProgress { margin: 0; font-size: .8rem; color: var(--muted); }
+.activity-history-list { display: grid; gap: 12px; margin: 20px 0; }
+.activity-history-card { padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft,var(--sky)); overflow-wrap: anywhere; }
+.activity-history-card-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
+.activity-history-card p { margin: 10px 0; font-size: .8rem; line-height: 1.6; white-space: pre-wrap; }
+.activity-history-card small { color: var(--muted); font-size: .72rem; }
+.activity-history-card details { margin-top: 12px; font-size: .78rem; }
+.activity-history-card summary { cursor: pointer; color: var(--blue); font-weight: 700; }
+.activity-history-changes { display: grid; grid-template-columns: minmax(80px,1fr) minmax(0,3fr); gap: 10px; line-height: 1.6; }
+.activity-history-changes dd { margin: 0; white-space: pre-wrap; }
+.student-id-preview { display: grid; gap: 16px; padding: 18px; margin-top: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft,var(--sky)); }
+.student-id-preview[hidden] { display: none; }
+.student-id-comparison { display: flex; flex-wrap: wrap; align-items: center; gap: 15px; }
+.student-id-comparison div { display: grid; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.student-id-comparison small { color: var(--muted); }
+.student-id-preview button { justify-self: start; }
+@media (max-width: 760px) { .activity-history-filters { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 480px) { .activity-history-filters,.activity-history-changes { grid-template-columns: minmax(0,1fr); } .student-id-preview { padding: 12px; } }
 .dashboard-modal .modal-icon.presence-modal-logo { background: transparent url('../images/presence-logo.png') center / contain no-repeat; border-radius: 12px; box-shadow: none; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
 .dashboard-modal form .modal-actions { margin-top: 4px; }

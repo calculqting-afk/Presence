@@ -1,4 +1,8 @@
 import { ControllerScope } from '../core/ControllerScope.js';
+import { StudentIdCorrectionController } from '../controllers/StudentIdCorrectionController.js';
+import { ActivityHistoryController } from '../controllers/ActivityHistoryController.js';
+import { ArrivalRecalculationController } from '../controllers/ArrivalRecalculationController.js';
+import { activityRecord, activitySnapshot } from '../controllers/ActivityRecordPolicy.js';
 import { CoursePolicy } from '../core/CoursePolicy.js';
 import { GenderPolicy } from '../core/GenderPolicy.js';
 import { PasswordResetApi } from '../controllers/PasswordResetApi.js';
@@ -11,7 +15,7 @@ import { AttendanceRelativeTime } from '../controllers/AttendanceRelativeTime.js
 import { SurveyConfirmationController } from '../controllers/SurveyConfirmationController.js';
 import { AttendanceReportController } from '../controllers/AttendanceReportController.js';
 import { StudentPasswordPolicy } from '../core/StudentPasswordPolicy.js';
-import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261011-optimized';
+import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_UID, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261011-optimized';
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
 import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261011-optimized';
 import { GeofenceController } from '../controllers/GeofenceController.js?v=20261011-optimized';
@@ -168,6 +172,12 @@ export class AdminDashboard {
     this.wireFineActions();
     this.wireEventActions();
     this.wireStudentAccountActions();
+    this.studentIdCorrection=new StudentIdCorrectionController({document:this.document,getUser:()=>auth.currentUser,can:this.can,notify:showDashboardToast});
+    this.studentIdCorrection.initialize();this.scope.addCleanup(()=>this.studentIdCorrection.dispose());
+    this.scope.listen(this.document,'click',event=>{const button=event.target.closest?.('[data-correct-student-id]');if(button)void this.studentIdCorrection.open(this.students.find(student=>student.uid===button.dataset.correctStudentId),button);});
+    this.activityHistory=new ActivityHistoryController({document:this.document,window:this.window,db,can:this.can,
+      getActorName:uid=>uid===currentUser.uid?this.document.querySelector('[data-admin-name]')?.textContent:[...this.students].filter(student=>student.uid===uid).map(student=>[student.firstName,student.middleName,student.lastName].filter(Boolean).join(' '))[0]});
+    this.activityHistory.initialize();this.scope.addCleanup(()=>this.activityHistory.dispose());
     this.wireDirectoryFilters();
     this.startSubscriptions();
     // The approvals listener also owns the navigation badge on every admin view.
@@ -189,6 +199,7 @@ export class AdminDashboard {
     });
     dashboard.actionSelectors = {
       changePasswords: '[data-password-student]',
+      correctStudentId:'[data-correct-student-id]',
       deleteStudents: '[data-delete-student]',
       resetFace: '[data-reset-face]',
       editStudents: '[data-edit-student]',
@@ -210,6 +221,7 @@ export class AdminDashboard {
       }
     });
     dashboard.scope.listen(dashboard.window, 'presence:viewchange', dashboard.changeSubscriptions);
+    dashboard.initializePresenceExpiry();
     dashboard.scope.addCleanup(() => {
       dashboard.subscriptions.stop();
       dashboard.window.removeEventListener('presence:viewchange', dashboard.changeSubscriptions);
@@ -256,6 +268,7 @@ export class AdminDashboard {
     dashboard.relativeAttendanceClock = new AttendanceRelativeTime({window:dashboard.window,document:dashboard.document});
     dashboard.relativeAttendanceClock.initialize();
     dashboard.scheduleConfirmation = new SurveyConfirmationController({document:dashboard.document,titleId:'eventScheduleChangeTitle'});
+    dashboard.arrivalRecalculation = new ArrivalRecalculationController({db,getUser:()=>auth.currentUser,getRole:()=>currentUserRole,getStudents:()=>dashboard.students,confirmation:dashboard.scheduleConfirmation});
     dashboard.scope.addCleanup(() => { dashboard.relativeAttendanceClock.dispose(); dashboard.scheduleConfirmation.dispose(); });
     dashboard.analyticsController = new AttendanceAnalyticsController({
       document: dashboard.document, repository: new AttendanceRepository(db),
@@ -440,10 +453,13 @@ export class AdminDashboard {
     dashboard.studentTableBody.closest("table").querySelectorAll("th")[2].textContent = "Face / live status";
     dashboard.document.querySelector('label[for="eventNotes"]').textContent = "Description";
     dashboard.document.querySelector("#eventNotes").placeholder = "Write a clear announcement or event description";
+    dashboard.scope.mount(dashboard.document.querySelector('#eventNotes').closest('.field'),'afterend',`<div class="field full" id="eventChangeReasonField" hidden><label for="eventChangeReason">Reason for event changes</label><textarea id="eventChangeReason" rows="2" minlength="5" maxlength="1000" placeholder="Explain why the event details or schedule changed"></textarea></div>`);
+    dashboard.scope.mount(dashboard.document.querySelector('#eventChangeReasonField'),'afterend','<div class="field full" id="eventRecalculationField" hidden><label><input id="eventRecalculateArrivals" type="checkbox"> Preview and recalculate saved Late/Present labels</label><small>Uses each session’s updated check-in cutoff. Manual corrections, original timestamps and existing fines are preserved. You can also select this to repair labels after an earlier cutoff extension.</small><p id="eventRecalculationProgress" role="status" aria-live="polite"></p></div>');
+    for(const selector of ['#eventCheckInCutoff','#eventAfternoonCheckInCutoff'])dashboard.scope.listen(dashboard.document.querySelector(selector),'change',()=>{if(dashboard.document.querySelector('#editingEventId').value)dashboard.document.querySelector('#eventRecalculateArrivals').checked=true;});
     dashboard.scope.mount(dashboard.document.querySelector("#eventLocation").closest(".field"), "beforebegin", '<div class="field"><label for="eventType">Event type</label><select id="eventType" required><option value="Assembly">Assembly</option><option value="Meeting">Meeting</option><option value="Seminar">Seminar</option><option value="Workshop">Workshop</option><option value="School Activity">School Activity</option><option value="Ceremony">Ceremony</option><option value="Sports">Sports</option><option value="Other">Other</option></select></div>');
     dashboard.scope.mount(dashboard.document.querySelector("#eventNotes").closest(".field"), "beforebegin", `<fieldset class="geofence-editor field full"><legend>Attendance area</legend><label class="geofence-toggle"><input id="eventGeofenceEnabled" type="checkbox"> <span>Require location to check in</span></label><p>Choose a circle radius or draw a custom polygon boundary.</p><div class="map-search-row"><input id="eventGeofenceSearch" type="search" placeholder="Search an address or place"><button id="eventGeofenceSearchButton" class="outline-button" type="button">Search</button></div><div id="eventGeofenceMap" class="geofence-map" aria-label="Event attendance area map"></div><div class="geofence-fields"><div class="field"><label for="eventGeofenceRadius">Allowed radius (meters)</label><input id="eventGeofenceRadius" type="number" min="25" max="100000" step="5" value="100"></div><div class="field"><label for="eventGeofenceAddress">Selected address</label><input id="eventGeofenceAddress" type="text" readonly placeholder="Click the map or search for a place"></div><div class="field"><label for="eventGeofenceLatitude">Latitude</label><input id="eventGeofenceLatitude" type="number" step="any" readonly></div><div class="field"><label for="eventGeofenceLongitude">Longitude</label><input id="eventGeofenceLongitude" type="number" step="any" readonly></div></div><small class="geofence-help">Circle: click to set the center. Polygon: add 3–10 points around the area, then close the boundary. Students must allow location access.</small></fieldset>`);
     dashboard.scope.mount(dashboard.document.querySelector(".content"), "beforeend", `<section class="view-section" data-section="geofence" hidden><div class="section-head"><div><p class="eyebrow">Attendance setup</p><h2>Geofence Locations</h2><p>Select an event and update the area where students may check in.</p></div></div><article class="panel geofence-manager-panel"><div class="field"><label for="geofenceEventSelect">Event</label><select id="geofenceEventSelect"><option value="">Select an event</option></select></div><div id="geofenceManagerContent" hidden><div class="geofence-manager-head"><div><strong id="geofenceManagerEventName"></strong><small id="geofenceManagerEventDetails"></small></div><label class="geofence-toggle"><input id="managerGeofenceEnabled" type="checkbox"> <span>Require location to check in</span></label></div><div class="map-search-row"><input id="managerGeofenceSearch" type="search" placeholder="Search an address or place"><button id="managerGeofenceSearchButton" class="outline-button" type="button">Search</button></div><div id="managerGeofenceMap" class="geofence-map" aria-label="Selected event attendance area map"></div><div class="geofence-fields"><div class="field"><label for="managerGeofenceRadius">Allowed radius (meters)</label><input id="managerGeofenceRadius" type="number" min="25" max="100000" step="5" value="100"></div><div class="field"><label for="managerGeofenceAddress">Selected address</label><input id="managerGeofenceAddress" type="text" readonly></div><div class="field"><label for="managerGeofenceLatitude">Latitude</label><input id="managerGeofenceLatitude" type="number" step="any" readonly></div><div class="field"><label for="managerGeofenceLongitude">Longitude</label><input id="managerGeofenceLongitude" type="number" step="any" readonly></div></div><div class="form-actions"><button id="geofenceEditEvent" class="outline-button" type="button">Edit full event</button><button id="saveManagerGeofence" class="primary-button" type="button">Save attendance area</button></div></div><div id="geofenceManagerEmpty" class="empty-state">Select an event to view or change its attendance area.</div></article></section>`);
-    dashboard.document.querySelector("#adminProfileEmail").value = currentUser.email || SUPER_ADMIN_EMAIL;
+    dashboard.document.querySelector("#adminProfileEmail").value = currentUser.email || '';
     dashboard.eventGeofenceEditor = dashboard.makeGeofenceEditor("event");
     dashboard.managerGeofenceEditor = dashboard.makeGeofenceEditor("manager");
     dashboard.geofenceEventSelect = dashboard.document.querySelector("#geofenceEventSelect");
@@ -702,6 +718,21 @@ export class AdminDashboard {
       includeMetadataChanges: true
     }, guard(callback), onError) : onSnapshot(reference, guard(callback), onError));
   }
+  initializePresenceExpiry() {
+    // Presence leases expire even when Firestore sends no new snapshot.
+    // requestAnimationFrame may remain suspended while the student browser is in front.
+    const refresh = () => {
+      if (activeView === 'modify-students') {
+        this.window.cancelAnimationFrame(this.studentRenderFrame);
+        this.studentRenderFrame = undefined;
+        this.renderStudents();
+      }
+    };
+    const timer = this.window.setInterval(refresh, 15000);
+    this.scope.listen(this.window, 'focus', refresh);
+    this.scope.listen(this.document, 'visibilitychange', refresh);
+    this.scope.addCleanup(() => this.window.clearInterval(timer));
+  }
   changeSubscriptions(event) {
     const dashboard = this;
     dashboard.subscriptions.setView(event.detail.viewName);
@@ -825,6 +856,7 @@ export class AdminDashboard {
       selector
     };
     dashboard.roleChangeMessage.textContent = `Change ${student.accountId}'s role from ${roleLabel(previousRole)} to ${roleLabel(role)}? They will need to sign out and sign back in before the new access takes effect.`;
+    dashboard.document.querySelector('#roleChangeReason').value='';
     dashboard.roleChangeModal.hidden = false;
     dashboard.confirmRoleChange.focus();
   }
@@ -1416,6 +1448,11 @@ export class AdminDashboard {
   resetEventForm() {
     const dashboard = this;
     dashboard.eventForm.reset();
+    dashboard.document.querySelector('#eventChangeReasonField').hidden=true;
+    dashboard.document.querySelector('#eventChangeReason').required=false;
+    dashboard.document.querySelector('#eventRecalculationField').hidden=true;
+    dashboard.document.querySelector('#eventRecalculateArrivals').checked=false;
+    dashboard.document.querySelector('#eventRecalculationProgress').textContent='';
     delete dashboard.eventForm.dataset.rosterVersion;
     dashboard.eventAudienceEditor?.set();
     dashboard.eventSessionEditor?.set();
@@ -1435,6 +1472,12 @@ export class AdminDashboard {
     if (!dashboard.can('manageEvents')) return;
     const event = dashboard.events.find(item => item.id === id);
     if (!event) return;
+    dashboard.document.querySelector('#eventChangeReasonField').hidden=false;
+    dashboard.document.querySelector('#eventChangeReason').required=true;
+    dashboard.document.querySelector('#eventChangeReason').value='';
+    dashboard.document.querySelector('#eventRecalculationField').hidden=false;
+    dashboard.document.querySelector('#eventRecalculateArrivals').checked=false;
+    dashboard.document.querySelector('#eventRecalculationProgress').textContent='';
     if (event.sessionPeriod === 'afternoon' && event.sessionGroupId !== id) {
       if (!dashboard.events.some(item => item.id === event.sessionGroupId)) return showDashboardToast('Morning session unavailable', 'Refresh the event list. The linked morning event must be available before editing this group.');
       return dashboard.editEvent(event.sessionGroupId);
@@ -1575,6 +1618,7 @@ export class AdminDashboard {
     dashboard.studentForm.reset();
     dashboard.document.querySelector("#originalStudentId").value = "";
     dashboard.document.querySelector("#managedStudentId").disabled = false;
+    dashboard.document.querySelector("#managedStudentId").readOnly = false;
     dashboard.document.querySelector("#managedBirthday").required = true;
     dashboard.document.querySelector("#managedPassword").required = true;
     dashboard.document.querySelector("#managedPassword").disabled = false;
@@ -1593,6 +1637,7 @@ export class AdminDashboard {
     dashboard.document.querySelector("#originalStudentId").value = student.uid;
     dashboard.document.querySelector("#managedStudentId").value = student.accountId;
     dashboard.document.querySelector("#managedStudentId").disabled = false;
+    dashboard.document.querySelector("#managedStudentId").readOnly = true;
     dashboard.document.querySelector("#managedFirstName").value = student.firstName;
     dashboard.document.querySelector("#managedMiddleName").value = student.middleName || "";
     dashboard.document.querySelector("#managedBirthday").value = student.birthday || "";
@@ -2011,6 +2056,14 @@ export class AdminDashboard {
     dashboard.fineStudent.focus();
   }
   async handleEventFormSubmit(submitEvent) {
+    submitEvent.preventDefault();
+    if(this.eventSaveBusy)return;
+    this.eventSaveBusy=true;
+    const button=this.document.querySelector('#eventSubmitButton');button.disabled=true;
+    try{return await AdminDashboard.prototype.saveEventForm.call(this,submitEvent);}
+    finally{this.eventSaveBusy=false;button.disabled=false;}
+  }
+  async saveEventForm(submitEvent) {
     const dashboard = this;
     if (!dashboard.can('manageEvents')) {
       submitEvent.preventDefault();
@@ -2054,13 +2107,15 @@ export class AdminDashboard {
       checkOutClosesAt: Timestamp.fromDate(new Date(`${date}T${checkOutCutoff}`)),
       updatedAt: serverTimestamp()
     };
-    let sessionPlan, afternoonPrevious, eventReference;
+    let sessionPlan, afternoonPrevious, eventReference, previousEvent,arrivalPlan,changeReason;
     try {
-      let previousEvent;
       if (id) {
         const saved = await getDocFromServer(doc(db, 'events', id));
         if (!saved.exists()) throw new Error('This event is unavailable. Refresh the event list.');
         previousEvent = { ...saved.data(), id };
+        const reason=dashboard.document.querySelector('#eventChangeReason').value.trim();
+        if(reason.length<5||reason.length>1000)throw new Error('Enter a reason for the event changes (5–1000 characters).');
+        changeReason=reason;
         if (dashboard.eventForm.dataset.rosterVersion !== undefined && Number(dashboard.eventForm.dataset.rosterVersion) !== (previousEvent.rosterVersion || 0)) throw new Error('Participants changed while this editor was open. Reopen the event, review its groups and save again.');
       }
       const sections = dashboard.eventAudienceEditor.read();
@@ -2086,7 +2141,7 @@ export class AdminDashboard {
       if (changedOngoing) {
         const reopening = record.checkoutOnlyReopened || sessionPlan?.afternoon?.checkoutOnlyReopened;
         const confirmed = await dashboard.scheduleConfirmation.open(true, {title:reopening ? 'Extend checkout for this session?' : 'Change an ongoing attendance schedule?',
-          message:reopening ? 'Only students with a saved check-in can check out during the reopened window. New check-ins and checkout-only attendance are blocked. Existing timestamps, arrival labels, completed records and fines are preserved. The date, other times and participants stay locked; morning cannot overlap afternoon.' : 'The new times will apply to subsequent check-ins and checkouts. Existing attendance timestamps, late/present labels and completed records will not be changed. Moving the checkout cutoff earlier can close attendance immediately. Morning and afternoon must not overlap.',label:reopening ? 'Extend checkout' : 'Save new schedule'});
+          message:reopening ? 'Only students with a saved check-in can check out during the reopened window. New check-ins and checkout-only attendance are blocked. Existing timestamps, completed records and fines are preserved. Arrival recalculation, if selected, has a separate preview before saving.' : 'The new times will apply to subsequent attendance. Original attendance timestamps and completed records stay unchanged. Arrival recalculation, if selected, has a separate preview before saving. Moving the checkout cutoff earlier can close attendance immediately.',label:reopening ? 'Extend checkout' : 'Continue'});
         if (!confirmed) return;
       }
     } catch (error) { return showDashboardToast('Unable to update participants', error.message || 'Refresh and try again.'); }
@@ -2094,7 +2149,13 @@ export class AdminDashboard {
     if (duplicate) {
       return showDashboardToast("Duplicate event", `An event named ${record.name} already uses this date, location, audience, and attendance schedule. Change one of those details before saving.`);
     }
-    let linkedRecordsSynced = true;
+    if(id&&dashboard.document.querySelector('#eventRecalculateArrivals').checked&&dashboard.arrivalRecalculation){
+      try{
+        arrivalPlan=await dashboard.arrivalRecalculation.preview([{id,event:record},...(sessionPlan?.afternoon&&afternoonPrevious?[{id:EventSessionPolicy.afternoonId(id),event:sessionPlan.afternoon}]:[])]);
+        if(!arrivalPlan)return;
+      }catch(error){showDashboardToast('Unable to preview arrival labels',error.message);return;}
+    }
+    let linkedRecordsSynced = true,recalculationMessage='';
     try {
       if (id) {
         const batch = writeBatch(db);
@@ -2103,6 +2164,7 @@ export class AdminDashboard {
           mergeFields: Object.keys(record)
         });
         batch.set(doc(db, "eventGeofences", id), geofence);
+        dashboard.stageEventActivity?.(batch,id,previousEvent,{...previousEvent,...record},changeReason);
         dashboard.stagePushOutbox?.(batch, id);
         dashboard.stageAfternoonSession?.(batch, id, sessionPlan, afternoonPrevious, geofence);
         await batch.commit();
@@ -2140,6 +2202,7 @@ export class AdminDashboard {
           createdBy: currentUser.uid
         });
         batch.set(doc(db, "eventGeofences", eventReference.id), geofence);
+        dashboard.stageEventActivity?.(batch,eventReference.id,null,record,'Event published');
         dashboard.stagePushOutbox?.(batch, eventReference.id);
         dashboard.stageAfternoonSession?.(batch, eventReference.id, sessionPlan, afternoonPrevious, geofence);
         await batch.commit();
@@ -2168,6 +2231,17 @@ export class AdminDashboard {
         }
       }
       const returnView = dashboard.eventForm.dataset.returnView || "modify-events";
+      if(arrivalPlan){
+        const result=await dashboard.arrivalRecalculation.apply(arrivalPlan,changeReason,progress=>{
+          dashboard.document.querySelector('#eventRecalculationProgress').textContent=`Updating arrival labels: ${progress.updated} saved, ${progress.skipped} unchanged, ${progress.failed} failed / ${progress.total}.`;
+        });
+        recalculationMessage=`${result.updated} arrival labels updated; ${result.skipped} changed or protected records skipped. Original times and fines were preserved.`;
+        if(result.failed){
+          showDashboardToast('Arrival recalculation incomplete',`${recalculationMessage} ${result.failed} failed; reopen the event to preview and retry the remaining changes.`);
+          dashboard.document.querySelector('#eventRecalculationProgress').textContent=`The event was saved. ${result.updated} labels updated; ${result.failed} failed. Reopen this event and select recalculation again to preview the remaining changes. Successful changes are already saved.`;
+          return;
+        }
+      }
       dashboard.resetEventForm();
       openView(returnView);
       const message = id
@@ -2175,7 +2249,7 @@ export class AdminDashboard {
           ? "The event and linked attendance records were synced."
           : "The event was saved, but existing attendance records could not be updated. Their original event details were kept."
         : "The event and attendance window were saved and synced.";
-      showDashboardToast(id ? "Event updated" : "Event created", message);
+      showDashboardToast(id ? "Event updated" : "Event created", message+(recalculationMessage?' '+recalculationMessage:''));
     } catch (error) {
       const message = firebaseErrorCode(error) === "permission-denied" ? "Firestore rejected the event or its location settings. Refresh, sign in again, and reopen the event. If it still fails, confirm the published rules match this app version and your account has event-management access." : error.message || "The event could not be saved. Please try again.";
       showDashboardToast("Unable to save event", message);
@@ -2187,10 +2261,15 @@ export class AdminDashboard {
     if (previous) batch.set(reference, plan.afternoon, { mergeFields: Object.keys(plan.afternoon) });
     else batch.set(reference, { ...plan.afternoon, createdAt: serverTimestamp(), createdBy: currentUser.uid });
     batch.set(doc(db, 'eventGeofences', reference.id), geofence);
+    this.stageEventActivity?.(batch,reference.id,previous,previous?{...previous,...plan.afternoon}:plan.afternoon,previous?this.document.querySelector('#eventChangeReason').value.trim():'Afternoon session published');
     this.stagePushOutbox?.(batch, reference.id);
   }
   stagePushOutbox(batch, eventId) {
     batch.set(doc(db, 'eventPushOutbox', eventId), {eventId, pending:true, requestedAt:serverTimestamp()});
+  }
+  stageEventActivity(batch,eventId,before,after,reason) {
+    batch.set(doc(collection(db,'activityLogs')),activityRecord({action:before?'event-updated':'event-created',actorUid:currentUser.uid,eventId,eventName:after.name,
+      reason,before:activitySnapshot('event',before),after:activitySnapshot('event',after),createdAt:serverTimestamp()}));
   }
   notifyAfternoonSession(id, plan, previous) {
     const event = plan?.afternoon;
@@ -2272,13 +2351,9 @@ export class AdminDashboard {
           ...profile
         } = student;
         const existingStudent = dashboard.students.find(s => s.uid === uid);
-        const oldKey = (existingStudent?.accountIdKey || existingStudent?.accountId || "").toLowerCase();
-        if (oldKey !== studentIdKey) {
-          const idSnap = await getDoc(doc(db, "studentIds", studentIdKey));
-          if (idSnap.exists() && idSnap.data().uid !== uid) {
-            showDashboardToast("Student ID taken", "This Student ID is already registered by another student.");
-            return;
-          }
+        if (!existingStudent || existingStudent.accountId !== student.accountId) {
+          showDashboardToast('Use Correct ID', 'Correct the login ID through the Correct ID action in Modify Students, then reopen this profile.');
+          return;
         }
         const studentBatch = writeBatch(db);
         studentBatch.set(doc(db, "students", uid), {
@@ -2290,14 +2365,6 @@ export class AdminDashboard {
         }, {
           merge: true
         });
-        if (oldKey !== studentIdKey) {
-          if (oldKey) studentBatch.delete(doc(db, "studentIds", oldKey));
-          studentBatch.set(doc(db, "studentIds", studentIdKey), {
-            studentId: student.accountId,
-            uid,
-            createdAt: serverTimestamp()
-          });
-        }
         await studentBatch.commit();
       } else {
         const studentIdKey = student.accountId.toLowerCase();
@@ -2419,6 +2486,8 @@ export class AdminDashboard {
     const dashboard = this;
     if (!dashboard.can('changeRoles')) return;
     if (!dashboard.pendingRoleChange) return;
+    const reason=dashboard.document.querySelector('#roleChangeReason').value.trim();
+    if(reason.length<5||reason.length>1000){showDashboardToast('Reason required','Enter a reason for this role change (5–1000 characters).');return;}
     const {
       student,
       role,
@@ -2428,13 +2497,17 @@ export class AdminDashboard {
     selector.disabled = true;
     dashboard.confirmRoleChange.disabled = true;
     dashboard.confirmRoleChange.textContent = "Updating role…";
-    const roleWrite = setDoc(doc(db, "students", student.uid), {
+    const roleBatch = writeBatch(db);
+    roleBatch.set(doc(db, "students", student.uid), {
       role,
       roleUpdatedAt: serverTimestamp(),
       roleUpdatedBy: currentUser.uid
     }, {
       merge: true
     });
+    roleBatch.set(doc(collection(db,'activityLogs')),activityRecord({action:'role-changed',actorUid:currentUser.uid,subjectUid:student.uid,subjectId:student.accountId,
+      subjectName:[student.firstName,student.middleName,student.lastName].filter(Boolean).join(' '),reason,before:activitySnapshot('role',{role:previousRole}),after:activitySnapshot('role',{role}),createdAt:serverTimestamp()}));
+    const roleWrite=roleBatch.commit();
     let syncTimer;
     try {
       const acknowledged = await Promise.race([roleWrite.then(() => true), new Promise(resolve => {

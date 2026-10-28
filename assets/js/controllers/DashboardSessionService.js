@@ -3,7 +3,7 @@ export class DashboardSessionService {
     auth,
     subscribe,
     loadStudent,
-    superAdminEmail,
+    superAdminUid,
     dashboardRole,
     onState
   }) {
@@ -11,7 +11,7 @@ export class DashboardSessionService {
       auth,
       subscribe,
       loadStudent,
-      superAdminEmail,
+      superAdminUid,
       dashboardRole,
       onState
     });
@@ -40,12 +40,14 @@ export class DashboardSessionService {
   async verifyRole(user) {
     if (!user) return false;
     const generation = ++this.generation;
-    const isSuperAdmin = user.email?.toLowerCase() === this.superAdminEmail;
+    const isSuperAdmin = typeof user.uid==='string' && user.uid === this.superAdminUid;
     const snapshot = isSuperAdmin ? null : await this.loadStudent(user.uid);
     if (generation !== this.generation) return false;
+    if(!isSuperAdmin&&(!snapshot.exists()||snapshot.data()?.active!==true))return false;
     this.user = user;
     this.profile = snapshot?.data() || {};
     const storedRole = this.profile.role || 'student';
+    if(!isSuperAdmin&&!['student','viewer','head_admin','attendance_admin','student_manager'].includes(storedRole))return false;
     this.role = isSuperAdmin ? 'super_admin' : storedRole === 'viewer' ? 'student' : storedRole;
     this.onState?.({
       user: this.user,

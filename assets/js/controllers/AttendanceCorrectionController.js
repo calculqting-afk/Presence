@@ -1,6 +1,7 @@
 import { hasPermission, requirePermission } from '../core/permissions.js?v=20261011-optimized';
 import { runTransaction, doc, collection, Timestamp, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { assertPendingRequest, loadReviewerName, writeRequestDecision } from './CorrectionRequestService.js';
+import {activityRecord,activitySnapshot} from './ActivityRecordPolicy.js';
 
 export function correctionValues({ checkIn, checkOut, arrival, reason }) {
   const start = new Date(checkIn), end = checkOut ? new Date(checkOut) : null;
@@ -100,6 +101,9 @@ export class AttendanceCorrectionController {
       else { delete after.checkedOutAt; delete after.checkOutLocation; }
       transaction.set(reference, after);
       transaction.set(audit, { before, after, by: this.user.uid, at: serverTimestamp(), reason: values.reason });
+      transaction.set(doc(this.db,'activityLogs','attendance_'+audit.id),activityRecord({action:'attendance-corrected',actorUid:this.user.uid,
+        subjectUid:studentUid,subjectId:student.accountId,subjectName:[student.firstName,student.middleName,student.lastName].filter(Boolean).join(' '),eventId,eventName:event.name,
+        reason:values.reason,before:activitySnapshot('attendance',before),after:activitySnapshot('attendance',after),createdAt:serverTimestamp()}));
       if (requestId) writeRequestDecision(transaction, this.db, requestId, request, {
         userUid: this.user.uid, reviewerName, status: 'approved', reason: values.reason, correctionId: audit.id
       });

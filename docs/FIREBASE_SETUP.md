@@ -6,11 +6,11 @@ The browser app is configured for the Firebase project `presence-a873f`.
 
 1. In **Authentication → Sign-in method**, enable **Email/Password**.
 2. Create the Cloud Firestore database.
-3. In **Authentication → Users**, create the Super Admin using `mikhailovna2007@gmail.com` and a private strong password.
+3. In **Authentication → Users**, preserve the existing Super Admin account and its UID. Use its private email and strong password to sign in.
 
-That exact email is the protected Super Admin identity. No `admins/{UID}` document is needed, so deleting and recreating the account with the same email will not break administrator access. Do not enable public account registration. The Super Admin can assign Head Admin, Attendance Admin, Student Manager, or Student roles; Viewer is not a supported role.
+The pinned UID in `SUPER_ADMIN_UID`, Firestore Rules and backend services identifies the Super Admin. The UID is a public identifier, not a credential; Google-verified authentication establishes ownership. An email address, display name or profile role of `super_admin` cannot grant this access. Deleting/recreating an account gives it a different UID and does not restore Super Admin privileges. The Super Admin can assign Head Admin, Attendance Admin, Student Manager, or Student roles; Viewer is not a supported new role.
 
-If the Super Admin email changes later, update `SUPER_ADMIN_EMAIL` in `config/firebase-config.js` and update the email in `firestore.rules`, then redeploy.
+Changing the existing account's email does not change its UID or require publishing the address in configuration. Do not change the pinned UID without a deliberate administrator migration across Rules, frontend and backend services.
 
 ## Deploy
 

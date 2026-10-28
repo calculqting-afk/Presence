@@ -27,11 +27,15 @@ export async function verifyToken(token, fetcher = fetch, now = Date.now()) {
     return claims;
   } catch { throw new SafeError(401, 'Sign in again to continue.'); }
 }
-const encode = value => value instanceof Date ? { timestampValue: value.toISOString() }
+export const encode = value => value === null ? {nullValue:null} : value instanceof Date ? { timestampValue: value.toISOString() }
+  : Array.isArray(value) ? {arrayValue:{values:value.map(encode)}}
+    : typeof value === 'object' ? {mapValue:{fields:Object.fromEntries(Object.entries(value).filter(([,item])=>item!==undefined).map(([key,item])=>[key,encode(item)]))}}
   : typeof value === 'boolean' ? { booleanValue: value } : typeof value === 'number' ? { integerValue: String(value) }
     : { stringValue: String(value) };
-const decode = value => 'booleanValue' in value ? value.booleanValue : 'integerValue' in value ? Number(value.integerValue)
-  : 'timestampValue' in value ? value.timestampValue : value.stringValue;
+export const decode = value => 'mapValue' in value ? Object.fromEntries(Object.entries(value.mapValue.fields||{}).map(([key,item])=>[key,decode(item)]))
+  : 'arrayValue' in value ? (value.arrayValue.values||[]).map(decode) : 'nullValue' in value ? null
+    : 'booleanValue' in value ? value.booleanValue : 'integerValue' in value ? Number(value.integerValue)
+      : 'timestampValue' in value ? new Date(value.timestampValue) : value.stringValue;
 let cachedAccess;
 export class FirebaseGateway {
   constructor(secret, fetcher = globalThis.fetch.bind(globalThis), expectedEmail = `presence-password-reset@${PROJECT}.iam.gserviceaccount.com`) {
@@ -64,6 +68,13 @@ export class FirebaseGateway {
     const result = await this.call(`https://identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:lookup`, { localId: [uid] });
     return result.users?.find(user => user.localId === uid) || null;
   }
+  async userByEmail(email) {
+    const result=await this.call(`https://identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:lookup`,{email:[email]});
+    return result.users?.find(user=>user.email?.toLowerCase()===email.toLowerCase())||null;
+  }
+  async changeEmail(uid,email) {
+    await this.call(`https://identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:update`,{localId:uid,email,returnSecureToken:false});
+  }
   async password(uid, password, validAfter) {
     await this.call(`https://identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:update`, { localId: uid, password, validSince: String(validAfter), returnSecureToken: false });
   }
@@ -78,10 +89,18 @@ export class FirebaseGateway {
     return { update: { name: `projects/${PROJECT}/databases/(default)/documents/${path}`, fields: Object.fromEntries(Object.entries(data).map(([key, value]) => [key, encode(value)])) },
       ...(merge ? { updateMask: { fieldPaths: Object.keys(data) } } : {}), ...(exists === undefined ? {} : { currentDocument: { exists } }) };
   }
+  remove(path) { return {delete:`projects/${PROJECT}/databases/(default)/documents/${path}`}; }
+  async matches(field,value,transaction) {
+    const result=await this.call(this.base+':runQuery',{...(transaction?{transaction}:{}),structuredQuery:{from:[{collectionId:'students'}],
+      select:{fields:[{fieldPath:'uid'}]},where:{fieldFilter:{field:{fieldPath:field},op:'EQUAL',value:{stringValue:value}}},limit:2}});
+    return result.filter(row=>row.document).map(row=>row.document.name.split('/').at(-1));
+  }
   async transaction(fn) {
     const { transaction } = await this.call(this.base + ':beginTransaction', { options: { readWrite: {} } });
     try {
-      const writes = await fn(path => this.get(path, transaction));
+      const get=path=>this.get(path,transaction);
+      get.matches=(field,value)=>this.matches(field,value,transaction);
+      const writes = await fn(get);
       await this.call(this.base + ':commit', { transaction, writes });
     } catch (error) {
       await this.call(this.base + ':rollback', { transaction }).catch(() => {}); throw error;

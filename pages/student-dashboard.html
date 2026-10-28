@@ -174,7 +174,7 @@
       <form id="studentProfileForm">
         <div class="form-grid">
           <div class="field full profile-photo-field"><label for="profilePhoto">Profile photo</label><div class="profile-photo-control"><span class="profile-photo-preview" id="profilePhotoPreview"><span id="profilePhotoPreviewInitials">ST</span><img id="profilePhotoPreviewImage" alt="Selected profile preview" hidden></span><div><input id="profilePhoto" type="file" accept="image/jpeg,image/png,image/webp"><small>Choose a JPG, PNG, or WebP image. It will be resized automatically.</small><button class="link-button" id="removeProfilePhoto" type="button">Remove photo</button></div></div></div>
-          <div class="field"><label for="profileAccountId">Student ID (ID number)</label><input id="profileAccountId" required pattern="[A-Za-z0-9._-]+" title="Use only letters, numbers, periods, underscores, or dashes" placeholder="e.g. 25100-1"></div>
+          <div class="field"><label for="profileAccountId">Student ID (ID number)</label><input id="profileAccountId" readonly><small>Contact a Super Admin or Head Admin to correct your login ID.</small></div>
           <div class="field"><label for="profileFirstName">First name</label><input id="profileFirstName" required></div>
           <div class="field"><label for="profileMiddleName">Middle name</label><input id="profileMiddleName"></div>
           <div class="field"><label for="profileLastName">Last name</label><input id="profileLastName" required></div>

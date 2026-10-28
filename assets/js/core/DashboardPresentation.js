@@ -25,6 +25,7 @@ const pageCopy = {
     surveys: ["Event Surveys", "Configure questions, share QR links and review responses"],
     "account-approvals": ["Account Approvals", "Review pending student registration requests"],
     "correction-requests": ["Correction Requests", "Review student attendance correction requests"],
+    "activity-history": ["Admin Activity History", "Review recorded administrative changes"],
     profile: ["Profile", "Update your administrator information"]
   }
 };

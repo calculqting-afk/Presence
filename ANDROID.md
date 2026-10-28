@@ -38,7 +38,7 @@ Run `npm run android:apk` (debug) or `npm run android:beta` (beta). After a succ
 
 ### Publish each update
 
-1. Increase `versionCode` and `versionName` in `android/app/build.gradle` before every new build (current: 15 / 1.8.6; next versionCode: 16).
+1. Increase `versionCode` and `versionName` in `android/app/build.gradle` before every new build (current: 16 / 1.8.7; next versionCode: 17).
 2. Build using one of the commands above.
 3. Create a GitHub release in **calculqting-afk/Presence**, for example tag `v1.7`, title `Presence v1.7 — Morning and Afternoon Attendance`.
 4. Upload **both files from the same build**: `Presence.apk` and `presence-update.json`. Keep those exact asset names. Publish after both uploads complete. Public prereleases are intentionally supported too; drafts are ignored. Publishing a qualifying release makes it eligible for every installed app with a lower version code, so do not use this repository for private test-only updates.

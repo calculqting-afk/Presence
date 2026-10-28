@@ -24,9 +24,11 @@ export class ResetService {
     await this.db.transaction(async get => {
       const actorProfile = await get('students/' + claims.sub), profile = await get('students/' + uid);
       const ledger = await get(ledgerPath), limit = await get('passwordResetLimits/' + claims.sub), audit = await get(auditPath);
+      const correctionLock = await get('studentIdCorrectionLocks/' + uid);
       if (claims.sub !== SUPER_UID && !(actorProfile?.active === true && actorProfile.role === 'head_admin')) throw new SafeError(403, 'Only Super Admin and Head Admin can reset student passwords.');
       if (!targetAllowed(profile) || (profile.uid && profile.uid !== uid) || target.email !== (profile.authEmail || `${profile.accountIdKey || String(profile.accountId || '').toLowerCase()}@students.presence.local`)) throw new SafeError(403, 'Only a matching ordinary student account can be reset.');
       if (audit) throw new SafeError(409, 'This reset request was already processed. Its temporary password cannot be retrieved.');
+      if (correctionLock) throw new SafeError(409, 'Finish the pending Student ID correction before resetting this password.');
       if ((ledger?.leaseUntil || 0) > now) throw new SafeError(409, 'A password operation is in progress. Wait two minutes before retrying.');
       if (ledger && now - ledger.startedAt < 60000) throw new SafeError(429, 'Wait one minute before resetting this account again.');
       const fresh = limit && now - limit.windowStart < 900000, count = fresh ? limit.count : 0;

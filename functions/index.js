@@ -5,7 +5,7 @@ const { getAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 
 initializeApp();
-const SUPER_ADMIN_EMAIL = "mikhailovna2007@gmail.com";
+const SUPER_ADMIN_UID = "8uEjAk72BLWKjvnQJEatBdeVAi02";
 const ROLE = Object.freeze({
   SUPER_ADMIN: "super_admin",
   HEAD_ADMIN: "head_admin",
@@ -42,7 +42,7 @@ async function notifyRoles(firestore, roles, notification) {
     .map((snapshot) => ({ uid: snapshot.id, ...snapshot.data() }))
     .filter((profile) => roles.includes(profile.role));
   if (roles.includes(ROLE.SUPER_ADMIN)) {
-    const bootstrap = await getAuth().getUserByEmail(SUPER_ADMIN_EMAIL).catch((error) => error.code === "auth/user-not-found" ? null : Promise.reject(error));
+    const bootstrap = await getAuth().getUser(SUPER_ADMIN_UID).catch((error) => error.code === "auth/user-not-found" ? null : Promise.reject(error));
     if (bootstrap && !recipients.some((recipient) => recipient.uid === bootstrap.uid)) recipients.push({ uid: bootstrap.uid, role: ROLE.SUPER_ADMIN });
   }
   await Promise.all(recipients.map((recipient) => firestore.collection("notifications").add(notificationData(recipient, notification))));
@@ -290,7 +290,7 @@ function studentIdToEmail(studentId) {
 async function requireAdmin(request) {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in is required.");
   const role = request.auth.token.role;
-  const isSuperAdmin = request.auth.token.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
+  const isSuperAdmin = request.auth.uid === SUPER_ADMIN_UID;
   if (role !== ROLE.HEAD_ADMIN && !isSuperAdmin) {
     throw new HttpsError("permission-denied", "Only the Head Admin can manage student accounts.");
   }
@@ -298,7 +298,7 @@ async function requireAdmin(request) {
 
 function requireSuperAdmin(request) {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in is required.");
-  if (request.auth.token.email?.toLowerCase() !== SUPER_ADMIN_EMAIL) {
+  if (request.auth.uid !== SUPER_ADMIN_UID) {
     throw new HttpsError("permission-denied", "Only the Super Admin can manage roles.");
   }
 }
@@ -344,8 +344,8 @@ function validateStudent(data) {
   if (!/^[A-Za-z0-9._-]+$/.test(data.accountId)) {
     throw new HttpsError("invalid-argument", "Student ID may only use letters, numbers, dots, dashes, and underscores.");
   }
-  if (typeof data.email === "string" && data.email.trim().toLowerCase() === SUPER_ADMIN_EMAIL) {
-    throw new HttpsError("invalid-argument", "The protected Super Admin email cannot be registered as a student email.");
+  if (data.uid === SUPER_ADMIN_UID) {
+    throw new HttpsError("invalid-argument", "The protected Super Admin account cannot be managed as a student.");
   }
   if (!allowedSections.has(data.section)) {
     throw new HttpsError("invalid-argument", "Choose a valid section from 1A through 4B.");
@@ -541,7 +541,7 @@ exports.manageStudent = onCall(async (request) => {
     const firestore = getFirestore();
 
     if (action === "delete") {
-      if (request.auth.token.email?.toLowerCase() !== SUPER_ADMIN_EMAIL) {
+      if (request.auth.uid !== SUPER_ADMIN_UID) {
         throw new HttpsError("permission-denied", "Only the Super Admin can delete student accounts.");
       }
       if (!data.uid) throw new HttpsError("invalid-argument", "Student UID is required.");

@@ -9,7 +9,7 @@ async function load(relative) {
   const context = vm.createContext({ URL, console, setTimeout, clearTimeout });
   const modules = new Map();
   const sdk = Object.fromEntries(['browserLocalPersistence', 'browserSessionPersistence', 'setPersistence',
-    'onAuthStateChanged', 'signInWithEmailAndPassword', 'signOut', 'doc', 'getDoc', 'serverTimestamp',
+    'onAuthStateChanged', 'signInWithEmailAndPassword', 'signOut', 'doc', 'getDoc', 'getDocFromServer', 'serverTimestamp',
     'setDoc', 'updateDoc', 'writeBatch', 'createUserWithEmailAndPassword'].map(name => [name, () => { throw Error('Unexpected live SDK call'); }]));
   const synthetic = (key, values) => {
     if (!modules.has(key)) modules.set(key, new vm.SyntheticModule(Object.keys(values), function () {
@@ -24,7 +24,7 @@ async function load(relative) {
   const entry = module(path.join(root, relative));
   await entry.link((specifier, parent) => {
     if (specifier.startsWith('https:')) return synthetic('sdk', sdk);
-    if (specifier.includes('firebase-config')) return synthetic('config', { SUPER_ADMIN_EMAIL: 'owner@test.local',
+    if (specifier.includes('firebase-config')) return synthetic('config', { SUPER_ADMIN_UID: 'owner',
       auth: {}, db: {}, studentIdToEmail: id => `${id}@student.test`, studentProvisioningAuth: {}, studentProvisioningDb: {} });
     return module(path.resolve(path.dirname(parent.identifier), specifier.split('?')[0]));
   });
@@ -34,10 +34,10 @@ async function load(relative) {
 
 function sessionOptions(profile = { active: true, role: 'student', accountId: '123' }) {
   const calls = [];
-  return { calls, auth: {}, superAdminEmail: 'owner@test.local', studentEmail: id => `${id}@student.test`,
+  return { calls, auth: {}, superAdminUid: 'owner', studentEmail: id => `${id}@student.test`,
     localPersistence: 'local', sessionPersistence: 'session',
     persist: async (_, mode) => calls.push(['persist', mode]),
-    signIn: async (_, email, password) => { calls.push(['signIn', email, password]); return { user: { uid: 'one', email } }; },
+    signIn: async (_, email, password) => { calls.push(['signIn', email, password]); return { user: { uid: email === 'owner@test.local' ? 'owner' : 'one', email } }; },
     logOut: async () => calls.push(['signOut']),
     loadStudent: async () => ({ exists: () => true, data: () => profile }) };
 }
@@ -57,7 +57,7 @@ test('login session preserves student/viewer/admin roles and persistence choices
   const result = await new LoginSessionService(options).authenticate({ accountId: 'owner@test.local', password: 'secret123', remember: false });
   assert.equal(result.session.role, 'admin');
   assert.equal(result.session.assignedRole, 'super_admin');
-  assert.equal(result.session.accountId, 'owner@test.local');
+  assert.equal(result.session.accountId, '');
   assert.deepEqual(options.calls[0], ['persist', 'session']);
 });
 
@@ -89,6 +89,21 @@ test('survey auto-resume eligibility and login error messages stay unchanged', a
   assert.match(service.errorMessage({ code: 'auth/invalid-credential' }), /incorrect/);
   assert.match(service.errorMessage({ code: 'auth/too-many-requests' }), /Too many attempts/);
   assert.match(service.errorMessage({ code: 'firestore/permission-denied' }), /Firestore rules/);
+});
+
+test('Super Admin uses authenticated UID rather than email, and inactive or invented roles cannot sign in as staff',async()=>{
+  const {LoginSessionService}=await load('assets/js/controllers/LoginSessionService.js');
+  const options=sessionOptions(),service=new LoginSessionService(options);
+  assert.equal(service.isSuperAdmin({uid:'impostor',email:'owner@test.local'}),false);
+  assert.equal(service.isSuperAdmin({uid:'owner',email:'changed@example.test'}),true);
+  assert.equal(service.isSuperAdmin({email:'owner@test.local'}),false);
+  options.signIn=async()=>({user:{uid:'owner',email:'changed@example.test'}});options.loadStudent=async()=>{throw Error('Pinned admin must not require student profile');};
+  const authenticated=await new LoginSessionService(options).authenticate({accountId:'changed@example.test',password:'test',remember:false});
+  assert.equal(authenticated.session.assignedRole,'super_admin');assert.equal(authenticated.session.accountId,'');
+  for(const role of ['head_admin','attendance_admin','student_manager']){
+    const inactive=sessionOptions({active:false,role});await assert.rejects(new LoginSessionService(inactive).authenticate({accountId:'123',password:'test'}),/not a registered student/);assert.equal(inactive.calls.at(-1)[0],'signOut');
+  }
+  const forged=sessionOptions({active:true,role:'super_admin'});await assert.rejects(new LoginSessionService(forged).authenticate({accountId:'123',password:'test'}),/unsupported role/);
 });
 
 function browser() {

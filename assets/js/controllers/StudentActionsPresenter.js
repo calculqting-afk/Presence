@@ -15,6 +15,7 @@ export class StudentActionsPresenter {
         : button('viewStudents', 'data-view-student', 'Profile', standard),
       hasFaceRegistration ? button('resetFace', 'data-reset-face', profile ? 'Reset face registration' : 'Reset face', profile ? standard : 'small-button danger') : '',
       button('changePasswords', 'data-password-student', 'Reset password', standard),
+      button('correctStudentId','data-correct-student-id','Correct ID',standard),
       button('deleteStudents', 'data-delete-student', 'Clear account', profile ? 'small-button danger modal-danger-button' : 'small-button danger')
     ].join('');
   }

@@ -86,6 +86,7 @@ export class StudentDashboard {
     this.handleCaptureFaceButtonClick = this.handleCaptureFaceButtonClick.bind(this);
   }
   dispose() {
+    this.presenceDisposed = true;
     this.clearFaceGuidanceTimers();
     this.communityServiceModalController?.dispose?.();
     this.scope.dispose();
@@ -210,7 +211,7 @@ export class StudentDashboard {
     try {
       dashboard.storedPresenceSession = dashboard.sessionStorage.getItem("presenceDeviceSession") || "";
     } catch {}
-    sessionState.presenceSessionId = dashboard.storedPresenceSession || `${currentUser.uid}_${createDeviceSessionToken()}`;
+    sessionState.presenceSessionId = (dashboard.storedPresenceSession.startsWith(`${currentUser.uid}_`) ? dashboard.storedPresenceSession : "") || `${currentUser.uid}_${createDeviceSessionToken()}`;
     try {
       dashboard.sessionStorage.setItem("presenceDeviceSession", sessionState.presenceSessionId);
     } catch {}
@@ -406,7 +407,17 @@ export class StudentDashboard {
     dashboard.renderMyAttendances();
     if (dashboard.view === 'fines') dashboard.renderFines();
   }
-  async updatePresence(status = "online", silent = false) {
+  updatePresence(status = "online", silent = false) {
+    if ((this.studentProfile || currentUserProfile)?.passwordResetRequired === true) return Promise.resolve();
+    if (this.presenceDisposed || sessionState.studentLoggedOut || !currentUser?.uid || auth.currentUser?.uid !== currentUser.uid || !sessionState.presenceSessionId) return Promise.resolve();
+    const pending = Promise.resolve(sessionState.presenceWrite).catch(() => {}).then(() => {
+      if (this.presenceDisposed || sessionState.studentLoggedOut || auth.currentUser?.uid !== currentUser.uid) return;
+      return this.writePresence(status, silent);
+    });
+    sessionState.presenceWrite = pending;
+    return pending;
+  }
+  async writePresence(status = "online", silent = false) {
     const dashboard = this;
     if ((dashboard.studentProfile || currentUserProfile)?.passwordResetRequired === true) return;
     const online = status === "online";
@@ -910,20 +921,13 @@ export class StudentDashboard {
       showDashboardToast("Invalid Student ID", "Use only letters, numbers, periods, underscores, or dashes.");
       return;
     }
-    const newKey = newAccountId.toLowerCase();
     const oldAccountId = dashboard.studentProfile.accountId;
-    const oldKey = (dashboard.studentProfile.accountIdKey || oldAccountId || "").toLowerCase();
+    if (newAccountId !== oldAccountId) {
+      showDashboardToast('Contact an administrator', 'A Super Admin or Head Admin must correct your login Student ID.');
+      return;
+    }
     try {
-      if (oldKey !== newKey) {
-        const idSnap = await getDoc(doc(db, "studentIds", newKey));
-        if (idSnap.exists() && idSnap.data().uid !== currentUser.uid) {
-          showDashboardToast("Student ID taken", "This Student ID is already registered by another student.");
-          return;
-        }
-      }
       const updateData = {
-        accountId: newAccountId,
-        accountIdKey: newKey,
         firstName: dashboard.document.querySelector("#profileFirstName").value.trim(),
         middleName: dashboard.document.querySelector("#profileMiddleName").value.trim(),
         lastName: dashboard.document.querySelector("#profileLastName").value.trim(),
@@ -936,23 +940,7 @@ export class StudentDashboard {
         photoDataUrl: dashboard.pendingProfilePhoto,
         updatedAt: serverTimestamp()
       };
-      if (oldKey !== newKey) {
-        const batch = writeBatch(db);
-        batch.set(doc(db, "students", currentUser.uid), updateData, {
-          merge: true
-        });
-        if (oldKey) batch.delete(doc(db, "studentIds", oldKey));
-        batch.set(doc(db, "studentIds", newKey), {
-          studentId: newAccountId,
-          uid: currentUser.uid,
-          createdAt: serverTimestamp()
-        });
-        await batch.commit();
-      } else {
-        await setDoc(doc(db, "students", currentUser.uid), updateData, {
-          merge: true
-        });
-      }
+      await setDoc(doc(db, "students", currentUser.uid), updateData, { merge: true });
       dashboard.closeStudentProfileModal();
       showDashboardToast("Profile updated", "Your changes are now live.");
     } catch (error) {

@@ -1,5 +1,7 @@
 # Correct a student's login Student ID locally
 
+The dashboard now provides a protected **Modify Students → Correct ID** action for Super Admin and Head Admin. See [dashboard flow, setup and recovery](ADMIN-ID-AND-ACTIVITY.md). This document describes the separate trusted terminal recovery helper.
+
 This terminal helper updates the Firebase Authentication email and the registered student profile/ID index while keeping the UID and password. Attendance, fines, face registration and historical Student ID snapshots are not rewritten. Only registered, active student accounts are supported; pending/declined registrations and staff accounts require separate review.
 
 ## Setup

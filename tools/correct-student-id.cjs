@@ -61,11 +61,13 @@ class StudentIdCorrection {
   }
   async check(tx,plan) {
     const {uid,oldId,newId,journal}=plan;
-    const refs={profile:this.db.doc('students/'+uid),oldIndex:this.db.doc('studentIds/'+key(oldId)),newIndex:this.db.doc('studentIds/'+key(newId)),oldRequest:this.db.doc('registrationRequests/'+key(oldId)),newRequest:this.db.doc('registrationRequests/'+key(newId)),lock:this.db.doc('studentIdCorrectionLocks/'+uid)};
+    const refs={profile:this.db.doc('students/'+uid),oldIndex:this.db.doc('studentIds/'+key(oldId)),newIndex:this.db.doc('studentIds/'+key(newId)),oldRequest:this.db.doc('registrationRequests/'+key(oldId)),newRequest:this.db.doc('registrationRequests/'+key(newId)),lock:this.db.doc('studentIdCorrectionLocks/'+uid),passwordReset:this.db.doc('passwordResets/'+uid)};
     const docs={};
     for (const [name,ref] of Object.entries(refs)) docs[name]=await tx.get(ref);
     const existing=await tx.get(journal);
     const profile=docs.profile.data();
+    if (profile?.passwordResetRequired===true || (docs.passwordReset.data()?.leaseUntil||0)>Date.now()) throw Error('Finish the pending password reset before correcting the Student ID.');
+    if ((docs.lock.data()?.leaseUntil||0)>Date.now()) throw Error('A dashboard correction is in progress. Wait two minutes and resume it from the dashboard.');
     if (!profile || key(profile.accountId||'')!==key(oldId) || profile.active!==true
       || (profile.role && !['student','viewer'].includes(profile.role))
       || (profile.authEmail && profile.authEmail.toLowerCase()!==email(oldId))) throw Error('Student profile changed. Stop and review the account.');

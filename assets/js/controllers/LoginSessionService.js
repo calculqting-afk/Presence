@@ -1,19 +1,19 @@
-import { SUPER_ADMIN_EMAIL, auth, db, studentIdToEmail } from '../../../config/firebase-config.js';
+import { SUPER_ADMIN_UID, auth, db, studentIdToEmail } from '../../../config/firebase-config.js';
 import { browserLocalPersistence, browserSessionPersistence, setPersistence, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
-import { doc, getDoc } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
+import { doc, getDocFromServer } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 
 /** Authentication/profile access only; no DOM, navigation, or UI state. */
 export class LoginSessionService {
-  constructor({ auth: authentication = auth, superAdminEmail = SUPER_ADMIN_EMAIL,
-    studentEmail = studentIdToEmail, loadStudent = uid => getDoc(doc(db, 'students', uid)),
+  constructor({ auth: authentication = auth, superAdminUid = SUPER_ADMIN_UID,
+    studentEmail = studentIdToEmail, loadStudent = uid => getDocFromServer(doc(db, 'students', uid)),
     persist = setPersistence, localPersistence = browserLocalPersistence,
     sessionPersistence = browserSessionPersistence, signIn = signInWithEmailAndPassword,
     logOut = signOut, subscribe = onAuthStateChanged } = {}) {
-    Object.assign(this, { auth: authentication, superAdminEmail, studentEmail, loadStudent,
+    Object.assign(this, { auth: authentication, superAdminUid, studentEmail, loadStudent,
       persist, localPersistence, sessionPersistence, signIn, logOut, subscribe });
   }
 
-  isSuperAdmin(user) { return user.email?.toLowerCase() === this.superAdminEmail; }
+  isSuperAdmin(user) { return typeof user?.uid==='string' && user.uid === this.superAdminUid; }
 
   async resolveExistingRole(user) {
     if (this.isSuperAdmin(user)) return 'admin';
@@ -38,7 +38,9 @@ export class LoginSessionService {
         if (completed) snapshot = await this.loadStudent(user.uid);
       }
       profile = snapshot.data() || {};
+      if(!snapshot.exists()||profile.active!==true){await this.logOut(this.auth);throw new Error('This account is not a registered student.');}
       const assignedRole = profile.role === 'viewer' ? 'student' : profile.role || 'student';
+      if(!['student','head_admin','attendance_admin','student_manager'].includes(assignedRole)){await this.logOut(this.auth);throw new Error('This account has an unsupported role. Contact an administrator.');}
       if (['head_admin', 'attendance_admin', 'student_manager'].includes(assignedRole)) role = 'admin';
       else if (snapshot.exists() && profile.active === true) role = 'student';
       else {
@@ -47,7 +49,7 @@ export class LoginSessionService {
       }
     }
     return { user, profile, session: {
-      role, uid: user.uid, accountId: role === 'student' ? profile.accountId : user.email,
+      role, uid: user.uid, accountId: role === 'student' ? profile.accountId : '',
       assignedRole: isSuperAdmin ? 'super_admin' : profile.role === 'viewer' ? 'student' : profile.role || 'student'
     } };
   }
