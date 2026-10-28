@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/css/style.css?v=20261024-registration-compact">
+  <link rel="stylesheet" href="assets/css/style.css?v=20261028-modal-logo">
   <link rel="stylesheet" href="assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="assets/css/button-loading.css?v=20261010-auth-progress">
 </head>
@@ -130,7 +130,7 @@
   <div class="dialog-backdrop" id="helpDialog" hidden>
     <section class="dialog password-help-dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle" aria-describedby="passwordHelpDescription">
       <button class="dialog-close" type="button" id="dialogClose" aria-label="Close">×</button>
-      <span class="dialog-icon">?</span>
+      <span class="dialog-icon presence-modal-logo" aria-hidden="true"></span>
       <h2 id="dialogTitle">Forgot your password?</h2>
       <p id="passwordHelpDescription">Contact the Presence administrator on Facebook to request a password reset. Include your full name and Student ID so the admin can verify your account.</p>
       <a class="dialog-action password-help-contact" id="passwordHelpContact" href="https://www.facebook.com/pusangnakashadess" target="_blank" rel="noopener noreferrer">Contact admin on Facebook <span aria-hidden="true">↗</span></a>
@@ -142,7 +142,7 @@
   <div class="dialog-backdrop registration-dialog-backdrop" id="registrationDialog" hidden>
     <section class="dialog registration-dialog" role="dialog" aria-modal="true" aria-labelledby="registrationDialogTitle">
       <button class="dialog-close" type="button" data-close-registration aria-label="Close">×</button>
-      <span class="dialog-icon">＋</span>
+      <span class="dialog-icon presence-modal-logo" aria-hidden="true"></span>
       <h2 id="registrationDialogTitle">Create student account</h2>
       <p>Your request will be reviewed by an administrator. You cannot sign in until it is approved.</p>
       <form id="registrationForm" class="registration-form registration-wizard" novalidate>
@@ -178,7 +178,7 @@
   <div class="dialog-backdrop registration-dialog-backdrop" id="registrationStatusDialog" hidden>
     <section class="dialog registration-dialog registration-status-dialog" role="dialog" aria-modal="true" aria-labelledby="registrationStatusTitle">
       <button class="dialog-close" type="button" data-close-registration-status aria-label="Close">×</button>
-      <span class="dialog-icon">i</span>
+      <span class="dialog-icon presence-modal-logo" aria-hidden="true"></span>
       <h2 id="registrationStatusTitle">Registration status</h2>
       <p>Enter the same Student ID, birthday, and password used when you registered.</p>
       <form id="registrationStatusForm" class="registration-form" novalidate>
