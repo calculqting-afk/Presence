@@ -32,7 +32,7 @@ export class StudentAttendanceListController {
       const review = this.summary.needsReview(record, eventsById.get(record.eventId));
       return (!from || record.eventDate >= from) && (!to || record.eventDate <= to)
         && (!search || (record.eventName || '').toLowerCase().includes(search))
-        && (!status || (status === 'review' ? review : status === 'completed' ? Boolean(record.checkedOutAt) : !record.checkedOutAt && !review));
+        && (!status || (status === 'review' ? review : status === 'completed' ? Boolean(record.checkedOutAt) && !review : !record.checkedOutAt && !review));
     });
     this.page = Math.min(this.page, Math.max(0, Math.ceil(matches.length / this.pageSize) - 1));
     this.previous.disabled = this.page === 0;

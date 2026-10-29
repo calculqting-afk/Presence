@@ -1,13 +1,16 @@
+import { attendanceDay, attendanceMilliseconds } from '../core/AttendanceTimePolicy.js';
 import { hasPermission, requirePermission } from '../core/permissions.js?v=20261011-optimized';
 import { runTransaction, doc, collection, Timestamp, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { assertPendingRequest, loadReviewerName, writeRequestDecision } from './CorrectionRequestService.js';
 import {activityRecord,activitySnapshot} from './ActivityRecordPolicy.js';
 
-export function correctionValues({ checkIn, checkOut, arrival, reason }) {
-  const start = new Date(checkIn), end = checkOut ? new Date(checkOut) : null;
+export function correctionValues({ checkIn, checkOut, arrival, reason, eventDate }) {
+  const parse = value => new Date(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(value) ? value + '+08:00' : value);
+  const start = parse(checkIn), end = checkOut ? parse(checkOut) : null;
   const explanation = String(reason || '').trim();
   if (!checkIn || !Number.isFinite(start.getTime())) throw new Error('Enter a valid check-in time.');
-  if (end && (!Number.isFinite(end.getTime()) || end < start)) throw new Error('Check-out must be at or after check-in.');
+  if (end && (!Number.isFinite(end.getTime()) || end <= start)) throw new Error('Checkout must be later than check-in.');
+  if (eventDate && (attendanceDay(start) !== eventDate || end && attendanceDay(end) !== eventDate)) throw new Error('Attendance times must use the selected event date (' + eventDate + ', Philippine time).');
   if (start > new Date() || (end && end > new Date())) throw new Error('Attendance times cannot be in the future.');
   if (!['present', 'late'].includes(arrival)) throw new Error('Select Present or Late.');
   if (explanation.length < 5 || explanation.length > 1000) throw new Error('Provide a reason between 5 and 1000 characters.');
@@ -33,6 +36,9 @@ export class AttendanceCorrectionController {
     this.button = document.querySelector('#addAttendanceCorrection');
     this.button.hidden = !hasPermission(this.role, 'correctAttendance');
     this.onOpen = () => this.open();
+    this.onChange = () => this.refreshValidation();
+    this.form.addEventListener('input', this.onChange);
+    this.form.addEventListener('change', this.onChange);
     this.onSubmit = event => { event.preventDefault(); this.submit(); };
     this.onClose = event => { if (event.target === this.modal || event.target.closest('[data-close-correction]')) this.modal.hidden = true; };
     this.button.addEventListener('click', this.onOpen);
@@ -54,23 +60,25 @@ export class AttendanceCorrectionController {
     student.disabled = event.disabled = Boolean(record);
     if (record) { student.value = record.studentUid; event.value = record.eventId; }
     const localTime = value => {
-      const date = value?.toDate?.();
-      return date ? new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '';
+      const time = attendanceMilliseconds(value);
+      const date = Number.isFinite(time) ? new Date(time + 8 * 3600000) : null;
+      return date ? date.toISOString().slice(0, 19) : '';
     };
     document.querySelector('#correctionCheckIn').value = localTime(record?.checkedInAt);
     document.querySelector('#correctionCheckOut').value = localTime(record?.checkedOutAt);
     document.querySelector('#correctionArrival').value = record?.arrivalStatus || 'present';
     document.querySelector('#correctionReason').value = '';
+    this.refreshValidation();
     this.modal.hidden = false;
     document.querySelector('#correctionReason').focus();
   }
 
   async save({ studentUid, eventId, checkIn, checkOut, arrival, reason, requestId = null }) {
     requirePermission(this.role, 'correctAttendance');
-    const values = correctionValues({ checkIn, checkOut, arrival, reason });
     const student = this.getStudents().find(item => item.uid === studentUid);
     const event = this.getEvents().find(item => item.id === eventId);
     if (!student || !event || student.active === false) throw new Error('Select an active student and an existing event.');
+    const values = correctionValues({ checkIn, checkOut, arrival, reason, eventDate: event.date });
     const eligible = this.eligibility ? this.eligibility(student, event) !== 'excluded'
       : event.attendanceRoster ? Object.hasOwn(event.attendanceRoster, studentUid)
         : event.audience === 'All students' || event.audience === `Section ${student.section}`;
@@ -110,8 +118,37 @@ export class AttendanceCorrectionController {
     });
   }
 
+  refreshValidation() {
+    const selected = this.getEvents().find(item => item.id === document.querySelector('#correctionEvent').value);
+    const checkIn = document.querySelector('#correctionCheckIn'), checkOut = document.querySelector('#correctionCheckOut');
+    for (const input of [checkIn, checkOut]) {
+      input.min = selected?.date ? selected.date + 'T00:00:00' : '';
+      input.max = selected?.date ? selected.date + 'T23:59:59' : '';
+    }
+    const schedule = document.querySelector('#correctionSchedule');
+    schedule.textContent = selected ? selected.name + '\n' + selected.date + ' · Philippine time\nCheck-in: ' + (selected.timeIn || 'Not set') + '–' + (selected.checkInCutoff || 'Not set') + '\nCheck-out: ' + (selected.timeOut || 'Not set') + '–' + (selected.checkOutCutoff || 'Not set') : 'Choose an event to see its schedule.';
+    const display = value => {
+      const time = attendanceMilliseconds(value);
+      return Number.isFinite(time) ? new Date(time).toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'medium' }) : 'Not recorded';
+    };
+    const before = document.querySelector('#correctionBefore');
+    before.textContent = this.record ? 'Before: ' + display(this.record.checkedInAt || this.record.attendedAt) + ' → ' + display(this.record.checkedOutAt) : '';
+    before.hidden = !this.record;
+    const error = document.querySelector('#correctionTimeError'), after = document.querySelector('#correctionAfter');
+    try {
+      if (!selected) throw Error('Choose an event.');
+      const values = correctionValues({ checkIn: checkIn.value, checkOut: checkOut.value, arrival: document.querySelector('#correctionArrival').value, reason: 'Preview correction', eventDate: selected.date });
+      const elapsed = values.end ? values.end - values.start : null;
+      after.textContent = 'After: ' + display(values.start) + ' → ' + display(values.end) + ' · ' + values.arrival + ' · Duration: ' + (elapsed === null ? 'Awaiting checkout' : elapsed < 60000 ? 'Less than 1 minute' : Math.floor(elapsed / 60000) + ' minutes');
+      error.textContent = ''; document.querySelector('#saveAttendanceCorrection').disabled = Boolean(this.saving);
+    } catch (issue) {
+      error.textContent = issue.message; after.textContent = ''; document.querySelector('#saveAttendanceCorrection').disabled = true;
+    }
+  }
+
   async submit() {
     const button = document.querySelector('#saveAttendanceCorrection');
+    this.saving = true;
     button.disabled = true;
     try {
       await this.save({ studentUid: document.querySelector('#correctionStudent').value, eventId: document.querySelector('#correctionEvent').value,
@@ -120,13 +157,15 @@ export class AttendanceCorrectionController {
       this.modal.hidden = true;
       this.notify('Attendance corrected', 'The reason, administrator and previous record were saved together.');
     } catch (error) { this.notify('Correction not saved', error.message); }
-    finally { button.disabled = false; }
+    finally { this.saving = false; this.refreshValidation(); }
   }
 
   dispose() {
     if (!this.initialized) return;
     this.button.removeEventListener('click', this.onOpen);
     this.form.removeEventListener('submit', this.onSubmit);
+    this.form.removeEventListener('input', this.onChange);
+    this.form.removeEventListener('change', this.onChange);
     this.modal.removeEventListener('click', this.onClose);
     document.removeEventListener('keydown', this.onEscape);
     this.initialized = false;

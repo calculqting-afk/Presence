@@ -1,3 +1,4 @@
+import { attendanceMilliseconds } from '../core/AttendanceTimePolicy.js';
 import { currentUser, currentUserProfile, showDashboardToast, openView, isCheckoutAvailable, db, Timestamp, doc, getDocFromServer, serverTimestamp, setDoc } from '../dashboard.js?v=20261011-optimized';
 const GEOFENCE_GPS_ALLOWANCE_CAP_METERS = 20;
 import { AttendanceSubmissionService } from './AttendanceSubmissionService.js?v=20261011-optimized';
@@ -5,11 +6,22 @@ import { GeofenceBoundary } from './GeofenceBoundary.js';
 import { ButtonLoadingController } from './ButtonLoadingController.js';
 import { deviceLocation } from './DeviceLocationService.js';
 import { EventAudiencePolicy } from './EventAudiencePolicy.js';
+import { PasswordResetApi } from './PasswordResetApi.js';
 
 export class StudentAttendanceController {
   constructor({ getState, setFaceRegistration, showError, bridge, checkIn }) {
     Object.assign(this, { getState, setFaceRegistration, showError, bridge, checkIn });
-    this.submission = new AttendanceSubmissionService({ read: getDocFromServer, write: setDoc,
+    this.submission = new AttendanceSubmissionService({ read: getDocFromServer, write: async (reference, payload, options) => {
+      const location = payload.checkInLocation || payload.checkOutLocation;
+      if (location) {
+        this.securityApi ||= new PasswordResetApi();
+        const eventId = payload.eventId || reference.id.slice(currentUser.uid.length + 1);
+        await this.securityApi.call('/v1/student/attendance-location', currentUser, {
+          eventId, action: payload.checkInLocation ? 'in' : 'out', location
+        });
+      }
+      return setDoc(reference, payload, options);
+    },
       onWaiting: () => showDashboardToast('Waiting for the server', 'Attendance is still awaiting a server response. Keep this page open and do not submit again.') });
     this.checkoutBusy = new Set();
     this.loading = new ButtonLoadingController();
@@ -107,6 +119,7 @@ export class StudentAttendanceController {
     if (!saved || saved.studentUid !== currentUser.uid || saved.eventId !== eventId || saved.status !== 'checked-in' || !saved.checkedInAt || saved.checkedOutAt) {
       throw new Error('A matching saved check-in is required before checkout. Refresh your attendance records or ask an Attendance Manager to review the record.');
     }
+    if (attendanceMilliseconds(saved.checkedInAt) >= Date.now()) throw new Error('Checkout must be later than check-in. Wait and try again, or ask an Attendance Manager to review the saved time.');
   }
 
   async requireFaceRegistration() {

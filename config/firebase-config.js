@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+import { getFirestore, initializeFirestore, memoryLocalCache, clearIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 
 export const firebaseConfig = {
   apiKey: "AIzaSyCiHNnPQzPvGZLupVtYZ5uNNDPgdSK3m5I",
@@ -15,7 +15,13 @@ export const firebaseConfig = {
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+  localCache: memoryLocalCache()
+});
+// Remove data left by earlier versions before starting this Firestore instance.
+// An older tab may hold IndexedDB open; new sessions still use memory only.
+export const legacyCacheCleared = await clearIndexedDbPersistence(db).then(() => true).catch(() => {
+  console.warn('Close older Presence tabs and reload to finish clearing the previous offline cache.');
+  return false;
 });
 const studentProvisioningApp = initializeApp(firebaseConfig, "student-provisioning");
 export const studentProvisioningAuth = getAuth(studentProvisioningApp);

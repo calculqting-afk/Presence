@@ -60,15 +60,15 @@ function canResetFace_(requester, idToken) {
 }
 
 function createFaceRegistration_(studentUid, idToken, file) {
-  return firestoreRequest_("patch", `faceRegistrations/${studentUid}`, idToken, {
-    fields: {
-      registered: { booleanValue: true },
-      storageProvider: { stringValue: "Google Drive" },
-      driveFileId: { stringValue: file.getId() },
-      driveFileName: { stringValue: file.getName() },
-      registeredAt: { timestampValue: new Date().toISOString() }
-    }
-  }, "?currentDocument.exists=false");
+  // This secret lives only in Script Properties and the Worker secret store.
+  // The browser never receives it, and direct student writes are denied.
+  const response = UrlFetchApp.fetch('https://presence-admin-api.mikhailovna2007.workers.dev/v1/internal/face-registration', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { Authorization: `Bearer ${idToken}`, 'X-Presence-Face-Secret': getConfig_('FACE_BACKEND_SECRET') },
+    payload: JSON.stringify({ fileId: file.getId(), fileName: file.getName() })
+  });
+  if (response.getResponseCode() !== 200) throw new Error('Server face confirmation failed. Ask an administrator to check the face service setup.');
+  return JSON.parse(response.getContentText());
 }
 
 // Focused reset service. Upload behavior remains independent.
@@ -191,6 +191,7 @@ function doGet() {
 
 function doPost(e) {
   try {
+    if (!e?.postData || typeof e.postData.contents !== 'string' || e.postData.contents.length > 1600000) throw new Error('Upload request is too large or missing.');
     const payload = JSON.parse(e.postData.contents || "{}");
     if (!payload.idToken) throw new Error("Missing sign-in token.");
     const requester = verifyFirebaseUser_(payload.idToken);
@@ -204,11 +205,15 @@ function doPost(e) {
     if (getFaceRegistration_(studentUid, payload.idToken)) throw new Error("A face photo is already registered. Ask your administrator to reset it.");
     if (getStudentFaceFiles_(studentUid).length) throw new Error("An existing Drive photo was found. Ask your administrator to reset it.");
 
+    if (typeof payload.imageDataUrl !== 'string' || payload.imageDataUrl.length > 1500000) throw new Error('Photo is too large.');
     const match = payload.imageDataUrl.match(/^data:(image\/jpeg|image\/png);base64,([A-Za-z0-9+/=\s]+)$/);
     if (!match) throw new Error("Only JPEG or PNG photos are accepted.");
     const mimeType = match[1];
     const bytes = Utilities.base64Decode(match[2].replace(/\s/g, ""));
     if (bytes.length > 1024 * 1024) throw new Error("Photo is too large.");
+    const header = bytes.slice(0, 8).map(value => (value + 256) % 256);
+    const imageHeader = mimeType === 'image/png' ? [137,80,78,71,13,10,26,10] : [255,216,255];
+    if (bytes.length < 32 || !imageHeader.every((value,index) => header[index] === value)) throw new Error('The photo data is not a valid JPEG or PNG image.');
 
     const studentName = safeNamePart_(payload.studentName, "Student");
     const studentId = safeNamePart_(payload.studentId, "No-ID");
@@ -223,6 +228,12 @@ function doPost(e) {
       // Save the exact file ID to Firebase; if that fails, keep no orphaned Drive file.
       createFaceRegistration_(studentUid, payload.idToken, file);
     } catch (error) {
+      // An acknowledgement can be lost after the Worker committed. Keep the
+      // confirmed photo, and leave an uncertain upload for admin reconciliation.
+      let saved;
+      try { saved = getFaceRegistration_(studentUid, payload.idToken); }
+      catch { throw new Error('Upload confirmation is uncertain. Ask an administrator to refresh face status before retrying.'); }
+      if (saved?.fields?.driveFileId?.stringValue === file.getId()) return json_({ ok: true, fileId: file.getId(), fileName: file.getName() });
       file.setTrashed(true);
       throw error;
     }

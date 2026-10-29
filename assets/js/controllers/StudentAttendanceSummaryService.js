@@ -1,3 +1,4 @@
+import { attendanceTimeIssue, attendanceReviewLabel } from '../core/AttendanceTimePolicy.js';
 import { AttendanceSummaryService } from './AttendanceSummaryService.js';
 import { AttendanceViews } from './AttendanceViews.js';
 import { EventAudiencePolicy } from './EventAudiencePolicy.js';
@@ -37,9 +38,10 @@ export class StudentAttendanceSummaryService {
       const checkIn = StudentAttendanceSummaryService.milliseconds(record?.checkedInAt || record?.attendedAt);
       const checkOut = StudentAttendanceSummaryService.milliseconds(record?.checkedOutAt);
       const hasCheckIn = Number.isFinite(checkIn), hasCheckOut = Number.isFinite(checkOut);
-      const malformed = Boolean(record && ((record.checkedInAt || record.attendedAt) && !hasCheckIn
+      const timeIssue = attendanceTimeIssue(record, event);
+      const malformed = Boolean(timeIssue) || Boolean(record && ((record.checkedInAt || record.attendedAt) && !hasCheckIn
         || record.checkedOutAt && !hasCheckOut || hasCheckIn && checkIn > now || hasCheckOut && (!hasCheckIn || checkOut < checkIn || checkOut > now)));
-      let status = 'review', label = 'Needs review';
+      let status = 'review', label = attendanceReviewLabel(timeIssue) || 'Needs review';
       if (event && Number.isFinite(close) && !malformed) {
         if (hasCheckIn && hasCheckOut) { status = record.arrivalStatus === 'late' ? 'late' : 'present'; label = 'Completed'; }
         else if (hasCheckIn) {
@@ -53,8 +55,8 @@ export class StudentAttendanceSummaryService {
       const arrival = hasCheckIn && !malformed ? record.arrivalStatus === 'late' ? 'Late' : 'Present' : '';
       rows.push({ eventId: id, group, title, date, session, status, label, arrival, checkIn: hasCheckIn ? checkIn : null,
         checkOut: hasCheckOut ? checkOut : null, corrected: record?.recordSource === 'admin-corrected',
-        canRequest: verified && event && ['absent', 'incomplete'].includes(status) && EventAudiencePolicy.canAttend(student, event),
-        requestKind: status === 'incomplete' ? 'missed-checkout' : 'missed-check-in' });
+        canRequest: verified && event && (['absent', 'incomplete'].includes(status) || Boolean(timeIssue) && now > close) && EventAudiencePolicy.canAttend(student, event),
+        requestKind: timeIssue ? 'incorrect-attendance' : status === 'incomplete' ? 'missed-checkout' : 'missed-check-in' });
     }
     const selected = rows.filter(row => (!filters.month || row.date.slice(0, 7) === filters.month)
       && (!filters.event || row.group === filters.event)

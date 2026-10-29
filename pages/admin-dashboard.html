@@ -304,7 +304,7 @@
           <input id="temporaryStudentPassword" type="text" readonly autocomplete="off" spellcheck="false" aria-describedby="temporaryPasswordHelp">
           <button class="primary-button" id="copyTemporaryStudentPassword" type="button">Copy temporary password</button>
         </div>
-        <p id="temporaryPasswordHelp">Copy and deliver privately. The student must create a new password when signing in.</p>
+        <p id="temporaryPasswordHelp">Copy and deliver privately. The student must create a new password within 30 minutes of this reset.</p>
         <p class="password-reset-once">Shown once. Closing clears this password; issue another reset if it is lost.</p>
         <div class="modal-actions"><button class="outline-button" type="button" data-close-password>Done</button></div>
       </div>
@@ -415,12 +415,28 @@
           <p class="correction-request-reason" data-correction-request-reason></p>
           <small>Verify the attendance times and enter your decision reason below. Review existing fines separately.</small>
         </div>
-        <div class="field"><label for="correctionCheckIn">Check-in time</label><input type="datetime-local" id="correctionCheckIn" required></div>
-        <div class="field"><label for="correctionCheckOut">Check-out time (optional)</label><input type="datetime-local" id="correctionCheckOut"></div>
+        <div class="field full"><p id="correctionSchedule" class="muted"></p></div>
+        <div class="field"><label for="correctionCheckIn">Check-in time</label><input type="datetime-local" id="correctionCheckIn" step="1" aria-describedby="correctionTimeError correctionSchedule" required></div>
+        <div class="field"><label for="correctionCheckOut">Check-out time (optional)</label><input type="datetime-local" id="correctionCheckOut" step="1" aria-describedby="correctionTimeError correctionSchedule"></div>
+        <div class="field full" aria-live="polite"><p id="correctionTimeError" role="alert"></p><p id="correctionBefore"></p><p id="correctionAfter"></p></div>
         <div class="field"><label for="correctionArrival">Arrival</label><select id="correctionArrival"><option value="present">Present</option><option value="late">Late</option></select></div>
         <div class="field full"><label for="correctionReason">Required reason / admin decision</label><textarea id="correctionReason" minlength="5" maxlength="1000" required></textarea></div>
       </div><div class="form-actions"><button type="button" class="outline-button" data-close-correction>Cancel</button><button type="submit" class="primary-button" id="saveAttendanceCorrection">Save audited correction</button></div></form>
     </section>
   </div>
+<div class="dashboard-modal-backdrop" id="attendanceRevocationModal" hidden>
+  <section class="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="revocationTitle" aria-describedby="revocationWarning">
+    <button type="button" class="modal-close" data-close-revocation aria-label="Close">×</button>
+    <h2 id="revocationTitle">Revoke attendance?</h2>
+    <p><strong id="revocationStudent"></strong><br><span id="revocationEvent"></span></p>
+    <p id="revocationTimes"></p>
+    <p id="revocationWarning">This removes the record from active attendance and attendance exports. The original values, earlier correction history, your account and reason will be retained. A closed session can count as absent under the normal roster rules; during an open session the student may record attendance again. Existing fines stay unchanged.</p>
+    <form id="attendanceRevocationForm"><div class="form-grid">
+      <div class="field full"><label for="revocationReason">Required reason</label><textarea id="revocationReason" required minlength="5" maxlength="1000"></textarea></div>
+      <div class="field full"><label for="revocationConfirmation">Type REVOKE to confirm</label><input id="revocationConfirmation" required autocomplete="off" pattern="REVOKE"></div>
+      <p id="revocationStatus" class="field full" role="status" aria-live="polite"></p>
+    </div><div class="form-actions"><button class="outline-button" type="button" data-close-revocation>Cancel</button><button class="primary-button" type="submit" id="confirmAttendanceRevocation">Revoke attendance</button></div></form>
+  </section>
+</div>
 </body>
 </html>

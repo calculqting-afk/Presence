@@ -21,7 +21,7 @@ async function commit(entries,uid='owner',allowed=true){
   const {activityRecord,activitySnapshot}=await import('../assets/js/controllers/ActivityRecordPolicy.js');
   for(const [uid,role] of [['arrivalstudent','student'],['arrivalhead','head_admin'],['arrivaladmin','attendance_admin'],['arrivalmanager','student_manager']])await commit([['students/'+uid,{uid,accountId:uid,active:true,role,section:'2A',firstName:'Test',lastName:'Student'}]]);
   const oldCutoff=new Date(now-5400000),newCutoff=new Date(now-4800000),checkedIn=new Date(now-5100000);
-  const event={name:'Cutoff test',type:'Assembly',date:'2026-10-28',timeIn:'13:00',checkInCutoff:'15:00',timeOut:'16:00',checkOutCutoff:'17:00',location:'Hall',audience:'All students',description:'',requiresGeofence:false,
+  const event={name:'Cutoff test',type:'Assembly',date:new Date(now + 8*3600000).toISOString().slice(0,10),timeIn:'13:00',checkInCutoff:'15:00',timeOut:'16:00',checkOutCutoff:'17:00',location:'Hall',audience:'All students',description:'',requiresGeofence:false,
     openAt:new Date(now-7200000),checkInClosesAt:oldCutoff,closeAt:new Date(now-3600000),checkOutClosesAt:new Date(now-1800000),updatedAt:new Date(now-86400000),attendanceRoster:{arrivalstudent:'2A'},rosterCapturedAt:new Date(now-86400000)};
   const changed={...event,checkInCutoff:'15:10',checkInClosesAt:newCutoff,updatedAt:SERVER};
   await commit([['events/arrivalclosed',event]]);

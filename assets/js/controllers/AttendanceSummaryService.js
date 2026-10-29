@@ -1,3 +1,4 @@
+import { attendanceTimeIssue } from '../core/AttendanceTimePolicy.js';
 // Shared policy: a check-in is participation; a missed checkout needs review,
 // not an automatic absence or fine. Legacy eligibility is never invented.
 import { EventAudiencePolicy } from './EventAudiencePolicy.js';
@@ -36,7 +37,7 @@ export class AttendanceSummaryService {
   }
 
   needsReview(record, event) {
-    return Boolean(record.checkedInAt || record.attendedAt) && !record.checkedOutAt
+    return Boolean(attendanceTimeIssue(record, event)) || Boolean(record.checkedInAt || record.attendedAt) && !record.checkedOutAt
       && Boolean(event?.checkOutClosesAt || (event?.date && event?.timeOut)) && this.now() > this.checkoutCloseDate(event);
   }
 

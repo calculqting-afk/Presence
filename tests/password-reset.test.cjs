@@ -85,6 +85,29 @@ test('reset replay, concurrent lease, actor rate limit and uncertain failures ne
   f=await fixture();f.failFinalize();await assert.rejects(f.service.reset(f.claims('head'),f.body),/unconfirmed/);assert.equal(f.passwords.length,1);assert.equal(f.store.get('students/student').passwordResetRequired,true);
   f=await fixture();f.store.set('passwordResetLimits/head',{windowStart:Date.parse('2026-10-27T08:00:00Z'),count:5});await assert.rejects(f.service.reset(f.claims('head'),f.body),/limit/);
 });
+
+test('temporary passwords expire after thirty minutes and a server job invalidates the credential without unlocking attendance',async()=>{
+  const f=await fixture(),result=await f.service.reset(f.claims('head'),f.body);
+  assert.equal(Date.parse(result.expiresAt),Date.parse('2026-10-27T08:00:00Z')+30*60000);
+  f.advance(30*60000);
+  await assert.rejects(f.service.complete(f.claims('student'),{newPassword:'Personal!password123'}),/expired/);
+  const oldCount=f.passwords.length;
+  assert.equal(await f.service.expire('student'),true);
+  assert.equal(f.passwords.length,oldCount+1);assert.notEqual(f.passwords.at(-1).value,result.temporaryPassword);
+  assert.equal(f.store.get('passwordResets/student').state,'expired');
+  assert.equal(f.store.get('students/student').passwordResetRequired,true);
+  assert.equal(await f.service.expire('student'),false);
+});
+
+test('expiry cleanup skips fresh, leased and completed reset operations',async()=>{
+  const f=await fixture();await f.service.reset(f.claims('head'),f.body);
+  assert.equal(await f.service.expire('student'),false);
+  f.advance(30*60000);f.store.get('passwordResets/student').leaseUntil=Date.parse('2026-10-27T09:00:00Z');
+  assert.equal(await f.service.expire('student'),false);assert.equal(f.passwords.length,1);
+  const completed=await fixture();await completed.service.reset(completed.claims('head'),completed.body);completed.advance(2000);
+  await completed.service.complete(completed.claims('student'),{newPassword:'Personal!password123'});completed.advance(31*60000);
+  assert.equal(await completed.service.expire('student'),false);assert.equal(completed.passwords.at(-1).value,'Personal!password123');
+});
 test('Worker is fail-closed, restricts origins, validates JSON size and never exposes internal errors', async()=>{
   const {handler}=await import('../workers/admin-api/src/index.js');let called=0;
   const run=handler({verify:async()=>{called++;throw Error('PRIVATE KEY SECRET');}});

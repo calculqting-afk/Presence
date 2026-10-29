@@ -1113,3 +1113,13 @@ body:has(.dashboard-modal-backdrop:not([hidden])) { overflow: hidden; }
 .attendance-alert-banner[hidden] { display: none; }
 .attendance-alert-banner > span { flex: 1 1 240px; }
 :root[data-theme="dark"] .attendance-alert-banner { background: #152b48; color: #e8f0ff; }
+#attendanceCorrectionForm #correctionSchedule,
+#attendanceCorrectionForm #correctionBefore,
+#attendanceCorrectionForm #correctionAfter,
+#attendanceCorrectionForm #correctionTimeError { margin: 0; font-size: .86rem; line-height: 1.5; overflow-wrap: anywhere; }
+#attendanceCorrectionForm #correctionTimeError { color: var(--danger, #d03948); }
+#attendanceCorrectionForm #correctionSchedule { white-space: pre-line; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--muted); }
+#attendanceCorrectionForm .field.full:has(#correctionBefore) { display: grid; gap: 6px; }
+#confirmAttendanceRevocation { background: var(--red-soft); color: var(--red); border: 1px solid var(--red); box-shadow: none; }
+#attendanceRevocationModal #revocationTimes,
+#attendanceRevocationModal #revocationWarning { font-size: .88rem; line-height: 1.6; overflow-wrap: anywhere; }

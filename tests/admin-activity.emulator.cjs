@@ -20,7 +20,7 @@ async function commit(entries,uid='owner',allowed=true){
 (async()=>{
   const {activityRecord,activitySnapshot}=await import('../assets/js/controllers/ActivityRecordPolicy.js');
   for(const [uid,role] of [['loghead','head_admin'],['logattendance','attendance_admin'],['logmanager','student_manager'],['logstudent','student']])await commit([['students/'+uid,{uid,accountId:uid,active:true,role,section:'2A',firstName:'Test',lastName:'Student'}]]);
-  const event={name:'Audit test',type:'Assembly',date:'2026-10-28',timeIn:'07:00',checkInCutoff:'09:00',timeOut:'11:00',checkOutCutoff:'12:00',location:'Hall',audience:'All students',description:'',requiresGeofence:false,
+  const event={name:'Audit test',type:'Assembly',date:new Date(now + 8*3600000).toISOString().slice(0,10),timeIn:'07:00',checkInCutoff:'09:00',timeOut:'11:00',checkOutCutoff:'12:00',location:'Hall',audience:'All students',description:'',requiresGeofence:false,
     openAt:new Date(now+3600000),checkInClosesAt:new Date(now+7200000),closeAt:new Date(now+10800000),checkOutClosesAt:new Date(now+14400000),updatedAt:SERVER,attendanceRoster:{logstudent:'2A'},rosterCapturedAt:SERVER};
   const log=activityRecord({action:'event-created',actorUid:'loghead',eventId:'logevent',eventName:event.name,reason:'Publish verified schedule',before:null,after:activitySnapshot('event',event),createdAt:SERVER});
   await commit([['events/logevent',event],['activityLogs/eventcreated',log]],'loghead');

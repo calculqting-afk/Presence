@@ -30,11 +30,11 @@ export async function verifyToken(token, fetcher = fetch, now = Date.now()) {
 export const encode = value => value === null ? {nullValue:null} : value instanceof Date ? { timestampValue: value.toISOString() }
   : Array.isArray(value) ? {arrayValue:{values:value.map(encode)}}
     : typeof value === 'object' ? {mapValue:{fields:Object.fromEntries(Object.entries(value).filter(([,item])=>item!==undefined).map(([key,item])=>[key,encode(item)]))}}
-  : typeof value === 'boolean' ? { booleanValue: value } : typeof value === 'number' ? { integerValue: String(value) }
+  : typeof value === 'boolean' ? { booleanValue: value } : typeof value === 'number' ? (Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value })
     : { stringValue: String(value) };
 export const decode = value => 'mapValue' in value ? Object.fromEntries(Object.entries(value.mapValue.fields||{}).map(([key,item])=>[key,decode(item)]))
   : 'arrayValue' in value ? (value.arrayValue.values||[]).map(decode) : 'nullValue' in value ? null
-    : 'booleanValue' in value ? value.booleanValue : 'integerValue' in value ? Number(value.integerValue)
+    : 'booleanValue' in value ? value.booleanValue : 'integerValue' in value ? Number(value.integerValue) : 'doubleValue' in value ? value.doubleValue
       : 'timestampValue' in value ? new Date(value.timestampValue) : value.stringValue;
 let cachedAccess;
 export class FirebaseGateway {
@@ -81,7 +81,7 @@ export class FirebaseGateway {
   async get(path, transaction) {
     const params = new URLSearchParams();
     if (transaction) params.set('transaction', transaction);
-    if (path.startsWith('students/')) for (const field of ['uid', 'active', 'role', 'firstName', 'middleName', 'lastName', 'accountId', 'accountIdKey', 'authEmail', 'birthday', 'passwordResetRequired', 'passwordResetValidAfter']) params.append('mask.fieldPaths', field);
+    if (path.startsWith('students/')) for (const field of ['uid', 'active', 'role', 'firstName', 'middleName', 'lastName', 'accountId', 'accountIdKey', 'authEmail', 'birthday', 'section', 'createdAt', 'passwordResetRequired', 'passwordResetValidAfter']) params.append('mask.fieldPaths', field);
     const result = await this.call(this.base + '/' + path + (params.size ? '?' + params : ''), undefined, true);
     return result ? { ...Object.fromEntries(Object.entries(result.fields || {}).map(([key, value]) => [key, decode(value)])), _updateTime: result.updateTime } : null;
   }
@@ -90,6 +90,14 @@ export class FirebaseGateway {
       ...(merge ? { updateMask: { fieldPaths: Object.keys(data) } } : {}), ...(exists === undefined ? {} : { currentDocument: { exists } }) };
   }
   remove(path) { return {delete:`projects/${PROJECT}/databases/(default)/documents/${path}`}; }
+  async expiredResets(now) {
+    const rows = await this.call(this.base + ':runQuery', { structuredQuery: {
+      from: [{ collectionId: 'passwordResets' }],
+      where: { fieldFilter: { field: { fieldPath: 'expiresAt' }, op: 'LESS_THAN_OR_EQUAL', value: { timestampValue: new Date(now).toISOString() } } },
+      limit: 20
+    } });
+    return rows.filter(row => row.document).map(row => row.document.name.split('/').at(-1));
+  }
   async matches(field,value,transaction) {
     const result=await this.call(this.base+':runQuery',{...(transaction?{transaction}:{}),structuredQuery:{from:[{collectionId:'students'}],
       select:{fields:[{fieldPath:'uid'}]},where:{fieldFilter:{field:{fieldPath:field},op:'EQUAL',value:{stringValue:value}}},limit:2}});

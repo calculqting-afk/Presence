@@ -1,3 +1,5 @@
+import { AttendanceRevocationController } from '../controllers/AttendanceRevocationController.js';
+import { attendanceTimeIssue, attendanceReviewLabel } from '../core/AttendanceTimePolicy.js';
 import { ControllerScope } from '../core/ControllerScope.js';
 import { StudentIdCorrectionController } from '../controllers/StudentIdCorrectionController.js';
 import { ActivityHistoryController } from '../controllers/ActivityHistoryController.js';
@@ -329,6 +331,15 @@ export class AdminDashboard {
       escapeHtml,
       notify: showDashboardToast
     });
+    dashboard.revocationController = new AttendanceRevocationController({ db, user: currentUser, role: currentUserRole,
+      document: dashboard.document, getStudents: () => dashboard.students, notify: showDashboardToast,
+      onRevoked: id => {
+        dashboard.attendance = dashboard.attendance.filter(record => record.id !== id);
+        dashboard.historyController.records = dashboard.historyController.records.filter(record => record.id !== id);
+        dashboard.renderAdminAttendance(); dashboard.renderAttendanceLine(); dashboard.scheduleStudentsRender();
+      } });
+    dashboard.revocationController.initialize();
+    dashboard.scope.addCleanup(() => dashboard.revocationController.dispose());
     dashboard.correctionController.initialize();
     dashboard.scope.addCleanup(() => {
       dashboard.correctionController.dispose();
@@ -773,6 +784,14 @@ export class AdminDashboard {
   }
   handleCorrection(event) {
     const dashboard = this;
+    const revokeButton = event.target.closest('[data-revoke-attendance]');
+    if (revokeButton?.dataset.revokeAttendance) {
+      if (!dashboard.can('correctAttendance')) return;
+      const record = dashboard.historyController.records.find(item => item.id === revokeButton.dataset.revokeAttendance)
+        || dashboard.attendance.find(item => item.id === revokeButton.dataset.revokeAttendance);
+      if (record && !record.displayOnly) dashboard.revocationController.open(record, revokeButton);
+      return;
+    }
     const button = event.target.closest('[data-correct-attendance]');
     if (!button || !dashboard.can('correctAttendance')) return;
     const record = dashboard.historyController.records.find(item => item.id === button.dataset.correctAttendance)
@@ -1025,8 +1044,9 @@ export class AdminDashboard {
       const absent = record.status === 'absent';
       const partial = record.status === 'checkout-only' || (!checkedInAt && completed);
       const inLabel = absent || partial ? 'ABSENT IN' : record.arrivalStatus === 'late' ? 'LATE IN' : 'IN';
-      const completionLabel = record.pending ? 'Not yet checked in' : absent ? 'Absent — no attendance' : partial ? 'Partial attendance' : completed ? 'Completed' : dashboard.summaryService.needsReview(record, dashboard.events.find(event => event.id === record.eventId)) ? 'Needs review — missed checkout' : 'Checked in';
-      return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || record.studentId || "Student ID unavailable")}${student?.section ? ` · ${escapeHtml(student.section)}` : ""}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><small>${escapeHtml(record.eventDate || "Date unavailable")}</small></div><div class="attendance-line-times"><div class="${record.arrivalStatus === 'late' ? 'attendance-time-late' : ''}"><span>${inLabel}</span><strong>${escapeHtml(absent || partial ? 'Not recorded' : formatAttendanceTimestamp(checkedInAt))}</strong>${!absent && !partial ? AttendanceRelativeTime.render(checkedInAt, 'in') : ''}</div><div><span>OUT</span><strong>${escapeHtml(absent ? 'Not recorded' : formatAttendanceTimestamp(record.checkedOutAt))}</strong>${!absent ? AttendanceRelativeTime.render(record.checkedOutAt, 'out') : ''}</div><div><span>Duration</span><strong>${escapeHtml(checkedInAt ? attendanceDuration(checkedInAt, record.checkedOutAt) : 'Not available')}</strong></div></div><div class="attendance-line-status">${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}${(!record.displayOnly || (absent && student.active !== false)) && dashboard.can("correctAttendance") ? `<button class="small-button" type="button" data-correct-attendance="${escapeHtml(record.id)}">Correct</button>` : ""}${absent || partial ? '<span class="badge orange">Absent in</span>' : record.pending ? '' : arrivalStatusBadge(record.arrivalStatus)}<span class="badge ${absent || partial || dashboard.summaryService.needsReview(record, dashboard.events.find(event => event.id === record.eventId)) ? "orange" : completed ? "green" : "blue"}">${completionLabel}</span></div>${record.recordSource === "admin-corrected" ? `<p class="attendance-correction-reason"><span>Correction reason:</span> ${escapeHtml(record.correctionReason || "Reason not recorded")}</p>` : ""}</article>`;
+      const timeIssue = attendanceTimeIssue(record, dashboard.events.find(event => event.id === record.eventId));
+      const completionLabel = timeIssue ? attendanceReviewLabel(timeIssue) : record.pending ? 'Not yet checked in' : absent ? 'Absent — no attendance' : partial ? 'Partial attendance' : completed ? 'Completed' : dashboard.summaryService.needsReview(record, dashboard.events.find(event => event.id === record.eventId)) ? 'Needs review — missed checkout' : 'Checked in';
+      return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || record.studentId || "Student ID unavailable")}${student?.section ? ` · ${escapeHtml(student.section)}` : ""}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><small>${escapeHtml(record.eventDate || "Date unavailable")}</small></div><div class="attendance-line-times"><div class="${record.arrivalStatus === 'late' ? 'attendance-time-late' : ''}"><span>${inLabel}</span><strong>${escapeHtml(absent || partial ? 'Not recorded' : formatAttendanceTimestamp(checkedInAt))}</strong>${!absent && !partial ? AttendanceRelativeTime.render(checkedInAt, 'in') : ''}</div><div><span>OUT</span><strong>${escapeHtml(absent ? 'Not recorded' : formatAttendanceTimestamp(record.checkedOutAt))}</strong>${!absent ? AttendanceRelativeTime.render(record.checkedOutAt, 'out') : ''}</div><div><span>Duration</span><strong>${escapeHtml(checkedInAt ? attendanceDuration(checkedInAt, record.checkedOutAt) : 'Not available')}</strong></div></div><div class="attendance-line-status">${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}${(!record.displayOnly || (absent && student.active !== false)) && dashboard.can("correctAttendance") ? `<button class="small-button" type="button" data-correct-attendance="${escapeHtml(record.id)}">Correct</button>` : ""}${!record.displayOnly && dashboard.can("correctAttendance") ? `<button class="small-button danger" type="button" data-revoke-attendance="${escapeHtml(record.id)}">Revoke</button>` : ""}${absent || partial ? '<span class="badge orange">Absent in</span>' : record.pending ? '' : arrivalStatusBadge(record.arrivalStatus)}<span class="badge ${absent || partial || dashboard.summaryService.needsReview(record, dashboard.events.find(event => event.id === record.eventId)) ? "orange" : completed ? "green" : "blue"}">${completionLabel}</span></div>${record.recordSource === "admin-corrected" ? `<p class="attendance-correction-reason"><span>Correction reason:</span> ${escapeHtml(record.correctionReason || "Reason not recorded")}</p>` : ""}</article>`;
     }).join("");
   }
   renderAttendanceLine() {

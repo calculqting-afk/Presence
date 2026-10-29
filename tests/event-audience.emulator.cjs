@@ -45,7 +45,7 @@ async function sessionPair(id, morning, afternoon, geofence, auth, success = tru
   assert.equal(result.ok,success,await result.text());
 }
 const original = {
-  name: 'Audience test', type: 'Assembly', date: '2026-10-20', location: 'Hall', timeIn: '07:00', checkInCutoff: '09:00', timeOut: '11:00', checkOutCutoff: '12:10',
+  name: 'Audience test', type: 'Assembly', date: new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10), location: 'Hall', timeIn: '07:00', checkInCutoff: '09:00', timeOut: '11:00', checkOutCutoff: '12:10',
   audience: 'All students', description: '', requiresGeofence: false, openAt: date(-3600000), checkInClosesAt: date(-1800000), closeAt: date(-300000), checkOutClosesAt: date(3600000),
   attendanceRoster: { a: '2A' }, rosterCapturedAt: date(-86400000), createdAt: date(-86400000), updatedAt: date(-86400000)
 };

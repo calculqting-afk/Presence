@@ -64,7 +64,7 @@ export class AttendanceExcelExporter {
         [`Course: ${report.filters.course} | Section: ${report.filters.section}`], ['Pending/unverified records are not confirmed absences. Names and sex use current profiles.'], headers,
         ...[...report.rows].sort((a, b) => (a.exportName || a.name).localeCompare(b.exportName || b.name) || a.studentId.localeCompare(b.studentId)).map(row => [
           row.exportName || row.name, [row.course, /^([1-4])[AB]$/.exec(row.section || '')?.[1]].filter(Boolean).join(' / '), row.sex || '',
-          row.checkInIso ? 'Yes' : row.status === 'absent' ? 'No' : row.status === 'pending' ? 'Not yet recorded' : 'Needs review',
+          row.status === 'review' ? row.completion || 'Needs review' : row.checkInIso ? 'Yes' : row.status === 'absent' ? 'No' : row.status === 'pending' ? 'Not yet recorded' : 'Needs review',
           row.checkInIso ? row.late ? 'Late' : 'On time' : row.status === 'absent' ? 'Absent' : row.status === 'pending' ? 'Not yet recorded' : 'Needs review',
           time(row.checkInIso), time(row.checkOutIso)
         ])];

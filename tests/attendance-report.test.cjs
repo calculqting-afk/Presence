@@ -427,3 +427,21 @@ test('Excel Android delivery uses a separate save bridge and safely rejects old 
   const oldApk = new AttendanceExcelFileService({ native: () => ({ isNative: true }) });
   await assert.rejects(oldApk.deliver(new Uint8Array(4), 'report.xlsx'), /Update the Presence APK/);
 });
+
+test('invalid-duration and wrong-day records remain review in filters, PDF and both Excel layouts', async () => {
+  const service = await serviceAt('2026-10-18T12:00:00Z');
+  const invalid = { ...checkIn, status: 'completed', checkedOutAt: checkIn.checkedInAt };
+  const subMinute = { ...checkIn, id: 'r2', studentUid: 'b', status: 'completed', checkedOutAt: stamp('2026-10-17T00:01:30Z') };
+  const wrongDay = { ...checkIn, id: 'r3', studentUid: 'c', checkedInAt: stamp('2026-10-18T00:01:00Z'), checkedOutAt: stamp('2026-10-18T01:01:00Z') };
+  const report = snapshot(service, [invalid, subMinute, wrongDay]);
+  assert.equal(report.rows.find(row => row.studentUid === 'a').completion, 'Needs review — invalid duration');
+  assert.equal(report.rows.find(row => row.studentUid === 'c').completion, 'Needs review — event date mismatch');
+  assert.equal(report.rows.find(row => row.studentUid === 'b').status, 'completed');
+  assert.equal(snapshot(service, [invalid, subMinute, wrongDay], { filters: { status: 'review' } }).rows.length, 2);
+  assert.deepEqual(snapshot(service, [invalid, subMinute, wrongDay], { filters: { status: 'completed' } }).rows.map(row => row.studentUid), ['b']);
+  const { AttendanceExcelExporter } = await import('../assets/js/controllers/AttendanceExcelExporter.js');
+  const workbook = excelParts(await new AttendanceExcelExporter().generateSessions([report]));
+  assert.match(workbook.get('xl/worksheets/sheet1.xml'), /Needs review — invalid duration/);
+  assert.match(workbook.get('xl/worksheets/sheet1.xml'), /Needs review — event date mismatch/);
+  assert.equal(invalid.checkedOutAt, invalid.checkedInAt, 'projection never edits the saved values');
+});

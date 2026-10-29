@@ -1,3 +1,4 @@
+import { attendanceTimeIssue, attendanceReviewLabel } from '../core/AttendanceTimePolicy.js';
 import { AttendanceRecordProjectionService } from './AttendanceRecordProjectionService.js';
 import { EventAudiencePolicy } from './EventAudiencePolicy.js';
 import { AttendanceSort } from './AttendanceSort.js';
@@ -70,8 +71,9 @@ export class AttendanceReportService {
       return !search || [student?.firstName, student?.middleName, student?.lastName, student?.accountId, student?.email, record.studentId, record.studentName].join(' ').toLocaleLowerCase().includes(search);
     }).map(record => {
       const student = byUid.get(record.studentUid), checkIn = record.checkedInAt || record.attendedAt;
+      const timeIssue = attendanceTimeIssue(record, event);
       const profileMissing = !student;
-      const review = profileMissing || record.rosterUnverified || (!checkIn && record.checkedOutAt) || this.summary.needsReview(record, event);
+      const review = Boolean(timeIssue) || profileMissing || record.rosterUnverified || (!checkIn && record.checkedOutAt) || this.summary.needsReview(record, event);
       const absent = !record.pending && !review && !checkIn && (record.status === 'absent' || record.arrivalStatus === 'absent');
       const status = profileMissing ? 'review' : record.pending ? 'pending' : review ? 'review' : absent ? 'absent' : record.checkedOutAt ? 'completed' : checkIn ? 'checked-in' : 'review';
       return {
@@ -89,7 +91,7 @@ export class AttendanceReportService {
         checkInMilliseconds: AttendanceSort.checkIn(record),
         hasCheckIn: Boolean(checkIn),
         arrival: record.pending && !profileMissing ? 'Not yet checked in' : absent ? 'Absent' : !checkIn ? 'No check-in' : record.arrivalStatus === 'late' ? 'Late' : 'Present',
-        completion: profileMissing ? 'Needs review - profile missing' : status === 'completed' ? 'Completed' : status === 'review' ? 'Needs review' : status === 'absent' ? 'Absent' : status === 'pending' ? 'Pending' : 'Checked in',
+        completion: timeIssue ? attendanceReviewLabel(timeIssue) : profileMissing ? 'Needs review - profile missing' : status === 'completed' ? 'Completed' : status === 'review' ? 'Needs review' : status === 'absent' ? 'Absent' : status === 'pending' ? 'Pending' : 'Checked in',
         status, late: Boolean(checkIn) && record.arrivalStatus === 'late', corrected: record.recordSource === 'admin-corrected'
       };
     });

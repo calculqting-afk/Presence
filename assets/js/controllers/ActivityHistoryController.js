@@ -67,7 +67,7 @@ export class ActivityHistoryController {
     this.field('list').replaceChildren();
     const text=(tag,value)=>{const node=this.document.createElement(tag);node.textContent=value;return node;};
     const display=value=>{const time=millis(value);return time?new Date(time).toLocaleString('en-PH',{timeZone:'Asia/Manila'}):value===null?'Not recorded':Array.isArray(value)?value.join(', '):String(value??'');};
-    const allowed=action=>action==='student-id-corrected'?['accountId']:action==='role-changed'?['role']:['attendance-corrected','arrival-recalculated'].includes(action)?['checkedInAt','checkedOutAt','arrivalStatus','status']:action.startsWith('event-')?['name','date','timeIn','checkInCutoff','timeOut','checkOutCutoff','location','audience','audienceSections','description']:[];
+    const allowed=action=>action==='student-id-corrected'?['accountId']:action==='role-changed'?['role']:['attendance-revoked','attendance-corrected','arrival-recalculated'].includes(action)?['checkedInAt','checkedOutAt','arrivalStatus','status']:action.startsWith('event-')?['name','date','timeIn','checkInCutoff','timeOut','checkOutCutoff','location','audience','audienceSections','description']:[];
     for(const row of rows){
       const card=text('article','');card.className='activity-history-card';
       const head=text('div','');head.className='activity-history-card-head';head.append(text('strong',ACTIVITY_ACTIONS[row.action]),text('small',new Date(row.createdAt).toLocaleString('en-PH',{timeZone:'Asia/Manila'})));card.append(head);

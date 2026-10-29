@@ -1,3 +1,4 @@
+import { attendanceMilliseconds } from './AttendanceTimePolicy.js';
 // Stateless formatting and policy helpers; no page startup or mutable session state.
 const FACE_UPLOAD_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzXA8Gi7akcpT3MS87kOKC-7MCpejazTeK0zLtu-pUNugXL4YBeUan5vVLXhqKTHzsQ_Q/exec";
 const pageCopy = {
@@ -138,7 +139,10 @@ function attendanceDuration(checkIn, checkOut) {
   const started = checkIn?.toDate?.() || (checkIn ? new Date(checkIn) : null);
   const ended = checkOut?.toDate?.() || (checkOut ? new Date(checkOut) : null);
   if (!started || !ended || Number.isNaN(started.getTime()) || Number.isNaN(ended.getTime())) return "In progress";
-  return formatServiceMinutes(Math.max(0, Math.round((ended - started) / 60000)));
+  const elapsed = attendanceMilliseconds(checkOut) - attendanceMilliseconds(checkIn);
+  if (elapsed <= 0) return "Needs review — invalid duration";
+  if (elapsed < 60000) return "Less than 1 minute";
+  return formatServiceMinutes(Math.floor(elapsed / 60000));
 }
 function getEventStatus(event, now = new Date()) {
   if (now < eventOpenDate(event)) return "upcoming";

@@ -30,7 +30,7 @@ async function get(path, user = 'owner', success = true) {
   const data = await response.json(); assert.equal(response.ok, success, JSON.stringify(data)); checks++;
   return data.fields ? decode({ mapValue: { fields: data.fields } }) : null;
 }
-const closed = { name: 'Request test', type: 'Assembly', date: '2026-10-01', location: 'Hall', timeIn: '07:00', checkInCutoff: '09:00', timeOut: '11:00', checkOutCutoff: '12:00', audience: 'Selected sections', audienceSections: ['2A'], description: '', requiresGeofence: false, openAt: new Date(now - 7200000), checkInClosesAt: new Date(now - 6000000), closeAt: new Date(now - 4000000), checkOutClosesAt: new Date(now - 3600000), attendanceRoster: { reqstudent: '2A' }, rosterCapturedAt: new Date(now - 86400000) };
+const closed = { name: 'Request test', type: 'Assembly', date: new Date(now + 8*3600000).toISOString().slice(0,10), location: 'Hall', timeIn: '07:00', checkInCutoff: '09:00', timeOut: '11:00', checkOutCutoff: '12:00', audience: 'Selected sections', audienceSections: ['2A'], description: '', requiresGeofence: false, openAt: new Date(now - 7200000), checkInClosesAt: new Date(now - 6000000), closeAt: new Date(now - 4000000), checkOutClosesAt: new Date(now - 3600000), attendanceRoster: { reqstudent: '2A' }, rosterCapturedAt: new Date(now - 86400000) };
 const submitted = (eventId, overrides = {}) => ({ studentUid: 'reqstudent', eventId, kind: 'missed-check-in', reason: 'I participated; please verify the staff log.', status: 'pending', submittedAt: SERVER, ...overrides });
 const superUid = '8uEjAk72BLWKjvnQJEatBdeVAi02';
 const reviewerNames = { reqhead: 'Head Reviewer', reqadmin: 'Attendance Reviewer', [superUid]: 'Test Super Admin' };

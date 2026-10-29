@@ -5,7 +5,7 @@ export class PasswordResetApi {
     const response = await this.fetcher(this.url + path, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body), cache: 'no-store', credentials: 'omit', signal: AbortSignal.timeout(60000) });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Password service unavailable. Retry later.');
+    if (!response.ok) throw new Error(result.error || 'Presence service unavailable. Retry later.');
     return result;
   }
   reset(user, studentUid, reason) { return this.call('/v1/admin/password-reset', user, { studentUid, reason, operationId: crypto.randomUUID() }); }

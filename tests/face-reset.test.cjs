@@ -6,6 +6,20 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const response = (status, data = {}) => ({ getResponseCode: () => status, getContentText: () => JSON.stringify(data) });
 
+test('Apps Script confirms a saved upload through the authenticated private Worker connection',()=>{
+  const calls=[],secret='private-script-setting';
+  const context=vm.createContext({console,PropertiesService:{getScriptProperties:()=>({getProperty:key=>key==='FACE_BACKEND_SECRET'?secret:null})},
+    UrlFetchApp:{fetch:(url,options)=>{calls.push({url,options});return response(200,{registered:true});}}});
+  vm.runInContext(fs.readFileSync(path.join(root,'docs/google-apps-script-face-upload.js'),'utf8'),context);
+  const file={getId:()=> 'saved-photo-123456',getName:()=> 'Face.jpg'};
+  context.createFaceRegistration_('student','student-token',file);
+  assert.match(calls[0].url,/\/v1\/internal\/face-registration$/);
+  assert.equal(calls[0].options.headers.Authorization,'Bearer student-token');
+  assert.equal(calls[0].options.headers['X-Presence-Face-Secret'],secret);
+  assert.deepEqual(JSON.parse(calls[0].options.payload),{fileId:file.getId(),fileName:file.getName()});
+  context.UrlFetchApp.fetch=()=>response(503);assert.throws(()=>context.createFaceRegistration_('student','student-token',file),/confirmation failed/);
+});
+
 test('recovery modal places a labeled multiline reason below the confirmation option', () => {
   const html = fs.readFileSync(path.join(root, 'pages/admin-dashboard.html'), 'utf8');
   const block = html.split('id="faceMissingRecovery"')[1].split('<div class="modal-actions">')[0];

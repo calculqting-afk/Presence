@@ -1442,12 +1442,12 @@ test('missed checkout is review, not absence, and completed records leave review
   let now = 1000;
   const summary = new AttendanceSummaryService({ closeDate: () => new Date(500), checkoutCloseDate: () => new Date(2000), now: () => new Date(now) });
   const event = { id: 'event', attendanceRoster: { a: '2A' }, checkOutClosesAt: true };
-  const record = { studentUid: 'a', eventId: 'event', checkedInAt: true, eventDate: '2026-10-01' };
+  const record = { studentUid: 'a', eventId: 'event', checkedInAt: new Date(100), eventDate: '1970-01-01' };
   assert.equal(summary.needsReview(record, event), false);
   now = 3000;
   const result = summary.summarize({ uid: 'a' }, [event], [record]);
   assert.equal(result.review.length, 1); assert.equal(result.absences.length, 0); assert.equal(result.attendedCount, 1);
-  assert.equal(summary.needsReview({ ...record, checkedOutAt: true }, event), false);
+  assert.equal(summary.needsReview({ ...record, checkedOutAt: new Date(200) }, event), false);
 });
 
 test('today totals include scheduled active participants only and no event means zero pending', async () => {
@@ -1509,13 +1509,34 @@ for (const outcome of ['late', 'closed', 'cancelled']) {
       policy: { evaluateCheckIn: () => outcome === 'closed' ? { available: false } : { available: true, arrivalStatus: 'late' } } };
     const controller = new StudentAttendanceController({ getState: () => ({ events: [{ id: 'event', requiresGeofence: true }], attendance: [] }), setFaceRegistration() {}, checkIn, bridge: { publish: (...args) => publications.push(args) } });
     controller.verifiedGeofenceLocation = async () => ({ latitude: 14, longitude: 121 });
+    let locationProofs = 0;
+    controller.securityApi = { call: async (route, user, body) => {
+      locationProofs++;
+      assert.equal(route, '/v1/student/attendance-location');
+      assert.equal(body.action, 'in'); assert.equal(body.eventId, 'event');
+    } };
     const button = { dataset: { attendEvent: 'event' } };
     await controller.handleEventClick({ target: { closest: selector => selector === '[data-attend-event]' ? button : null } });
     assert.equal(writes.length, outcome === 'late' ? 1 : 0);
+    assert.equal(locationProofs, outcome === 'late' ? 1 : 0);
     if (writes.length) assert.equal(writes[0][1].arrivalStatus, 'late');
     else assert.equal(button.disabled, false);
   });
 }
+
+test('a rejected backend location proof never writes attendance or publishes success',async()=>{
+  const writes=[],publications=[];
+  const {StudentAttendanceController}=await isolatedModule('assets/js/controllers/StudentAttendanceController.js',attendanceMocks({
+    setDoc:async(...args)=>writes.push(args),getDocFromServer:async reference=>({id:reference.id,exists:()=>reference.collection==='faceRegistrations',data:()=>({registered:true})})
+  }),{document:gridDocument});
+  const controller=new StudentAttendanceController({getState:()=>({events:[{id:'event',requiresGeofence:true}],attendance:[]}),setFaceRegistration(){},
+    checkIn:{begin:async()=>({available:true,arrivalStatus:'present'})},bridge:{publish:(...args)=>publications.push(args)}});
+  controller.verifiedGeofenceLocation=async()=>({latitude:14,longitude:121,accuracy:1,distanceMeters:0});
+  let attempts=0;controller.securityApi={call:async()=>{attempts++;throw Error('Outside the attendance area.');}};
+  const button={dataset:{attendEvent:'event'}};
+  await controller.handleEventClick({target:{closest:selector=>selector==='[data-attend-event]'?button:null}});
+  assert.equal(attempts,1);assert.equal(writes.length,0);assert.equal(publications.length,0);assert.equal(button.disabled,false);
+});
 
 test('history reads are bounded, date-filtered, and use server document cursors', async () => {
   const { AttendanceRepository } = await isolatedModule('assets/js/controllers/AttendanceHistoryController.js');
@@ -2211,4 +2232,83 @@ test('student directory refreshes expiring presence without snapshots and cleans
   assert.equal(renders, 2); state.studentRenderFrame = 99; listeners.get('focus')();
   assert.equal(cancelled, 99); assert.equal(state.studentRenderFrame, undefined);
   listeners.get('visibilitychange')(); assert.equal(renders, 4); cleanup(); assert.equal(cleared, 42);
+});
+
+test('correction times reject equality and wrong event days while preserving second precision', async () => {
+  const { correctionValues } = await isolatedModule('assets/js/controllers/AttendanceCorrectionController.js');
+  const values = { checkIn: '2020-10-01T10:13:00', checkOut: '2020-10-01T10:13:30', eventDate: '2020-10-01', arrival: 'present', reason: 'Verified staff register' };
+  assert.equal(correctionValues(values).end - correctionValues(values).start, 30000);
+  assert.throws(() => correctionValues({ ...values, checkOut: values.checkIn }), /later than/);
+  assert.throws(() => correctionValues({ ...values, eventDate: '2020-10-02' }), /selected event date/);
+  assert.equal(correctionValues({ ...values, checkOut: '' }).end, null);
+});
+
+test('attendance duration displays sub-minute values honestly and flags invalid ordering', async () => {
+  const { attendanceDuration } = await isolatedModule('assets/js/core/DashboardPresentation.js');
+  const start = new Date('2020-10-01T10:13:00+08:00');
+  assert.equal(attendanceDuration(start, new Date(+start + 30000)), 'Less than 1 minute');
+  assert.equal(attendanceDuration(start, start), 'Needs review — invalid duration');
+  assert.equal(attendanceDuration(start, new Date(+start - 1)), 'Needs review — invalid duration');
+  assert.equal(attendanceDuration(start, null), 'In progress');
+});
+
+test('correction modal preserves seconds, previews verified duration and disables invalid times', async () => {
+  const browser = fakeBrowser();
+  const { AttendanceCorrectionController } = await isolatedModule('assets/js/controllers/AttendanceCorrectionController.js', {}, browser);
+  const controller = new AttendanceCorrectionController({ role: 'attendance_admin', escapeHtml: String,
+    getStudents: () => [{ uid: 's', accountId: '123', firstName: 'Test', lastName: 'Student' }],
+    getEvents: () => [{ id: 'e', name: 'Event', date: '2020-10-01', timeIn: '07:00', checkInCutoff: '09:00', timeOut: '11:00', checkOutCutoff: '12:00' }] });
+  controller.modal = browser.document.querySelector('#attendanceCorrectionModal');
+  const start = { toMillis: () => Date.parse('2020-10-01T10:13:10+08:00') };
+  controller.open({ studentUid: 's', eventId: 'e', checkedInAt: start, checkedOutAt: start });
+  assert.equal(browser.document.querySelector('#correctionCheckIn').value, '2020-10-01T10:13:10');
+  assert.equal(browser.document.querySelector('#saveAttendanceCorrection').disabled, true);
+  assert.match(browser.document.querySelector('#correctionTimeError').textContent, /later than/);
+  browser.document.querySelector('#correctionCheckOut').value = '2020-10-01T10:13:40'; controller.refreshValidation();
+  assert.equal(browser.document.querySelector('#saveAttendanceCorrection').disabled, false);
+  assert.match(browser.document.querySelector('#correctionAfter').textContent, /Less than 1 minute/);
+  assert.match(browser.document.querySelector('#correctionSchedule').textContent, /2020-10-01/);
+  browser.document.querySelector('#correctionCheckOut').value = '2020-10-02T10:13:40'; controller.refreshValidation();
+  assert.equal(browser.document.querySelector('#saveAttendanceCorrection').disabled, true);
+  assert.match(browser.document.querySelector('#correctionTimeError').textContent, /selected event date/);
+});
+
+test('revocation requires confirmation and atomically archives exact attendance before removing active record', async () => {
+  const { AttendanceRevocationController } = await isolatedModule('assets/js/controllers/AttendanceRevocationController.js');
+  const before = { studentUid: 's', studentId: '123', eventId: 'e', eventName: 'Event', status: 'completed', checkedInAt: new Date(1000), checkedOutAt: new Date(1000) };
+  let active = before; const committed = [];
+  const controller = new AttendanceRevocationController({ db: {}, user: { uid: 'admin' }, role: 'attendance_admin', getStudents: () => [],
+    transaction: async (_, run) => { const pending = []; await run({ get: async () => ({ exists: () => Boolean(active), data: () => active }), set: (ref, data) => pending.push(['set', ref, data]), delete: ref => pending.push(['delete', ref]) }); committed.push(...pending); active = null; } });
+  const selected = { ...before, id: 's_e' };
+  await assert.rejects(controller.revoke(selected, 'Verified erroneous manual entry', ''), /Type REVOKE/); assert.equal(committed.length, 0);
+  await controller.revoke(selected, 'Verified erroneous manual entry', 'REVOKE');
+  assert.equal(committed.length, 4); assert.equal(committed[0][2].original, before);
+  assert.equal(committed[0][2].status, 'revoked'); assert.equal(committed[0][2].revokedBy, 'admin');
+  assert.equal(committed[1][2], committed[0][2]); assert.equal(committed[2][2].action, 'attendance-revoked');
+  assert.equal(committed[2][2].after, null); assert.equal(committed[3][0], 'delete');
+  assert.equal(before.checkedOutAt.getTime(), 1000);
+  await assert.rejects(controller.revoke(selected, 'Verified erroneous manual entry', 'REVOKE'), /no longer active/);
+  assert.equal(committed.length, 4);
+});
+
+test('revocation rejects stale, synthesized and unauthorized records without writes', async () => {
+  const { AttendanceRevocationController } = await isolatedModule('assets/js/controllers/AttendanceRevocationController.js');
+  const before = { studentUid: 's', studentId: '123', eventId: 'e', status: 'completed' }; let writes = 0;
+  const options = { db: {}, user: { uid: 'admin' }, getStudents: () => [], transaction: async (_, run) => run({ get: async () => ({ exists: () => true, data: () => ({ ...before, status: 'checked-in' }) }), set: () => writes++, delete: () => writes++ }) };
+  const controller = new AttendanceRevocationController({ ...options, role: 'head_admin' });
+  await assert.rejects(controller.revoke({ ...before, id: 's_e' }, 'Verified error in register', 'REVOKE'), /changed since/);
+  await assert.rejects(controller.revoke({ ...before, id: 's_e', displayOnly: true }, 'Verified error in register', 'REVOKE'), /saved attendance/);
+  for (const role of ['student', 'student_manager']) await assert.rejects(new AttendanceRevocationController({ ...options, role }).revoke({ ...before, id: 's_e' }, 'Verified error in register', 'REVOKE'), /role cannot/);
+  assert.equal(writes, 0);
+});
+
+test('revocation modal shows selected student and event and cancel leaves attendance unchanged', async () => {
+  const browser = fakeBrowser(); const { AttendanceRevocationController } = await isolatedModule('assets/js/controllers/AttendanceRevocationController.js', {}, browser);
+  const controller = new AttendanceRevocationController({ role: 'attendance_admin', document: browser.document, getStudents: () => [{ uid: 's', firstName: 'Test', lastName: 'Student' }] });
+  controller.initialize(); let focused = false;
+  controller.open({ id: 's_e', studentUid: 's', eventId: 'e', eventName: 'Event', eventDate: '2020-10-01' }, { focus: () => { focused = true; } });
+  assert.equal(controller.modal.hidden, false); assert.equal(browser.document.querySelector('#revocationStudent').textContent, 'Test Student');
+  assert.match(browser.document.querySelector('#revocationEvent').textContent, /2020-10-01/);
+  controller.close(); assert.equal(controller.modal.hidden, true); assert.equal(focused, true); assert.equal(controller.record, null);
+  controller.dispose();
 });
