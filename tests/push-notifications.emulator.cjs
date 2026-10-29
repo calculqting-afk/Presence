@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const host=process.env.FIRESTORE_EMULATOR_HOST;
 if(!/^127\.0\.0\.1:\d+$/.test(host||''))throw Error('Local emulator required');
 const project='demo-presence-audience',base=`http://${host}/v1/projects/${project}/databases/(default)/documents`;
-const token=uid=>[Buffer.from('{"alg":"none","typ":"JWT"}').toString('base64url'),Buffer.from(JSON.stringify({sub:uid,user_id:uid,email:uid+'@example.test',aud:project,iss:`https://securetoken.google.com/${project}`,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+3600,auth_time:201,firebase:{sign_in_provider:'password'}})).toString('base64url'),''].join('.');
+const token=uid=>[Buffer.from('{"alg":"none","typ":"JWT"}').toString('base64url'),Buffer.from(JSON.stringify({sub:uid,user_id:uid,superAdmin:uid==='8uEjAk72BLWKjvnQJEatBdeVAi02',email:uid+'@example.test',aud:project,iss:`https://securetoken.google.com/${project}`,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+3600,auth_time:201,firebase:{sign_in_provider:'password'}})).toString('base64url'),''].join('.');
 const field=value=>typeof value==='boolean'?{booleanValue:value}:{stringValue:value};
 const write=(path,data)=>({update:{name:`projects/${project}/databases/(default)/documents/${path}`,fields:Object.fromEntries(Object.entries(data).map(([k,v])=>[k,field(v)]))}});
 async function commit(writes,actor='owner',allowed=true){const r=await fetch(base+':commit',{method:'POST',headers:{Authorization:'Bearer '+(actor==='owner'?'owner':token(actor)),'Content-Type':'application/json'},body:JSON.stringify({writes})});assert.equal(r.ok,allowed,await r.text());}

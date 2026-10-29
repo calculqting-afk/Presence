@@ -1,5 +1,5 @@
 import {SafeError} from './firebase.js';
-import {ResetService,SUPER_UID} from './service.js';
+import {ResetService,isSuperAuthority,authHasSuperAdmin} from './service.js';
 const key=id=>id.toLowerCase(),email=id=>key(id)+'@students.presence.local';
 const safeUid=uid=>typeof uid==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(uid);
 const name=profile=>[profile?.firstName,profile?.middleName,profile?.lastName].filter(Boolean).join(' ');
@@ -12,11 +12,12 @@ export class StudentIdService {
   async authorize(claims,recent=false) {
     const user=await new ResetService(this.db,this.now).authenticate(claims,recent);
     const profile=await this.db.get('students/'+claims.sub);
-    if(claims.sub!==SUPER_UID && !(profile?.active===true&&profile.role==='head_admin'))throw new SafeError(403,'Only Super Admin and Head Admin can correct Student IDs.');
-    const admin=claims.sub===SUPER_UID?await this.db.get('adminProfiles/'+claims.sub):null;
-    return admin?.displayName||name(profile)||user.displayName||(claims.sub===SUPER_UID?'Super Admin':'Head Admin');
+    const superAdmin=isSuperAuthority(claims,user);
+    if(!superAdmin && !(profile?.active===true&&profile.role==='head_admin'))throw new SafeError(403,'Only Super Admin and Head Admin can correct Student IDs.');
+    const admin=superAdmin?await this.db.get('adminProfiles/'+claims.sub):null;
+    return admin?.displayName||name(profile)||user.displayName||(superAdmin?'Super Admin':'Head Admin');
   }
-  target(uid,actor) {if(!safeUid(uid)||uid===actor||uid===SUPER_UID)throw new SafeError(400,'Select an ordinary student account.');}
+  target(uid,actor) {if(!safeUid(uid)||uid===actor)throw new SafeError(400,'Select an ordinary student account.');}
   ordinary(profile) {return profile?.active===true&&(!profile.role||profile.role==='student');}
   async status(claims,body) {
     await this.authorize(claims);this.target(body.studentUid,claims.sub);
@@ -64,6 +65,7 @@ export class StudentIdService {
   }
   async authTarget(plan,resume) {
     const user=await this.db.user(plan.studentUid),owner=await this.db.userByEmail(email(plan.newId));
+    if(authHasSuperAdmin(user))throw new SafeError(403,'Super Admin accounts cannot be corrected here.');
     if(!user||user.disabled||![email(plan.oldId),...(resume?[email(plan.newId)]:[])].includes(user.email?.toLowerCase()))throw new SafeError(409,'The student login does not match this correction.');
     if(owner&&owner.localId!==plan.studentUid)throw new SafeError(409,'The new login ID already belongs to another account.');
     return user;

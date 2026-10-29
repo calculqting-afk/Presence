@@ -37,7 +37,7 @@ function sessionOptions(profile = { active: true, role: 'student', accountId: '1
   return { calls, auth: {}, superAdminUid: 'owner', studentEmail: id => `${id}@student.test`,
     localPersistence: 'local', sessionPersistence: 'session',
     persist: async (_, mode) => calls.push(['persist', mode]),
-    signIn: async (_, email, password) => { calls.push(['signIn', email, password]); return { user: { uid: email === 'owner@test.local' ? 'owner' : 'one', email } }; },
+    signIn: async (_, email, password) => { calls.push(['signIn', email, password]); return { user: { uid: email === 'owner@test.local' ? 'owner' : 'one', email, getIdTokenResult: async () => ({claims:{superAdmin:email==='owner@test.local'}}) } }; },
     logOut: async () => calls.push(['signOut']),
     loadStudent: async () => ({ exists: () => true, data: () => profile }) };
 }
@@ -81,7 +81,7 @@ test('survey auto-resume eligibility and login error messages stay unchanged', a
   const { LoginSessionService } = await load('assets/js/controllers/LoginSessionService.js');
   const service = new LoginSessionService(sessionOptions({ active: false, role: 'head_admin' }));
   assert.equal(await service.resolveExistingRole({ uid: 'one', email: 'a@test.local' }), null);
-  assert.equal(await service.resolveExistingRole({ uid: 'owner', email: 'owner@test.local' }), 'admin');
+  assert.equal(await service.resolveExistingRole({ uid: 'owner', email: 'owner@test.local', getIdTokenResult:async()=>({claims:{superAdmin:true}}) }), 'admin');
   for (const [role,expected] of [['student','student'],['viewer','student'],['head_admin','admin'],['attendance_admin','admin'],['student_manager','admin'],['unknown',null]]) {
     const active=new LoginSessionService(sessionOptions({active:true,role}));
     assert.equal(await active.resolveExistingRole({uid:'one',email:'a@test.local'}),expected);
@@ -91,13 +91,13 @@ test('survey auto-resume eligibility and login error messages stay unchanged', a
   assert.match(service.errorMessage({ code: 'firestore/permission-denied' }), /Firestore rules/);
 });
 
-test('Super Admin uses authenticated UID rather than email, and inactive or invented roles cannot sign in as staff',async()=>{
+test('Super Admin uses a server-issued claim rather than UID or email, and inactive or invented roles cannot sign in as staff',async()=>{
   const {LoginSessionService}=await load('assets/js/controllers/LoginSessionService.js');
   const options=sessionOptions(),service=new LoginSessionService(options);
-  assert.equal(service.isSuperAdmin({uid:'impostor',email:'owner@test.local'}),false);
-  assert.equal(service.isSuperAdmin({uid:'owner',email:'changed@example.test'}),true);
-  assert.equal(service.isSuperAdmin({email:'owner@test.local'}),false);
-  options.signIn=async()=>({user:{uid:'owner',email:'changed@example.test'}});options.loadStudent=async()=>{throw Error('Pinned admin must not require student profile');};
+  assert.equal(await service.isSuperAdmin({uid:'impostor',email:'owner@test.local'}),false);
+  assert.equal(await service.isSuperAdmin({uid:'owner',email:'changed@example.test',getIdTokenResult:async()=>({claims:{superAdmin:true}})}),true);
+  assert.equal(await service.isSuperAdmin({email:'owner@test.local'}),false);
+  options.signIn=async()=>({user:{uid:'owner',email:'changed@example.test',getIdTokenResult:async()=>({claims:{superAdmin:true}})}});options.loadStudent=async()=>{throw Error('Pinned admin must not require student profile');};
   const authenticated=await new LoginSessionService(options).authenticate({accountId:'changed@example.test',password:'test',remember:false});
   assert.equal(authenticated.session.assignedRole,'super_admin');assert.equal(authenticated.session.accountId,'');
   for(const role of ['head_admin','attendance_admin','student_manager']){

@@ -6,15 +6,25 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function recentAdminLogin() {
+      return signedIn() && request.auth.token.auth_time is number
+        && request.auth.token.auth_time <= request.time.toMillis() / 1000
+        && request.time.toMillis() / 1000 - request.auth.token.auth_time < 300;
+    }
+
     function isAdmin() {
       return isSuperAdmin() || isHeadAdmin() || isAttendanceAdmin() || isStudentManager();
     }
 
-    // The pinned authenticated UID is the protected Super Admin account. Other roles are kept
-    // on each user's student profile so this works without Cloud Functions.
+    // Only a trusted Admin SDK operation can issue this signed Auth claim.
+    // A student profile role or a browser-supplied role grants no authority.
     function isSuperAdmin() {
       return signedIn()
-        && request.auth.uid == "8uEjAk72BLWKjvnQJEatBdeVAi02";
+        && request.auth.token.get("superAdmin", false) == true;
+    }
+
+    function protectedSuperAdminUid(uid) {
+      return uid is string && uid.size() > 0 && exists(/databases/$(database)/documents/superAdminAccounts/$(uid));
     }
 
     function hasStoredRole(role) {
@@ -254,7 +264,7 @@ service cloud.firestore {
         && optionalShortText(data, "course", 120) && optionalShortText(data, "email", 320)
         && optionalShortText(data, "phone", 24)
         // The bootstrap Super Admin account must never be represented as a student.
-        && data.get("uid","") != "8uEjAk72BLWKjvnQJEatBdeVAi02"
+        && !protectedSuperAdminUid(data.get("uid",""))
         && (!("photoDataUrl" in data) || (shortText(data.photoDataUrl, 350000) && data.photoDataUrl.matches('^data:image/(jpeg|png|webp);base64,.+$')))
         // Kept for existing records created before the Google Drive photo feature
         // was rolled back. Students cannot modify these fields from this version.
@@ -528,7 +538,7 @@ service cloud.firestore {
     match /students/{studentUid} {
       allow get: if isAdmin() || (signedIn() && request.auth.uid == studentUid);
       allow list: if isAdmin();
-      allow create: if studentUid != "8uEjAk72BLWKjvnQJEatBdeVAi02"
+      allow create: if !protectedSuperAdminUid(studentUid)
         && ((canManageStudents()
           && validStudent(request.resource.data)
           && !request.resource.data.keys().hasAny(["passwordResetRequired", "passwordResetValidAfter"])
@@ -539,11 +549,11 @@ service cloud.firestore {
           && approvedRegistration(request.resource.data.accountIdKey, request.resource.data.uid)
           && request.resource.data.uid == studentUid
           && request.resource.data.role == "student" && request.resource.data.active == true));
-      allow delete: if isSuperAdmin() && !exists(/databases/$(database)/documents/studentIdCorrectionLocks/$(studentUid));
-      allow update: if studentUid != "8uEjAk72BLWKjvnQJEatBdeVAi02"
+      allow delete: if isSuperAdmin() && recentAdminLogin() && !exists(/databases/$(database)/documents/studentIdCorrectionLocks/$(studentUid));
+      allow update: if !protectedSuperAdminUid(studentUid)
         && !exists(/databases/$(database)/documents/studentIdCorrectionLocks/$(studentUid))
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["accountId", "accountIdKey", "authEmail", "uid"])
-        && ((isSuperAdmin()
+        && ((isSuperAdmin() && recentAdminLogin()
           && resource.data.get("passwordResetRequired", false) == false
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["role", "roleUpdatedAt", "roleUpdatedBy"])
           && request.resource.data.role in ["head_admin", "attendance_admin", "student_manager", "student"]
@@ -587,6 +597,10 @@ service cloud.firestore {
       allow read, delete: if false;
     }
 
+    match /superAdminAccounts/{adminUid} {
+      allow read, write: if false;
+    }
+
     match /adminProfiles/{adminUid} {
       allow read, create, update: if isSuperAdmin() && request.auth.uid == adminUid;
       allow delete: if false;
@@ -601,7 +615,7 @@ service cloud.firestore {
         && (canManageStudents() || request.resource.data.uid == request.auth.uid);
       allow update: if false;
       allow delete: if !exists(/databases/$(database)/documents/studentIdCorrectionLocks/$(resource.data.uid))
-        && (canManageStudents() || (signedIn() && resource.data.uid == request.auth.uid));
+        && ((canManageStudents() && recentAdminLogin()) || (signedIn() && resource.data.uid == request.auth.uid));
     }
 
     match /registrationRequests/{requestId} {
@@ -635,7 +649,7 @@ service cloud.firestore {
           : validRosterUpdate(request.resource.data, resource.data));
       // Deletion is deliberately stricter than event editing. This protects
       // the operational-data reset from being triggered by other admin roles.
-      allow delete: if isSuperAdmin();
+      allow delete: if isSuperAdmin() && recentAdminLogin();
     }
 
 
@@ -949,8 +963,8 @@ service cloud.firestore {
         // Validate the checkout patch, not unrelated legacy check-in metadata.
         // studentCanCheckOut keeps every original check-in field immutable.
         || studentCanCheckOut(attendanceId, request.resource.data, resource.data);
-      allow delete: if isSuperAdmin() || (canManageAttendance()
-        && validRevocation(attendanceId, getAfter(/databases/$(database)/documents/attendanceRevocations/$(attendanceId)).data));
+      allow delete: if recentAdminLogin() && (isSuperAdmin() || (canManageAttendance()
+        && validRevocation(attendanceId, getAfter(/databases/$(database)/documents/attendanceRevocations/$(attendanceId)).data)));
 
       match /corrections/{correctionId} {
         allow read: if canViewAttendanceReports()
@@ -1013,13 +1027,13 @@ service cloud.firestore {
         && ((request.resource.data.studentUid == resource.data.studentUid
             && request.resource.data.eventId == resource.data.eventId)
           || confirmedFineAbsence(request.resource.data));
-      allow delete: if isSuperAdmin();
+      allow delete: if isSuperAdmin() && recentAdminLogin();
     }
 
     match /dismissedHistory/{dismissalId} {
       allow read: if isAdmin()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
-      allow delete: if isSuperAdmin()
+      allow delete: if (isSuperAdmin() && recentAdminLogin())
         || (isStudent() && resource.data.studentUid == request.auth.uid);
       allow create: if isStudent()
         && request.resource.data.studentUid == request.auth.uid;
@@ -1196,7 +1210,7 @@ service cloud.firestore {
       let path = /databases/$(database)/documents/students/$(data.subjectUid);
       let before = get(path).data;
       let after = getAfter(path).data;
-      return isSuperAdmin() && exists(path) && existsAfter(path) && before.get("role","student") != after.role
+      return isSuperAdmin() && recentAdminLogin() && exists(path) && existsAfter(path) && before.get("role","student") != after.role
         && after.roleUpdatedAt == request.time && after.roleUpdatedBy == request.auth.uid
         && data.before == {"role":before.get("role","student")} && data.after == {"role":after.role}
         && data.subjectId == before.accountId && data.eventId == "" && data.eventName == "";

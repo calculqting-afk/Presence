@@ -6,6 +6,30 @@ const vm = require('node:vm');
 const { pathToFileURL } = require('node:url');
 
 const root = path.resolve(__dirname, '..');
+test('admin recency uses signed authentication time, rejects future/missing values and leaves a write margin', async () => {
+  const { hasRecentAdminLogin, AdminRecentLogin } = await isolatedModule('assets/js/controllers/AdminRecentLogin.js');
+  const now = 1000000;
+  for (const claims of [{}, { auth_time: '999' }, { auth_time: 1001 }, { auth_time: 760 }, { auth_time: 0 }]) assert.equal(hasRecentAdminLogin(claims, now), false);
+  assert.equal(hasRecentAdminLogin({ auth_time: 761 }, now), true);
+  let prompts = 0, refreshes = 0;
+  const user = { uid: 'admin', email: 'admin@example.test', getIdTokenResult: async force => { assert.equal(force, true); refreshes++; return { claims: { auth_time: 999 } }; } };
+  const gate = new AdminRecentLogin({ getUser: () => user, document: {}, now: () => now });
+  gate.confirm = async () => { prompts++; };
+  await gate.require(); assert.equal(prompts, 0); assert.equal(refreshes, 1);
+  user.getIdTokenResult = async () => ({ claims: { auth_time: 700, iat: 1000 } });
+  gate.confirm = async () => { prompts++; throw Error('cancelled'); };
+  await assert.rejects(gate.require(), /cancelled/); assert.equal(prompts, 1); assert.equal(gate.pending, false);
+});
+
+test('revocation cannot write when recent-login confirmation fails or is missing', async () => {
+  const { AttendanceRevocationController } = await isolatedModule('assets/js/controllers/AttendanceRevocationController.js');
+  let writes = 0;
+  const options = { role: 'attendance_admin', transaction: async () => { writes++; } };
+  const record = { id: 's_e', studentUid: 's', eventId: 'e' };
+  await assert.rejects(new AttendanceRevocationController(options).revoke(record, 'Verified wrong record', 'REVOKE'), /Sign in again/);
+  await assert.rejects(new AttendanceRevocationController({ ...options, requireRecentLogin: async () => { throw Error('cancelled'); } }).revoke(record, 'Verified wrong record', 'REVOKE'), /cancelled/);
+  assert.equal(writes, 0);
+});
 test('student action presentation omits forbidden controls for every role and profile layout', async () => {
   const { StudentActionsPresenter } = await isolatedModule('assets/js/controllers/StudentActionsPresenter.js');
   const { hasPermission } = await isolatedModule('assets/js/core/permissions.js');
@@ -1006,8 +1030,8 @@ test('dashboard session service verifies each role and discards late authenticat
     service.dashboardRole = 'student'; assert.equal(await service.verifyRole(user), ['student','viewer'].includes(role));
   }
   service.loadStudent = () => { throw Error('super admin must not need a student record'); }; service.dashboardRole = 'admin';
-  assert.equal(await service.verifyRole({ uid: 'owner', email: 'owner@test.local' }), true);
-  assert.equal(await service.verifyRole({ uid: 'owner', email: 'changed@example.test' }), true);
+  assert.equal(await service.verifyRole({ uid: 'owner', email: 'owner@test.local', getIdTokenResult:async()=>({claims:{superAdmin:true}}) }), true);
+  assert.equal(await service.verifyRole({ uid: 'owner', email: 'changed@example.test', getIdTokenResult:async()=>({claims:{superAdmin:true}}) }), true);
   service.loadStudent=async()=>({exists:()=>true,data:()=>({active:true,role:'student'})});
   assert.equal(await service.verifyRole({uid:'impostor',email:'owner@test.local'}),false);
   service.loadStudent=async()=>({exists:()=>true,data:()=>({active:false,role:'head_admin'})});
@@ -1185,7 +1209,7 @@ for (const role of ['admin', 'student']) test(`the real ${role} bootstrap evalua
   browser.window.dispatchEvent = event => browser.window.emit(event.detail.viewName);
   const history = { state: null, replaceState() {}, pushState() {}, go() {} };
   const context = vm.createContext({ ...browser, history, console, URL, setTimeout, clearTimeout, CustomEvent: class { constructor(type, options) { this.type = type; Object.assign(this, options); } }, fetch: async () => ({}) });
-  const sdk = { Timestamp: { now: () => new Date(), fromMillis: n => new Date(n), fromDate: n => n }, onAuthStateChanged: (_, next) => { queueMicrotask(() => next({ uid: role, email: role === 'admin' ? 'owner@test.local' : 'student@test.local' })); return () => {}; }, signOut: async () => {}, collection: (_, name) => name, doc: (_, name, uid) => `${name}/${uid}`, query: x => x, where() {}, orderBy() {}, serverTimestamp: () => 'server', onSnapshot: () => () => {}, getDoc: async () => ({ exists: () => true, data: () => ({ role: 'student', active: true }) }), getDocFromServer: async ref => ({ exists: () => String(ref).startsWith('students/'), data: () => String(ref).startsWith('students/') ? {role:'student',active:true} : {} }), getDocs: async () => ({ docs: [] }), getDocsFromServer: async () => ({ docs: [] }), setDoc: async () => {}, writeBatch: () => ({ set() {}, delete() {}, commit: async () => {} }), limit() {}, startAfter() {}, runTransaction() {}, addDoc: async () => ({ id: 'test' }), deleteDoc: async () => {}, deleteField() {}, createUserWithEmailAndPassword() {}, deleteUser() {}, signInWithEmailAndPassword() {}, updatePassword() {}, updateProfile() {} };
+  const sdk = { Timestamp: { now: () => new Date(), fromMillis: n => new Date(n), fromDate: n => n }, onAuthStateChanged: (_, next) => { queueMicrotask(() => next({ uid: role, email: role === 'admin' ? 'owner@test.local' : 'student@test.local', getIdTokenResult:async()=>({claims:{superAdmin:role==='admin'}}) })); return () => {}; }, signOut: async () => {}, collection: (_, name) => name, doc: (_, name, uid) => `${name}/${uid}`, query: x => x, where() {}, orderBy() {}, serverTimestamp: () => 'server', onSnapshot: () => () => {}, getDoc: async () => ({ exists: () => true, data: () => ({ role: 'student', active: true }) }), getDocFromServer: async ref => ({ exists: () => String(ref).startsWith('students/'), data: () => String(ref).startsWith('students/') ? {role:'student',active:true} : {} }), getDocs: async () => ({ docs: [] }), getDocsFromServer: async () => ({ docs: [] }), setDoc: async () => {}, writeBatch: () => ({ set() {}, delete() {}, commit: async () => {} }), limit() {}, startAfter() {}, runTransaction() {}, addDoc: async () => ({ id: 'test' }), deleteDoc: async () => {}, deleteField() {}, createUserWithEmailAndPassword() {}, deleteUser() {}, signInWithEmailAndPassword() {}, updatePassword() {}, updateProfile() {} };
   Object.assign(sdk, { EmailAuthProvider: { credential: () => ({}) }, reauthenticateWithCredential: async () => {} });
   const modules = new Map(); const synthetic = (key, values) => {
     if (!modules.has(key)) modules.set(key, new vm.SyntheticModule(Object.keys(values), function() { for(const [name,value] of Object.entries(values)) this.setExport(name,value); }, { context, identifier: key }));
@@ -2278,6 +2302,7 @@ test('revocation requires confirmation and atomically archives exact attendance 
   const before = { studentUid: 's', studentId: '123', eventId: 'e', eventName: 'Event', status: 'completed', checkedInAt: new Date(1000), checkedOutAt: new Date(1000) };
   let active = before; const committed = [];
   const controller = new AttendanceRevocationController({ db: {}, user: { uid: 'admin' }, role: 'attendance_admin', getStudents: () => [],
+    requireRecentLogin: async () => {},
     transaction: async (_, run) => { const pending = []; await run({ get: async () => ({ exists: () => Boolean(active), data: () => active }), set: (ref, data) => pending.push(['set', ref, data]), delete: ref => pending.push(['delete', ref]) }); committed.push(...pending); active = null; } });
   const selected = { ...before, id: 's_e' };
   await assert.rejects(controller.revoke(selected, 'Verified erroneous manual entry', ''), /Type REVOKE/); assert.equal(committed.length, 0);
@@ -2294,7 +2319,7 @@ test('revocation requires confirmation and atomically archives exact attendance 
 test('revocation rejects stale, synthesized and unauthorized records without writes', async () => {
   const { AttendanceRevocationController } = await isolatedModule('assets/js/controllers/AttendanceRevocationController.js');
   const before = { studentUid: 's', studentId: '123', eventId: 'e', status: 'completed' }; let writes = 0;
-  const options = { db: {}, user: { uid: 'admin' }, getStudents: () => [], transaction: async (_, run) => run({ get: async () => ({ exists: () => true, data: () => ({ ...before, status: 'checked-in' }) }), set: () => writes++, delete: () => writes++ }) };
+  const options = { db: {}, user: { uid: 'admin' }, getStudents: () => [], requireRecentLogin: async () => {}, transaction: async (_, run) => run({ get: async () => ({ exists: () => true, data: () => ({ ...before, status: 'checked-in' }) }), set: () => writes++, delete: () => writes++ }) };
   const controller = new AttendanceRevocationController({ ...options, role: 'head_admin' });
   await assert.rejects(controller.revoke({ ...before, id: 's_e' }, 'Verified error in register', 'REVOKE'), /changed since/);
   await assert.rejects(controller.revoke({ ...before, id: 's_e', displayOnly: true }, 'Verified error in register', 'REVOKE'), /saved attendance/);

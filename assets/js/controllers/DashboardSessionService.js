@@ -1,9 +1,9 @@
+import { hasSuperAdminClaim } from '../core/SuperAdminAuthority.js';
 export class DashboardSessionService {
   constructor({
     auth,
     subscribe,
     loadStudent,
-    superAdminUid,
     dashboardRole,
     onState
   }) {
@@ -11,8 +11,7 @@ export class DashboardSessionService {
       auth,
       subscribe,
       loadStudent,
-      superAdminUid,
-      dashboardRole,
+        dashboardRole,
       onState
     });
     this.user = null;
@@ -40,7 +39,7 @@ export class DashboardSessionService {
   async verifyRole(user) {
     if (!user) return false;
     const generation = ++this.generation;
-    const isSuperAdmin = typeof user.uid==='string' && user.uid === this.superAdminUid;
+    const isSuperAdmin = typeof user.getIdTokenResult === 'function' ? await hasSuperAdminClaim(user) : false;
     const snapshot = isSuperAdmin ? null : await this.loadStudent(user.uid);
     if (generation !== this.generation) return false;
     if(!isSuperAdmin&&(!snapshot.exists()||snapshot.data()?.active!==true))return false;

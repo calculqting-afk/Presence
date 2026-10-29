@@ -1,5 +1,27 @@
 # Security hardening — 2026-10-29
 
+## Admin recent-login checks — 2026-10-30
+
+The dashboard now checks the signed Firebase token's `auth_time` before changing roles, deleting student accounts, removing events/fines, revoking attendance or resetting operational data. If authentication is four minutes old, it asks for the current administrator's password in a separate modal. Cancel or failed authentication makes no write. Passwords are cleared immediately after the attempt and never saved in application storage or activity logs. The existing Firebase keep-signed-in preference stays unchanged.
+
+The matching Rules require authentication less than five minutes old for role changes and the protected deletions. Refreshing a token alone does not satisfy this requirement: Firebase reauthentication updates `auth_time`. Missing, future and expired authentication times are rejected. Existing role/permission checks remain required; a fresh ordinary student login cannot perform these actions. Password resets and ID corrections already enforce recent authentication in the Worker.
+
+Publish these Rules with the updated dashboard. Older website/APK versions can be denied these admin actions after five minutes until they sign in again or update. Student attendance and personal course/section editing do not require admin password confirmation. Existing multi-batch cleanup is still non-atomic: if network/authentication expires during a large cleanup, some batches may have completed; no automatic retry bypasses the Rules.
+
+Super Admin authority now uses a server-issued `superAdmin: true` Firebase claim. The Worker checks both the signed token and the current Auth account claim; Rules check the signed claim. No UID or email grants authority. MFA and a sign-out-all-devices button remain separate work. Existing immutable role and attendance activity records remain in place; this change does not claim new audit coverage for every legacy deletion path.
+
+Verification: `npm.cmd test`, `npm.cmd run check`, and `tests/admin-recent-login.emulator.cjs` plus the existing emulator suites. Dummy emulator tests do not modify production accounts or records.
+
+## Super Admin migration — 2026-10-30
+
+The existing account was given the claim through the trusted local operator helper. Other custom claims, UID, password, student records and admin profile were retained. A server-only protected-account reservation lives in `superAdminAccounts`; clients cannot read/write it or create a student profile for a reserved UID. Assigning a student profile's `role` never grants this claim. There is no public endpoint or dashboard control for granting Super Admin.
+
+Operator recovery/migration: configure `PRESENCE_SERVICE_ACCOUNT_KEY` privately, run `node tools/migrate-super-admin.cjs --uid EXISTING_ADMIN_UID` to preview, and add `--apply` only for the verified existing administrator profile. Preserve other claims. On removal/recovery, use trusted Firebase administration to remove the claim and revoke refresh tokens; old signed tokens can remain valid in Rules until expiry, while the Worker rejects removed current claims immediately. This migration does not revoke existing sessions.
+
+Website routing forces token refresh to receive the new claim. Existing APKs continue to use their packaged UI; the latest admin password modal needs a later APK build. Existing accounts and attendance are preserved. The legacy Functions source was updated but was not deployed or enabled as a new paid service.
+
+Apps Script is separately deployed. Replace Code.gs with the complete `docs/google-apps-script-face-upload.js`, retain all Script Properties, then edit the existing deployment and choose New version. The local source uses Firebase's authenticated account lookup to read current custom claims. Browser automation was unable to safely determine the current URL, so the Apps Script deployment is not verified here.
+
 ## Production activation
 
 The stricter Firestore Rules were activated on 2026-10-29 following the user's explicit request. Server-owned face acknowledgements, restricted student-ID index reads and mandatory backend location proofs for geofenced attendance are now enforced. APK v1.8.8 or newer is required for geofenced student attendance. The activation order below is retained as the setup/migration reference, not a statement that enforcement is still pending.

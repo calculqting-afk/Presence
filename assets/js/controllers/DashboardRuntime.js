@@ -15,7 +15,7 @@ export class DashboardRuntime {
     dependencies = firebase, notificationService, greetingController, toastController,
     faceRegistrationService, sessionService, notificationCenter, navigation, application } = {}) {
     Object.assign(this, { state, role, document, window });
-    const { auth, db, SUPER_ADMIN_UID, onAuthStateChanged, addDoc, collection, serverTimestamp,
+    const { auth, db, onAuthStateChanged, addDoc, collection, serverTimestamp,
       getDoc, getDocFromServer, doc } = dependencies;
     this.notificationService = notificationService || new NotificationService({
       getSession: () => ({ user: state.user, role: state.role }), canReceive: canReceiveNotification,
@@ -27,7 +27,7 @@ export class DashboardRuntime {
       loadRegistration: uid => getDocFromServer(doc(db, 'faceRegistrations', uid)),
       loadResetResult: requestId => getDocFromServer(doc(db, 'faceResetRequests', requestId)) });
     this.sessionService = sessionService || new DashboardSessionService({ auth, subscribe: onAuthStateChanged,
-      loadStudent: uid => getDocFromServer(doc(db, 'students', uid)), superAdminUid: SUPER_ADMIN_UID,
+      loadStudent: uid => getDocFromServer(doc(db, 'students', uid)),
       dashboardRole: role, onState: session => { if (!this.disposed) state.setSession(session); } });
     this.notificationCenter = notificationCenter || new NotificationCenterController({ document, window });
     this.navigation = navigation || new DashboardNavigationController({ document, window });

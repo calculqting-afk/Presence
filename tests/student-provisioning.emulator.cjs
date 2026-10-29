@@ -4,7 +4,7 @@ const project = 'demo-presence-audience', host = process.env.FIRESTORE_EMULATOR_
 if (!host || !/^127\.0\.0\.1:\d+$/.test(host)) throw Error('Local emulator required');
 const base = `http://${host}/v1/projects/${project}/databases/(default)/documents`;
 const SERVER = Symbol('server');
-const token = uid => [Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url'), Buffer.from(JSON.stringify({ sub: uid, user_id: uid, email: `${uid}@example.test`, aud: project, iss: `https://securetoken.google.com/${project}`, iat: Math.floor(Date.now()/1000), exp: Math.floor(Date.now()/1000)+3600, firebase: { sign_in_provider: 'password' } })).toString('base64url'), ''].join('.');
+const token = uid => [Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url'), Buffer.from(JSON.stringify({ sub: uid, user_id: uid, superAdmin: uid === '8uEjAk72BLWKjvnQJEatBdeVAi02', email: `${uid}@example.test`, aud: project, iss: `https://securetoken.google.com/${project}`, iat: Math.floor(Date.now()/1000), exp: Math.floor(Date.now()/1000)+3600, firebase: { sign_in_provider: 'password' } })).toString('base64url'), ''].join('.');
 function encode(value, field, transforms) {
   if (value === SERVER) { transforms.push({ fieldPath: field, setToServerValue: 'REQUEST_TIME' }); return; }
   if (typeof value === 'boolean') return { booleanValue: value };

@@ -49,6 +49,22 @@ async function fixture() {
   const service = new ResetService(db,()=>now), claims = uid=>({sub:uid,auth_time:Math.floor(now/1000)});
   return {service,db,store,users,passwords,claims,advance(ms){now+=ms;},failPassword(){failPassword=true;},failFinalize(){failFinalize=true;},body:{studentUid:'student',operationId,reason:'Student forgot password'}};
 }
+
+test('Super Admin authority requires both signed claim and current Auth claim, independent of UID', async () => {
+  const { isSuperAuthority, authHasSuperAdmin } = await import('../workers/admin-api/src/service.js');
+  assert.equal(isSuperAuthority({ sub: 'any-server-assigned-uid', superAdmin: true }, { customAttributes: '{"superAdmin":true}' }), true);
+  assert.equal(isSuperAuthority({ sub: '8uEjAk72BLWKjvnQJEatBdeVAi02' }, { customAttributes: '{}' }), false);
+  assert.equal(isSuperAuthority({ superAdmin: true }, { customAttributes: '{}' }), false);
+  assert.equal(isSuperAuthority({}, { customAttributes: '{"superAdmin":true}' }), false);
+  assert.equal(authHasSuperAdmin({ customAttributes: '{"superAdmin":"true"}' }), false);
+  assert.equal(authHasSuperAdmin({ customAttributes: 'invalid' }), false);
+  const f = await fixture();
+  f.users.set('new-super-admin', { localId: 'new-super-admin', validSince: '0', customAttributes: '{"superAdmin":true}' });
+  await f.service.reset({ ...f.claims('new-super-admin'), superAdmin: true }, f.body);
+  const denied = await fixture();
+  denied.users.set('8uEjAk72BLWKjvnQJEatBdeVAi02', { localId: '8uEjAk72BLWKjvnQJEatBdeVAi02', validSince: '0' });
+  await assert.rejects(denied.service.reset(denied.claims('8uEjAk72BLWKjvnQJEatBdeVAi02'), denied.body), /Only Super Admin/);
+});
 test('admin reset creates locked profile and password-free audit, then protected completion releases it', async()=>{
   const f=await fixture(), result=await f.service.reset(f.claims('head'),f.body);
   assert.ok(result.temporaryPassword.length>=24);

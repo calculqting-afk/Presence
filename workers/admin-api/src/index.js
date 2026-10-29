@@ -14,7 +14,7 @@ export function handler({ verify = verifyToken, gateway = secret => new Firebase
       const url = new URL(request.url);
       if (origin && !allowed) throw new SafeError(403, 'Origin not allowed.');
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
-      if (url.pathname === '/health' && request.method === 'GET') return response({ service: 'presence-admin-api', enabled: env.RESET_ENABLED === 'true', configured: Boolean(env.FIREBASE_SERVICE_ACCOUNT),idCorrectionEnabled:env.ID_CORRECTION_ENABLED==='true',locationProofs:true,faceConfirmationConfigured:Boolean(env.FACE_REGISTRATION_SECRET),temporaryPasswordMinutes:30 });
+      if (url.pathname === '/health' && request.method === 'GET') return response({ service: 'presence-admin-api', superAdminAuthority: 'custom-claim', enabled: env.RESET_ENABLED === 'true', configured: Boolean(env.FIREBASE_SERVICE_ACCOUNT),idCorrectionEnabled:env.ID_CORRECTION_ENABLED==='true',locationProofs:true,faceConfirmationConfigured:Boolean(env.FACE_REGISTRATION_SECRET),temporaryPasswordMinutes:30 });
       const idRoute=['/v1/admin/student-id/status','/v1/admin/student-id/preview','/v1/admin/student-id/confirm'].includes(url.pathname);
       const locationRoute = url.pathname === '/v1/student/attendance-location', faceRoute = url.pathname === '/v1/internal/face-registration';
       if ((!idRoute && !locationRoute && !faceRoute && !['/v1/admin/password-reset', '/v1/student/password-change'].includes(url.pathname)) || url.search) throw new SafeError(404, 'Not found.');

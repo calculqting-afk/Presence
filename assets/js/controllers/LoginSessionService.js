@@ -1,22 +1,23 @@
-import { SUPER_ADMIN_UID, auth, db, studentIdToEmail } from '../../../config/firebase-config.js';
+import { auth, db, studentIdToEmail } from '../../../config/firebase-config.js';
+import { hasSuperAdminClaim } from '../core/SuperAdminAuthority.js';
 import { browserLocalPersistence, browserSessionPersistence, setPersistence, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
 import { doc, getDocFromServer } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 
 /** Authentication/profile access only; no DOM, navigation, or UI state. */
 export class LoginSessionService {
-  constructor({ auth: authentication = auth, superAdminUid = SUPER_ADMIN_UID,
+  constructor({ auth: authentication = auth,
     studentEmail = studentIdToEmail, loadStudent = uid => getDocFromServer(doc(db, 'students', uid)),
     persist = setPersistence, localPersistence = browserLocalPersistence,
     sessionPersistence = browserSessionPersistence, signIn = signInWithEmailAndPassword,
     logOut = signOut, subscribe = onAuthStateChanged } = {}) {
-    Object.assign(this, { auth: authentication, superAdminUid, studentEmail, loadStudent,
+    Object.assign(this, { auth: authentication, studentEmail, loadStudent,
       persist, localPersistence, sessionPersistence, signIn, logOut, subscribe });
   }
 
-  isSuperAdmin(user) { return typeof user?.uid==='string' && user.uid === this.superAdminUid; }
+  isSuperAdmin(user) { return hasSuperAdminClaim(user); }
 
   async resolveExistingRole(user) {
-    if (this.isSuperAdmin(user)) return 'admin';
+    if (await this.isSuperAdmin(user)) return 'admin';
     const snapshot = await this.loadStudent(user.uid);
     const profile = snapshot.data();
     if (!snapshot.exists() || profile.active !== true) return null;
@@ -29,7 +30,7 @@ export class LoginSessionService {
     const email = accountId.includes('@') ? accountId : this.studentEmail(accountId);
     const credential = await this.signIn(this.auth, email, password);
     const user = credential.user;
-    const isSuperAdmin = this.isSuperAdmin(user);
+    const isSuperAdmin = await this.isSuperAdmin(user);
     let profile = {}, role = 'admin';
     if (!isSuperAdmin) {
       let snapshot = await this.loadStudent(user.uid);

@@ -1,7 +1,10 @@
 import { SafeError, digest, temporaryPassword } from './firebase.js';
 import { StudentPasswordPolicy } from '../../../assets/js/core/StudentPasswordPolicy.js';
 
-export const SUPER_UID = '8uEjAk72BLWKjvnQJEatBdeVAi02';
+export function authHasSuperAdmin(user) {
+  try { return JSON.parse(user?.customAttributes || '{}').superAdmin === true; } catch { return false; }
+}
+export const isSuperAuthority = (claims, user) => claims.superAdmin === true && authHasSuperAdmin(user);
 const targetAllowed = profile => profile?.active === true && (!profile.role || profile.role === 'student');
 export const TEMPORARY_PASSWORD_TTL_MS = 30 * 60 * 1000;
 export class ResetService {
@@ -9,15 +12,16 @@ export class ResetService {
   async authenticate(claims, recent = false) {
     const user = await this.db.user(claims.sub);
     if (!user || user.disabled || claims.auth_time < Number(user.validSince || 0)) throw new SafeError(401, 'Sign in again to continue.');
-    if (recent && this.now() / 1000 - claims.auth_time > 300) throw new SafeError(401, 'Confirm your admin password again.');
+    if (recent && (!Number.isFinite(claims.auth_time) || claims.auth_time > this.now() / 1000 || this.now() / 1000 - claims.auth_time >= 300)) throw new SafeError(401, 'Confirm your admin password again.');
     return user;
   }
   async reset(claims, body) {
     if (typeof body.studentUid !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(body.studentUid) || !/^[a-f0-9-]{36}$/.test(body.operationId || '')
       || typeof body.reason !== 'string' || body.reason.trim().length < 5 || body.reason.length > 500) throw new SafeError(400, 'Select a student and enter a reason of 5–500 characters.');
     const actor = await this.authenticate(claims, true), uid = body.studentUid;
-    if (uid === claims.sub || uid === SUPER_UID) throw new SafeError(403, 'Only ordinary student accounts can be reset here.');
+    if (uid === claims.sub) throw new SafeError(403, 'Only ordinary student accounts can be reset here.');
     const target = await this.db.user(uid);
+    if (authHasSuperAdmin(target)) throw new SafeError(403, 'Super Admin accounts cannot be reset here.');
     if (!target || target.disabled) throw new SafeError(400, 'An active student login account is required.');
     const now = this.now(), password = temporaryPassword(), hash = await digest(body.operationId + ':' + password);
     const ledgerPath = 'passwordResets/' + uid, auditPath = 'auditLogs/password-reset_' + body.operationId;
@@ -26,7 +30,7 @@ export class ResetService {
       const actorProfile = await get('students/' + claims.sub), profile = await get('students/' + uid);
       const ledger = await get(ledgerPath), limit = await get('passwordResetLimits/' + claims.sub), audit = await get(auditPath);
       const correctionLock = await get('studentIdCorrectionLocks/' + uid);
-      if (claims.sub !== SUPER_UID && !(actorProfile?.active === true && actorProfile.role === 'head_admin')) throw new SafeError(403, 'Only Super Admin and Head Admin can reset student passwords.');
+      if (!isSuperAuthority(claims, actor) && !(actorProfile?.active === true && actorProfile.role === 'head_admin')) throw new SafeError(403, 'Only Super Admin and Head Admin can reset student passwords.');
       if (!targetAllowed(profile) || (profile.uid && profile.uid !== uid) || target.email !== (profile.authEmail || `${profile.accountIdKey || String(profile.accountId || '').toLowerCase()}@students.presence.local`)) throw new SafeError(403, 'Only a matching ordinary student account can be reset.');
       if (audit) throw new SafeError(409, 'This reset request was already processed. Its temporary password cannot be retrieved.');
       if (correctionLock) throw new SafeError(409, 'Finish the pending Student ID correction before resetting this password.');

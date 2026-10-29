@@ -18,8 +18,8 @@ function recordVersion(value) {
   return value;
 }
 export class AttendanceRevocationController {
-  constructor({ db, user, role, getStudents, notify, onRevoked = () => {}, document = globalThis.document, transaction = runTransaction }) {
-    Object.assign(this, { db, user, role, getStudents, notify, onRevoked, document, transaction });
+  constructor({ db, user, role, getStudents, notify, onRevoked = () => {}, document = globalThis.document, transaction = runTransaction, requireRecentLogin }) {
+    Object.assign(this, { db, user, role, getStudents, notify, onRevoked, document, transaction, requireRecentLogin });
     this.scope = new ControllerScope();
   }
   field(id) { return this.document.querySelector('#' + id); }
@@ -58,6 +58,8 @@ export class AttendanceRevocationController {
     requirePermission(this.role, 'correctAttendance');
     const explanation = revocationReason(reason, confirmation);
     if (!record || record.displayOnly || record.id !== `${record.studentUid}_${record.eventId}`) throw Error('Select a saved attendance record.');
+    if (!this.requireRecentLogin) throw Error('Sign in again before revoking attendance.');
+    await this.requireRecentLogin();
     const archive = doc(this.db, 'attendanceRevocations', record.id);
     const operation = doc(collection(archive, 'history')).id;
     await this.transaction(this.db, async tx => {

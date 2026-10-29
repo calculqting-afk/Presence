@@ -1,4 +1,5 @@
 import { AttendanceRevocationController } from '../controllers/AttendanceRevocationController.js';
+import { AdminRecentLogin } from '../controllers/AdminRecentLogin.js';
 import { attendanceTimeIssue, attendanceReviewLabel } from '../core/AttendanceTimePolicy.js';
 import { ControllerScope } from '../core/ControllerScope.js';
 import { StudentIdCorrectionController } from '../controllers/StudentIdCorrectionController.js';
@@ -17,7 +18,7 @@ import { AttendanceRelativeTime } from '../controllers/AttendanceRelativeTime.js
 import { SurveyConfirmationController } from '../controllers/SurveyConfirmationController.js';
 import { AttendanceReportController } from '../controllers/AttendanceReportController.js';
 import { StudentPasswordPolicy } from '../core/StudentPasswordPolicy.js';
-import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, SUPER_ADMIN_UID, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261011-optimized';
+import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261011-optimized';
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
 import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261011-optimized';
 import { GeofenceController } from '../controllers/GeofenceController.js?v=20261011-optimized';
@@ -46,6 +47,7 @@ export class AdminDashboard {
     this.window = window;
     this.sessionStorage = sessionStorage;
     this.scope = new ControllerScope();
+    this.recentLogin = new AdminRecentLogin({ getUser: () => auth.currentUser, document });
     this.can = this.can.bind(this);
     this.applyActionPermissions = this.applyActionPermissions.bind(this);
     this.listen = this.listen.bind(this);
@@ -332,6 +334,7 @@ export class AdminDashboard {
       notify: showDashboardToast
     });
     dashboard.revocationController = new AttendanceRevocationController({ db, user: currentUser, role: currentUserRole,
+      requireRecentLogin: () => dashboard.recentLogin.require(),
       document: dashboard.document, getStudents: () => dashboard.students, notify: showDashboardToast,
       onRevoked: id => {
         dashboard.attendance = dashboard.attendance.filter(record => record.id !== id);
@@ -1600,6 +1603,7 @@ export class AdminDashboard {
   }
   async removeEventAndRecords(event) {
     const dashboard = this;
+    await dashboard.recentLogin.require();
     if (event.sessionPeriod === 'morning') {
       const afternoon = await getDocFromServer(doc(db, 'events', EventSessionPolicy.afternoonId(event.id)));
       if (afternoon.exists()) throw new Error('This morning session has a linked afternoon session. Keep it for editing the event group, or remove the afternoon session first. No attendance was removed.');
@@ -1885,6 +1889,7 @@ export class AdminDashboard {
     dashboard.confirmDataCleanup.disabled = true;
     dashboard.confirmDataCleanup.textContent = "Resetting data…";
     try {
+      await dashboard.recentLogin.require();
       const clearEvents = dashboard.clearEventData.checked;
       const clearFines = dashboard.clearFineData.checked;
       const [eventSnapshot, attendanceSnapshot, dismissedSnapshot, geofenceSnapshot, fineSnapshot] = await Promise.all([clearEvents ? getDocs(collection(db, "events")) : Promise.resolve(null), clearEvents ? getDocs(collection(db, "attendance")) : Promise.resolve(null), clearEvents ? getDocs(collection(db, "dismissedHistory")) : Promise.resolve(null), clearEvents ? getDocs(collection(db, "eventGeofences")) : Promise.resolve(null), clearFines ? getDocs(collection(db, "fines")) : Promise.resolve(null)]);
@@ -2056,6 +2061,7 @@ export class AdminDashboard {
     }
     if (!button || !dashboard.can("deleteFines")) return;
     try {
+      await dashboard.recentLogin.require();
       await deleteDoc(doc(db, "fines", button.dataset.deleteFine));
       showDashboardToast("Fine removed", "The community-service requirement was removed.");
     } catch (error) {
@@ -2508,6 +2514,10 @@ export class AdminDashboard {
     if (!dashboard.pendingRoleChange) return;
     const reason=dashboard.document.querySelector('#roleChangeReason').value.trim();
     if(reason.length<5||reason.length>1000){showDashboardToast('Reason required','Enter a reason for this role change (5–1000 characters).');return;}
+    try { await dashboard.recentLogin.require(); }
+    catch (error) { showDashboardToast('Role unchanged', error.message); return; }
+    // Re-read after the confirmation dialog: the original modal may have changed.
+    if (!dashboard.pendingRoleChange) return;
     const {
       student,
       role,
@@ -2664,6 +2674,7 @@ export class AdminDashboard {
     confirmButton.disabled = true;
     confirmButton.textContent = "Removing account…";
     try {
+      await dashboard.recentLogin.require();
       await signOut(studentProvisioningAuth).catch(() => {});
       const credential = await signInWithEmailAndPassword(studentProvisioningAuth, studentToRemove.authEmail || studentIdToEmail(studentToRemove.accountId), currentPassword);
       if (credential.user.uid !== studentToRemove.uid) throw new Error("The password does not match this student account.");

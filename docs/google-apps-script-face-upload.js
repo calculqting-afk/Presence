@@ -1,4 +1,6 @@
-const SUPER_ADMIN_UID = "8uEjAk72BLWKjvnQJEatBdeVAi02";
+function isServerSuperAdmin_(user) {
+  try { return JSON.parse(user.customAttributes || "{}").superAdmin === true; } catch (_) { return false; }
+}
 const FIREBASE_PROJECT_ID = "presence-a873f";
 
 function getConfig_(key) {
@@ -51,7 +53,7 @@ function getFaceRegistration_(studentUid, idToken) {
 }
 
 function canResetFace_(requester, idToken) {
-  if (requester.localId === SUPER_ADMIN_UID) return true;
+  if (isServerSuperAdmin_(requester)) return true;
   // Never trust a role supplied by the browser. Read the authenticated caller's
   // stored role through Firestore, which also applies its deployed rules.
   const profile = firestoreRequest_("get", `students/${encodeURIComponent(requester.localId)}`, idToken);
@@ -165,7 +167,7 @@ class FaceResetService {
 }
 
 function canRecoverMissingFace_(requester, idToken) {
-  if (requester.localId === SUPER_ADMIN_UID) return true;
+  if (isServerSuperAdmin_(requester)) return true;
   const profile = firestoreRequest_("get", `students/${encodeURIComponent(requester.localId)}`, idToken);
   return profile?.fields?.active?.booleanValue === true && profile?.fields?.role?.stringValue === "head_admin";
 }

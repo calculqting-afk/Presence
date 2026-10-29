@@ -5,7 +5,7 @@ const { getAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 
 initializeApp();
-const SUPER_ADMIN_UID = "8uEjAk72BLWKjvnQJEatBdeVAi02";
+// Super Admin authority is assigned only through trusted Firebase custom claims.
 const ROLE = Object.freeze({
   SUPER_ADMIN: "super_admin",
   HEAD_ADMIN: "head_admin",
@@ -42,8 +42,11 @@ async function notifyRoles(firestore, roles, notification) {
     .map((snapshot) => ({ uid: snapshot.id, ...snapshot.data() }))
     .filter((profile) => roles.includes(profile.role));
   if (roles.includes(ROLE.SUPER_ADMIN)) {
-    const bootstrap = await getAuth().getUser(SUPER_ADMIN_UID).catch((error) => error.code === "auth/user-not-found" ? null : Promise.reject(error));
-    if (bootstrap && !recipients.some((recipient) => recipient.uid === bootstrap.uid)) recipients.push({ uid: bootstrap.uid, role: ROLE.SUPER_ADMIN });
+    const admins = await firestore.collection("superAdminAccounts").where("active", "==", true).get();
+    for (const entry of admins.docs) {
+      const account = await getAuth().getUser(entry.id);
+      if (!account.disabled && account.customClaims?.superAdmin === true && !recipients.some(recipient => recipient.uid === entry.id)) recipients.push({uid:entry.id, role:ROLE.SUPER_ADMIN});
+    }
   }
   await Promise.all(recipients.map((recipient) => firestore.collection("notifications").add(notificationData(recipient, notification))));
 }
@@ -290,16 +293,21 @@ function studentIdToEmail(studentId) {
 async function requireAdmin(request) {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in is required.");
   const role = request.auth.token.role;
-  const isSuperAdmin = request.auth.uid === SUPER_ADMIN_UID;
+  const isSuperAdmin = request.auth.token.superAdmin === true;
   if (role !== ROLE.HEAD_ADMIN && !isSuperAdmin) {
     throw new HttpsError("permission-denied", "Only the Head Admin can manage student accounts.");
   }
 }
 
-function requireSuperAdmin(request) {
+async function requireSuperAdmin(request) {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in is required.");
-  if (request.auth.uid !== SUPER_ADMIN_UID) {
+  if (request.auth.token.superAdmin !== true) {
     throw new HttpsError("permission-denied", "Only the Super Admin can manage roles.");
+  }
+  const account = await getAuth().getUser(request.auth.uid);
+  if (account.disabled || account.customClaims?.superAdmin !== true || request.auth.token.auth_time < Number(account.tokensValidAfterTime ? Date.parse(account.tokensValidAfterTime) / 1000 : 0)
+    || !Number.isFinite(request.auth.token.auth_time) || Date.now() / 1000 - request.auth.token.auth_time >= 300) {
+    throw new HttpsError('unauthenticated', 'Confirm your admin password again.');
   }
 }
 
@@ -318,6 +326,7 @@ exports.assignUserRole = onCall(async (request) => {
     throw error;
   });
   const previousRole = target.customClaims?.role || ROLE.STUDENT;
+  if (target.customClaims?.superAdmin === true) throw new HttpsError('permission-denied', 'Super Admin accounts cannot be managed as students.');
   const nextClaims = { ...(target.customClaims || {}), role };
   await firebaseAuth.setCustomUserClaims(uid, nextClaims);
   await firestore.doc(`students/${uid}`).set({ role, roleUpdatedAt: FieldValue.serverTimestamp(), roleUpdatedBy: request.auth.uid }, { merge: true });
@@ -333,7 +342,7 @@ exports.assignUserRole = onCall(async (request) => {
   return { ok: true, role };
 });
 
-function validateStudent(data) {
+async function validateStudent(data) {
   const required = ["accountId", "firstName", "lastName", "section"];
   const allowedSections = new Set(["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"]);
   for (const field of required) {
@@ -344,7 +353,7 @@ function validateStudent(data) {
   if (!/^[A-Za-z0-9._-]+$/.test(data.accountId)) {
     throw new HttpsError("invalid-argument", "Student ID may only use letters, numbers, dots, dashes, and underscores.");
   }
-  if (data.uid === SUPER_ADMIN_UID) {
+  if (data.uid && (await getAuth().getUser(data.uid).catch(() => null))?.customClaims?.superAdmin === true) {
     throw new HttpsError("invalid-argument", "The protected Super Admin account cannot be managed as a student.");
   }
   if (!allowedSections.has(data.section)) {
@@ -541,7 +550,7 @@ exports.manageStudent = onCall(async (request) => {
     const firestore = getFirestore();
 
     if (action === "delete") {
-      if (request.auth.uid !== SUPER_ADMIN_UID) {
+      if (request.auth.token.superAdmin !== true) {
         throw new HttpsError("permission-denied", "Only the Super Admin can delete student accounts.");
       }
       if (!data.uid) throw new HttpsError("invalid-argument", "Student UID is required.");
@@ -556,7 +565,7 @@ exports.manageStudent = onCall(async (request) => {
       return { ok: true };
     }
 
-    validateStudent(data.student || {});
+    await validateStudent(data.student || {});
     const student = data.student;
     const authEmail = studentIdToEmail(student.accountId);
     const accountIdKey = student.accountId.trim().toLowerCase();

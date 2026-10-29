@@ -1,5 +1,7 @@
 # Fixed role permissions
 
+Super Admin authority comes from the server-issued Firebase `superAdmin: true` claim, not a built-in UID, email or editable student role. Only trusted Firebase administration can grant it.
+
 The policy lives in `assets/js/core/permissions.js`. It is a reviewed code policy, not a user-editable toggle screen. Navigation, buttons and action handlers use that map. Firestore independently enforces database operations; changing only the JavaScript map does **not** grant database permission.
 
 | Action | Super Admin | Head Admin | Attendance Manager | Student Manager |
