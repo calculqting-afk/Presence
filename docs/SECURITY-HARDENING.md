@@ -1,5 +1,9 @@
 # Security hardening — 2026-10-29
 
+## Production activation
+
+The stricter Firestore Rules were activated on 2026-10-29 following the user's explicit request. Server-owned face acknowledgements, restricted student-ID index reads and mandatory backend location proofs for geofenced attendance are now enforced. APK v1.8.8 or newer is required for geofenced student attendance. The activation order below is retained as the setup/migration reference, not a statement that enforcement is still pending.
+
 Students can still edit their own personal information, including course and section. That is an intentional product decision. Captured event rosters remain authoritative where available; section changes can affect eligibility for legacy/unrostered events and some newly enrolled profiles.
 
 ## Changes
@@ -19,7 +23,7 @@ Students can still edit their own personal information, including course and sec
 4. Publish the updated website and release/install an APK containing `StudentAttendanceController`'s proof request. Verify real-device GPS check-in and checkout, login, expired-password handling and logout/cache cleanup.
 5. Only then deploy the stricter `firestore.rules`. Older APKs do not request GPS proofs and will be denied attendance writes for geofenced events after enforcement. They need the updated APK. Do not deploy the GPS Rules while deliberately keeping those old APKs in attendance use. Old face-upload script versions also cannot acknowledge uploads once the new face Rules are enforced.
 
-The implementation leaves stricter Rules staged until this rollout is ready. Worker deployment, Apps Script deployment, website push, APK release and Rules enforcement are separate operations; verify each rather than assuming a GitHub push activates everything.
+Worker deployment, Apps Script deployment, website push, APK release and Rules enforcement are separate operations; verify each rather than assuming a GitHub push activates everything. Rules enforcement was subsequently activated as recorded above; real-device and Apps Script acceptance checks remain separate.
 
 ## Verification
 

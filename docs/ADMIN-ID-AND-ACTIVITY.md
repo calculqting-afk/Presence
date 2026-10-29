@@ -14,7 +14,7 @@ Student ID fields in student/admin profile editors are read-only. Server Rules r
 
 ## Activity History
 
-Cutoff-based label adjustments are also recorded as **Arrival recalculated**. See [arrival recalculation](ARRIVAL-RECALCULATION.md) for preview, protected records and retry behavior.
+Cutoff-based label adjustments are also recorded as **Arrival recalculated**, with preview, protected-record checks and retry handling.
 
 **Super Admin only → Activity History**. Search loaded records by reviewer name/UID, student name/UID/old or new ID, event, or action. Apply dates to query the server; dates use Philippine time. Each request loads at most 50 entries from each of `activityLogs` and `auditLogs`; use **Load older activity** to extend searches. Refresh retrieves new activity. Search is over loaded records, not a server-wide full-text search.
 
@@ -40,9 +40,3 @@ datastore.entities.delete
 The two additions to the password-reset role are `datastore.entities.list` (duplicate checks) and `datastore.entities.delete` (obsolete ID/request/lock removal). IAM grants are project/database scoped, not individual-document scoped; Worker authorization is essential. The notification service account stays separate. No new Firebase billing upgrade is introduced.
 
 Set a cryptographically random, at least 32-character **`ID_PREVIEW_SECRET`** with `wrangler secret put ID_PREVIEW_SECRET --config workers/admin-api/wrangler.jsonc`. Keep it outside Git/browser/APK assets. Existing `FIREBASE_SERVICE_ACCOUNT` stays a Cloudflare secret. Deploy tested Firestore Rules and Worker code, verify IAM/query/transaction access, then enable `ID_CORRECTION_ENABLED=true` and redeploy. `/health` reports the flag without exposing credentials. Leave the flag false until setup passes. Do not test by silently changing a real student's ID.
-
-## Validation
-
-`npm.cmd test` includes preview integrity/expiry, duplicate/role/reset rejection, preservation of password and records, interrupted recovery, idempotent completion, and activity filtering/snapshot tests. `tests/admin-activity.emulator.cjs` checks atomic event/session/role/attendance history, forged entries, history privacy/immutability, identity-field protection and correction locks against a local demo Firestore emulator. Existing provisioning, password-reset and correction-request emulator suites should also pass.
-
-Physical-browser testing and a deliberately selected test-account walkthrough are separate from automated checks. Website changes do not update installed APK assets; build/release an APK separately when requested.
