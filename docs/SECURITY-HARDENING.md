@@ -18,9 +18,9 @@ The existing account was given the claim through the trusted local operator help
 
 Operator recovery/migration: configure `PRESENCE_SERVICE_ACCOUNT_KEY` privately, run `node tools/migrate-super-admin.cjs --uid EXISTING_ADMIN_UID` to preview, and add `--apply` only for the verified existing administrator profile. Preserve other claims. On removal/recovery, use trusted Firebase administration to remove the claim and revoke refresh tokens; old signed tokens can remain valid in Rules until expiry, while the Worker rejects removed current claims immediately. This migration does not revoke existing sessions.
 
-Website routing forces token refresh to receive the new claim. Existing APKs continue to use their packaged UI; the latest admin password modal needs a later APK build. Existing accounts and attendance are preserved. The legacy Functions source was updated but was not deployed or enabled as a new paid service.
+Website routing forces token refresh to receive the new claim. The admin password modal and claim-based login are included in APK v1.8.9. Existing APKs retain their packaged UI until the update is installed. Existing accounts and attendance are preserved. The legacy Functions source was updated but was not deployed or enabled as a new paid service.
 
-Apps Script is separately deployed. Replace Code.gs with the complete `docs/google-apps-script-face-upload.js`, retain all Script Properties, then edit the existing deployment and choose New version. The local source uses Firebase's authenticated account lookup to read current custom claims. Browser automation was unable to safely determine the current URL, so the Apps Script deployment is not verified here.
+Apps Script is separately deployed. Replace Code.gs with the complete `docs/google-apps-script-face-upload.js`, retain all Script Properties, then edit the existing deployment and choose New version. The local source uses Firebase's authenticated account lookup to read current custom claims. The operator reported completing the Apps Script deployment on 2026-10-30. Browser automation could not safely determine the current URL, so live face upload/reset acceptance has not been independently verified here.
 
 ## Production activation
 
