@@ -3,6 +3,7 @@ import { doc, getDoc, serverTimestamp, setDoc, updateDoc, writeBatch } from "htt
 import { CoursePolicy } from '../core/CoursePolicy.js';
 import { ageLabel, hometownFields, hometownLabel } from '../core/StudentPersonalInfo.js';
 import { GenderPolicy } from '../core/GenderPolicy.js';
+import { PolicyAgreementPolicy as Policy } from '../core/PolicyAgreementPolicy.js';
 
 export class RegistrationController {
   constructor({ document = globalThis.document, db, provisioningAuth, provisioningDb, studentIdToEmail, onSuccess = () => {} } = {}) {
@@ -100,7 +101,14 @@ export class RegistrationController {
     if (!GenderPolicy.valid(values.gender)) return 'Choose Male, Female, or Not specified for gender.';
     try { hometownFields(values); } catch (error) { return error.message; }
     if (String(values.password).length < 8) return 'Use a password with at least 8 characters.';
+    if (values.policyAgreement !== Policy.version) return Policy.message;
     return '';
+  }
+
+  async addAgreement(batch, uid) {
+    const reference = doc(this.provisioningDb, ...Policy.path(uid));
+    const existing = await getDoc(reference);
+    if (!existing.exists()) batch.set(reference, Policy.receipt(uid, serverTimestamp()));
   }
 
   async submitRegistration(event) {
@@ -130,22 +138,28 @@ export class RegistrationController {
           if (!previous.exists() || previous.data().uid !== credential.user.uid || previous.data().status !== 'declined') {
             throw new Error('This Student ID already has an account or a pending registration request.');
           }
-          await updateDoc(doc(this.provisioningDb, 'registrationRequests', accountIdKey), {
+          const batch = writeBatch(this.provisioningDb);
+          await this.addAgreement(batch, credential.user.uid);
+          batch.update(doc(this.provisioningDb, 'registrationRequests', accountIdKey), {
             ...hometownFields(values), birthday: values.birthday, firstName: values.firstName.trim(), lastName: values.lastName.trim(), gender: GenderPolicy.normalize(values.gender),
             course: CoursePolicy.normalize(values.course), section: values.section, status: 'pending', updatedAt: serverTimestamp()
           });
+          await batch.commit();
           form.reset(); this.wizard?.complete(); this.close(this.registrationDialog, true);
           this.onSuccess('Registration resubmitted', 'Your request is pending administrator approval again.');
           return;
         } finally { await signOut(this.provisioningAuth); }
       }
       try {
-        await setDoc(doc(this.provisioningDb, 'registrationRequests', accountIdKey), {
+        const batch = writeBatch(this.provisioningDb);
+        await this.addAgreement(batch, credential.user.uid);
+        batch.set(doc(this.provisioningDb, 'registrationRequests', accountIdKey), {
           uid: credential.user.uid, accountId: values.accountId.trim(), accountIdKey,
           ...hometownFields(values), birthday: values.birthday, firstName: values.firstName.trim(), lastName: values.lastName.trim(), gender: GenderPolicy.normalize(values.gender),
           course: CoursePolicy.normalize(values.course), section: values.section, status: 'pending',
           requestedAt: serverTimestamp(), updatedAt: serverTimestamp()
         });
+        await batch.commit();
       } finally { await signOut(this.provisioningAuth); }
       form.reset(); this.wizard?.complete(); this.close(this.registrationDialog, true);
       this.onSuccess('Registration submitted', 'Your account is waiting for administrator approval. Use the same Student ID and password after approval.');
@@ -230,6 +244,7 @@ export class RegistrationWizard {
     for (const field of controls) {
       field.setCustomValidity('');
       if (field.required && !String(field.value || '').trim()) field.setCustomValidity('Please fill out this field.');
+      if (field.name === 'policyAgreement' && !field.checked) field.setCustomValidity(Policy.message);
     }
     if (index === 2) {
       const password = this.form.elements.namedItem('password'), confirm = this.form.elements.namedItem('confirmPassword');
@@ -275,7 +290,7 @@ export class RegistrationWizard {
     this.nextButton.disabled = this.backButton.disabled = busy;
   }
   clearPasswords() { for (const name of ['password', 'confirmPassword']) { const field = this.form?.elements?.namedItem?.(name); if (field) field.value = ''; } }
-  reset() { if (!this.active) return; this.clearPasswords(); this.setBusy(false); this.showStep(0, false); }
+  reset() { if (!this.active) return; this.clearPasswords(); const agreement = this.form.elements.namedItem('policyAgreement'); if (agreement) agreement.checked = false; this.setBusy(false); this.showStep(0, false); }
   complete() {
     if (!this.active) return;
     this.indicators.forEach(indicator => { indicator.classList.remove('is-current'); indicator.classList.add('is-complete'); indicator.removeAttribute('aria-current'); });

@@ -16,15 +16,16 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261101-skeleton">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261101-navigation">
   <link rel="stylesheet" href="../assets/css/student-attendance-summary.css?v=20261025-grouped">
   <link rel="stylesheet" href="../assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261024-transparent-toast">
   <link rel="stylesheet" href="../assets/css/button-loading.css?v=20261010-auth-progress">
   <link rel="stylesheet" href="../assets/css/survey.css?v=20261011-survey-archive">
   <link rel="stylesheet" href="../assets/css/hometown-picker.css?v=20261101">
+  <link rel="stylesheet" href="../assets/css/legal.css?v=20261101">
 </head>
-<body data-dashboard="student" data-dashboard-loading>
+<body data-dashboard="student" data-dashboard-loading data-policy-enabled>
   <div class="app-shell">
     <aside class="sidebar" style="--nav-count: 9">
       <a class="brand" href="../index.html" data-dashboard-home><span class="brand-mark"><span></span></span><span>Presence</span></a>
@@ -152,11 +153,12 @@
               <label class="face-consent" id="faceConsentLabel"><input id="faceRegistrationConsent" type="checkbox"> <span>I confirm that I consent to using this photo for face registration and attendance check-ins.</span></label>
               <div class="camera-actions"><button class="primary-button" id="startCamera" type="button">Start camera</button><button class="outline-button" id="captureFace" type="button" disabled>Capture photo</button><button class="outline-button" id="retakeFace" type="button" hidden>Retake</button></div>
             </article>
-            <article class="panel"><div class="panel-head"><div><h3>Before you begin</h3><p>A clear image gives better attendance matching.</p></div></div><div class="info-list"><div class="info-item"><span class="info-number">01</span><div><strong>Remove face coverings</strong><small>Glasses are okay, but masks and hats should be removed.</small></div></div><div class="info-item"><span class="info-number">02</span><div><strong>Face the camera directly</strong><small>Keep your full face visible and centered in the guide.</small></div></div><div class="info-item"><span class="info-number">03</span><div><strong>Use good lighting</strong><small>Avoid strong backlight or very dark environments.</small></div></div></div><p class="notice">Prototype privacy note: this camera preview does not upload or permanently store an image. Production face data requires consent, encryption, and a clear school retention policy.</p></article>
+            <article class="panel"><div class="panel-head"><div><h3>Before you begin</h3><p>A clear image gives better attendance matching.</p></div></div><div class="info-list"><div class="info-item"><span class="info-number">01</span><div><strong>Remove face coverings</strong><small>Glasses are okay, but masks and hats should be removed.</small></div></div><div class="info-item"><span class="info-number">02</span><div><strong>Face the camera directly</strong><small>Keep your full face visible and centered in the guide.</small></div></div><div class="info-item"><span class="info-number">03</span><div><strong>Use good lighting</strong><small>Avoid strong backlight or very dark environments.</small></div></div></div><p class="notice">Camera preview is local. Submitting a face-registration photo uploads it through the configured Google Drive service. See the Privacy Policy in Profile for storage and removal details.</p></article>
           </div>
         </section>
 
         <section class="view-section" data-section="profile" hidden>
+          <nav class="policy-profile-links" aria-label="Privacy and terms"><a href="privacy-policy.html" target="_blank" rel="noopener">Privacy Policy</a><a href="terms-and-conditions.html" target="_blank" rel="noopener">Terms and Conditions</a></nav>
           <div class="section-head"><div><p class="eyebrow">Your information</p><h2>Profile</h2><p>Review and update your personal information.</p></div><span class="badge orange" id="profileStatusBadge">Pending registration</span></div>
           <div id="studentProfileContent"><article class="panel"><div class="empty-state profile-empty"><div class="empty-icon">○</div><strong>Profile not registered yet</strong><p>Ask your school administrator to register your student information. Refresh this page after they save it.</p></div></article></div>
         </section>

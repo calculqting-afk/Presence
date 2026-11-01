@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261101-skeleton">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261101-navigation">
   <link rel="stylesheet" href="../assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261024-transparent-toast">
   <link rel="stylesheet" href="../assets/css/button-loading.css?v=20261010-auth-progress">
@@ -24,8 +24,9 @@
   <link rel="stylesheet" href="../assets/css/attendance-report.css?v=20261026">
   <link rel="stylesheet" href="../assets/css/event-audience.css?v=20261020">
   <link rel="stylesheet" href="../assets/css/hometown-picker.css?v=20261101">
+  <link rel="stylesheet" href="../assets/css/legal.css?v=20261101">
 </head>
-<body data-dashboard="admin" data-dashboard-loading>
+<body data-dashboard="admin" data-dashboard-loading data-policy-enabled>
   <div class="app-shell">
     <aside class="sidebar" style="--nav-count: 14">
       <a class="brand" href="../index.html" data-dashboard-home><span class="brand-mark"><span></span></span><span>Presence</span></a>
@@ -260,6 +261,7 @@
           <article class="panel correction-requests-panel" id="adminCorrectionRequests"><p>Loading correction requests…</p></article>
         </section>
         <section class="view-section" data-section="profile" hidden>
+          <nav class="policy-profile-links" aria-label="Privacy and terms"><a href="privacy-policy.html" target="_blank" rel="noopener">Privacy Policy</a><a href="terms-and-conditions.html" target="_blank" rel="noopener">Terms and Conditions</a></nav>
           <div class="section-head"><div><p class="eyebrow">Administrator account</p><h2>Profile</h2><p>Update your information and see changes immediately.</p></div><span class="badge green">Active</span></div>
           <article class="panel">
             <div class="panel-head"><div><h3>Profile information</h3><p>Your administrator email remains fixed for account security.</p></div></div>

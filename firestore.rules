@@ -606,6 +606,20 @@ service cloud.firestore {
       allow read, delete: if false;
     }
 
+    // A user may create only their own current-version acknowledgement. Receipts
+    // are immutable and carry a server timestamp; this grants no account role.
+    match /policyAcceptances/{userUid}/versions/{version} {
+      allow get: if signedIn() && request.auth.uid == userUid;
+      allow create: if signedIn() && request.auth.uid == userUid
+        && version == "2026-11-01-v1"
+        && request.resource.data.keys().hasOnly(["uid", "version", "termsAccepted", "privacyAcknowledged", "acceptedAt"])
+        && request.resource.data.keys().hasAll(["uid", "version", "termsAccepted", "privacyAcknowledged", "acceptedAt"])
+        && request.resource.data.uid == userUid && request.resource.data.version == version
+        && request.resource.data.termsAccepted == true && request.resource.data.privacyAcknowledged == true
+        && request.resource.data.acceptedAt == request.time;
+      allow list, update, delete: if false;
+    }
+
     match /superAdminAccounts/{adminUid} {
       allow read, write: if false;
     }

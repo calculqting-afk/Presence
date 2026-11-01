@@ -2,6 +2,7 @@ import { AttendanceRevocationController } from '../controllers/AttendanceRevocat
 import { AdminRecentLogin } from '../controllers/AdminRecentLogin.js';
 import { attendanceTimeIssue, attendanceReviewLabel } from '../core/AttendanceTimePolicy.js';
 import { ControllerScope } from '../core/ControllerScope.js';
+import { StableListRenderer } from '../core/StableListRenderer.js';
 import { StudentIdCorrectionController } from '../controllers/StudentIdCorrectionController.js';
 import { ActivityHistoryController } from '../controllers/ActivityHistoryController.js';
 import { ArrivalRecalculationController } from '../controllers/ArrivalRecalculationController.js';
@@ -304,14 +305,14 @@ export class AdminDashboard {
       },
       render: (records, state) => {
         if (state.chooseEvent) {
-          dashboard.document.querySelector('#adminAttendanceLine').innerHTML = '<div class="attendance-empty" role="status"><h3>Choose an event to view attendance records.</h3><p>Select an event above to get started.</p></div>';
+          StableListRenderer.render(dashboard.document.querySelector('#adminAttendanceLine'), '<div class="attendance-empty" role="status"><h3>Choose an event to view attendance records.</h3><p>Select an event above to get started.</p></div>');
           return;
         }
         if (dashboard.historyController.combined() && records.length) {
           const groups = new Map();
           for (const record of records) { const key = record.studentUid || record.id; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(record); }
-          dashboard.document.querySelector('#adminAttendanceLine').innerHTML = [...groups.values()].map(group => `<section class="attendance-student-sessions" aria-label="Student morning and afternoon records">${group.map(record => `<div><p class="attendance-session-label">${AttendanceViews.label(dashboard.events.find(event => event.id === record.eventId) || record)}</p>${dashboard.attendanceLineMarkup([record])}</div>`).join('')}</section>`).join('');
-        } else dashboard.document.querySelector('#adminAttendanceLine').innerHTML = records.length ? dashboard.attendanceLineMarkup(records) : AttendanceToolbarController.emptyState(state);
+          StableListRenderer.render(dashboard.document.querySelector('#adminAttendanceLine'), [...groups.values()].map(group => `<section class="attendance-student-sessions" data-render-key="${escapeHtml(group[0].studentUid || group[0].id)}" aria-label="Student morning and afternoon records">${group.map(record => `<div><p class="attendance-session-label">${AttendanceViews.label(dashboard.events.find(event => event.id === record.eventId) || record)}</p>${dashboard.attendanceLineMarkup([record])}</div>`).join('')}</section>`).join(''));
+        } else StableListRenderer.render(dashboard.document.querySelector('#adminAttendanceLine'), records.length ? dashboard.attendanceLineMarkup(records) : AttendanceToolbarController.emptyState(state));
       }
     });
     dashboard.historyController.initialize();
@@ -1043,14 +1044,15 @@ export class AdminDashboard {
     const dashboard = this;
     if (!records.length) return '<div class="empty-state">No attendance activity yet.</div>';
     return records.map(record => {
+      const renderKey = escapeHtml(record.id || `${record.studentUid}:${record.eventId}`);
       const student = dashboard.students.find(item => item.uid === record.studentUid);
       const studentName = student ? [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ") : record.studentId || "Student";
       const avatar = student?.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student?.firstName || studentName, student?.lastName || ""));
       if (!student) {
         const section = dashboard.events.find(event => event.id === record.eventId)?.attendanceRoster?.[record.studentUid] ?? record.rosterSection ?? record.section;
-        return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>Deleted/missing student profile</strong><small>${escapeHtml(record.studentId || 'Student ID unavailable')}${section ? ` · ${escapeHtml(section)}` : ''}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || 'Attendance event')}</strong><small>${escapeHtml(record.eventDate || 'Date unavailable')}</small></div><div class="attendance-line-times"><div><span>IN</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedInAt || record.attendedAt))}</strong>${AttendanceRelativeTime.render(record.checkedInAt || record.attendedAt, "in")}</div><div><span>OUT</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong>${AttendanceRelativeTime.render(record.checkedOutAt, "out")}</div></div><div class="attendance-line-status"><span class="badge orange">Needs review — profile missing</span></div></article>`;
+        return `<article class="attendance-line-item" data-render-key="${renderKey}"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>Deleted/missing student profile</strong><small>${escapeHtml(record.studentId || 'Student ID unavailable')}${section ? ` · ${escapeHtml(section)}` : ''}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || 'Attendance event')}</strong><small>${escapeHtml(record.eventDate || 'Date unavailable')}</small></div><div class="attendance-line-times"><div><span>IN</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedInAt || record.attendedAt))}</strong>${AttendanceRelativeTime.render(record.checkedInAt || record.attendedAt, "in")}</div><div><span>OUT</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong>${AttendanceRelativeTime.render(record.checkedOutAt, "out")}</div></div><div class="attendance-line-status"><span class="badge orange">Needs review — profile missing</span></div></article>`;
       }
-      if (record.rosterUnverified) return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || '')} · ${escapeHtml(record.rosterSection || student?.section || '')}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName)}</strong><small>${escapeHtml(record.eventDate)}</small></div><div class="attendance-line-times"><p class="attendance-no-record">No attendance recorded</p></div><div class="attendance-line-status"><span class="badge orange">${record.assignmentUnverified ? 'Needs review — assigned after attendance opened' : 'Needs review — registration date unknown'}</span></div></article>`;
+      if (record.rosterUnverified) return `<article class="attendance-line-item" data-render-key="${renderKey}"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || '')} · ${escapeHtml(record.rosterSection || student?.section || '')}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName)}</strong><small>${escapeHtml(record.eventDate)}</small></div><div class="attendance-line-times"><p class="attendance-no-record">No attendance recorded</p></div><div class="attendance-line-status"><span class="badge orange">${record.assignmentUnverified ? 'Needs review — assigned after attendance opened' : 'Needs review — registration date unknown'}</span></div></article>`;
       const checkedInAt = record.checkedInAt || record.attendedAt;
       const completed = Boolean(record.checkedOutAt);
       const absent = record.status === 'absent';
@@ -1058,7 +1060,7 @@ export class AdminDashboard {
       const inLabel = absent || partial ? 'ABSENT IN' : record.arrivalStatus === 'late' ? 'LATE IN' : 'IN';
       const timeIssue = attendanceTimeIssue(record, dashboard.events.find(event => event.id === record.eventId));
       const completionLabel = timeIssue ? attendanceReviewLabel(timeIssue) : record.pending ? 'Not yet checked in' : absent ? 'Absent — no attendance' : partial ? 'Partial attendance' : completed ? 'Completed' : dashboard.summaryService.needsReview(record, dashboard.events.find(event => event.id === record.eventId)) ? 'Needs review — missed checkout' : 'Checked in';
-      return `<article class="attendance-line-item"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || record.studentId || "Student ID unavailable")}${student?.section ? ` · ${escapeHtml(student.section)}` : ""}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><small>${escapeHtml(record.eventDate || "Date unavailable")}</small></div><div class="attendance-line-times"><div class="${record.arrivalStatus === 'late' ? 'attendance-time-late' : ''}"><span>${inLabel}</span><strong>${escapeHtml(absent || partial ? 'Not recorded' : formatAttendanceTimestamp(checkedInAt))}</strong>${!absent && !partial ? AttendanceRelativeTime.render(checkedInAt, 'in') : ''}</div><div><span>OUT</span><strong>${escapeHtml(absent ? 'Not recorded' : formatAttendanceTimestamp(record.checkedOutAt))}</strong>${!absent ? AttendanceRelativeTime.render(record.checkedOutAt, 'out') : ''}</div><div><span>Duration</span><strong>${escapeHtml(checkedInAt ? attendanceDuration(checkedInAt, record.checkedOutAt) : 'Not available')}</strong></div></div><div class="attendance-line-status">${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}${(!record.displayOnly || (absent && student.active !== false)) && dashboard.can("correctAttendance") ? `<button class="small-button" type="button" data-correct-attendance="${escapeHtml(record.id)}">Correct</button>` : ""}${!record.displayOnly && dashboard.can("correctAttendance") ? `<button class="small-button danger" type="button" data-revoke-attendance="${escapeHtml(record.id)}">Revoke</button>` : ""}${absent || partial ? '<span class="badge orange">Absent in</span>' : record.pending ? '' : arrivalStatusBadge(record.arrivalStatus)}<span class="badge ${absent || partial || dashboard.summaryService.needsReview(record, dashboard.events.find(event => event.id === record.eventId)) ? "orange" : completed ? "green" : "blue"}">${completionLabel}</span></div>${record.recordSource === "admin-corrected" ? `<p class="attendance-correction-reason"><span>Correction reason:</span> ${escapeHtml(record.correctionReason || "Reason not recorded")}</p>` : ""}</article>`;
+      return `<article class="attendance-line-item" data-render-key="${renderKey}"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || record.studentId || "Student ID unavailable")}${student?.section ? ` · ${escapeHtml(student.section)}` : ""}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><small>${escapeHtml(record.eventDate || "Date unavailable")}</small></div><div class="attendance-line-times"><div class="${record.arrivalStatus === 'late' ? 'attendance-time-late' : ''}"><span>${inLabel}</span><strong>${escapeHtml(absent || partial ? 'Not recorded' : formatAttendanceTimestamp(checkedInAt))}</strong>${!absent && !partial ? AttendanceRelativeTime.render(checkedInAt, 'in') : ''}</div><div><span>OUT</span><strong>${escapeHtml(absent ? 'Not recorded' : formatAttendanceTimestamp(record.checkedOutAt))}</strong>${!absent ? AttendanceRelativeTime.render(record.checkedOutAt, 'out') : ''}</div><div><span>Duration</span><strong>${escapeHtml(checkedInAt ? attendanceDuration(checkedInAt, record.checkedOutAt) : 'Not available')}</strong></div></div><div class="attendance-line-status">${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}${(!record.displayOnly || (absent && student.active !== false)) && dashboard.can("correctAttendance") ? `<button class="small-button" type="button" data-correct-attendance="${escapeHtml(record.id)}">Correct</button>` : ""}${!record.displayOnly && dashboard.can("correctAttendance") ? `<button class="small-button danger" type="button" data-revoke-attendance="${escapeHtml(record.id)}">Revoke</button>` : ""}${absent || partial ? '<span class="badge orange">Absent in</span>' : record.pending ? '' : arrivalStatusBadge(record.arrivalStatus)}<span class="badge ${absent || partial || dashboard.summaryService.needsReview(record, dashboard.events.find(event => event.id === record.eventId)) ? "orange" : completed ? "green" : "blue"}">${completionLabel}</span></div>${record.recordSource === "admin-corrected" ? `<p class="attendance-correction-reason"><span>Correction reason:</span> ${escapeHtml(record.correctionReason || "Reason not recorded")}</p>` : ""}</article>`;
     }).join("");
   }
   renderAttendanceLine() {
@@ -1067,13 +1069,13 @@ export class AdminDashboard {
     const filter = dashboard.document.querySelector("#adminAttendanceEventFilter");
     const selectedEvent = filter.value || "";
     const eventOptions = AttendanceViews.groups(dashboard.events).map(group => group[0]).map(event => `<option value="${escapeHtml(event.id)}">${escapeHtml(AttendanceViews.title(event))}${event.date ? ` · ${escapeHtml(event.date)}` : ""}</option>`).join("");
-    filter.innerHTML = `<option value="">Choose an event…</option>${eventOptions}`;
+    StableListRenderer.render(filter, `<option value="">Choose an event…</option>${eventOptions}`);
     const previous = dashboard.events.find(event => event.id === selectedEvent);
     filter.value = previous ? AttendanceViews.related(previous,dashboard.events)[0].id : "";
     dashboard.historyController?.syncSessionControl();
     const records = dashboard.attendance.filter(record => record.eventDate === DailyAttendanceClock.dateKey()).sort((first, second) => (second.checkedInAt?.seconds || second.attendedAt?.seconds || 0) - (first.checkedInAt?.seconds || first.attendedAt?.seconds || 0));
     if (activeView === 'attendance-line') dashboard.historyController.draw();
-    dashboard.document.querySelector("#adminDashboardAttendanceLine").innerHTML = dashboard.attendanceLineMarkup(records.slice(0, 5));
+    StableListRenderer.render(dashboard.document.querySelector("#adminDashboardAttendanceLine"), dashboard.attendanceLineMarkup(records.slice(0, 5)));
   }
   renderAdminEvents() {
     const dashboard = this;
@@ -1277,7 +1279,7 @@ export class AdminDashboard {
     const search = dashboard.studentSearch.value.trim().toLowerCase();
     const updateFilterOptions = (select, label, values) => {
       const currentValue = select.value;
-      select.innerHTML = `<option value="all">All ${label}</option>${values.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`;
+      StableListRenderer.render(select, `<option value="all">All ${label}</option>${values.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`);
       select.value = values.includes(currentValue) ? currentValue : "all";
     };
     const courses = [...new Set(dashboard.students.map(student => student.course).filter(Boolean))].sort();
@@ -1327,8 +1329,8 @@ export class AdminDashboard {
     dashboard.nextStudentPage.disabled = dashboard.studentPage >= totalPages;
     if (!filtered.length) {
       const emptyMessage = dashboard.students.length ? "No students match the selected filters." : "No students have been registered yet.";
-      dashboard.studentTableBody.innerHTML = `<tr><td colspan="6"><div class="empty-state">${emptyMessage}</div></td></tr>`;
-      dashboard.studentMobileCards.innerHTML = `<div class="empty-state">${emptyMessage}</div>`;
+      StableListRenderer.render(dashboard.studentTableBody, `<tr><td colspan="6"><div class="empty-state">${emptyMessage}</div></td></tr>`);
+      StableListRenderer.render(dashboard.studentMobileCards, `<div class="empty-state">${emptyMessage}</div>`);
       dashboard.renderSelectedStudent();
       dashboard.renderAdminAttendance();
       return;
@@ -1339,7 +1341,7 @@ export class AdminDashboard {
       const hasFaceRegistration = dashboard.faceRegistrationsByUid.get(student.uid)?.registered === true;
       const role = student.role === "viewer" ? "student" : student.role || "student";
       const roleControl = dashboard.can('changeRoles') ? `<select class="role-select" data-role-select="${escapeHtml(student.uid)}" aria-label="Role for ${escapeHtml(student.accountId)}">${Object.entries(ASSIGNABLE_ROLE_LABELS).map(([value, label]) => `<option value="${value}"${value === role ? " selected" : ""}>${label}</option>`).join("")}</select>` : `<span class="badge blue">${escapeHtml(roleLabel(role))}</span>`;
-      return `<tr><td><div class="student-cell"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))}</strong><small>${escapeHtml(student.accountId)}</small></div></div></td><td><strong>${escapeHtml(student.course || "Not assigned")}</strong><br><small>Section ${escapeHtml(student.section)}</small></td><td><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span><small class="presence-time presence-status is-${presence.status}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</small></td><td>${escapeHtml(student.email || "Not provided")}</td><td>${roleControl}</td><td><div class="table-actions">${dashboard.studentActions.render({
+      return `<tr data-render-key="${escapeHtml(student.uid)}"><td><div class="student-cell"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml([student.lastName, student.firstName, student.middleName].filter(Boolean).join(", "))}</strong><small>${escapeHtml(student.accountId)}</small></div></div></td><td><strong>${escapeHtml(student.course || "Not assigned")}</strong><br><small>Section ${escapeHtml(student.section)}</small></td><td><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span><small class="presence-time presence-status is-${presence.status}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</small></td><td>${escapeHtml(student.email || "Not provided")}</td><td>${roleControl}</td><td><div class="table-actions">${dashboard.studentActions.render({
         uid: student.uid,
         hasFaceRegistration
       })}</div></td></tr>`;
@@ -1349,14 +1351,14 @@ export class AdminDashboard {
       const avatar = student.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student.firstName, student.lastName));
       const presence = dashboard.getStudentPresence(student.uid);
       const hasFaceRegistration = dashboard.faceRegistrationsByUid.get(student.uid)?.registered === true;
-      return `<article class="student-mobile-card"><div class="student-mobile-card-head"><span class="mini-avatar">${avatar}</span><div><h3>${escapeHtml(fullName)}</h3><p>${escapeHtml(student.accountId)}</p></div><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span></div><div class="student-mobile-card-details"><div><span>Course / Section</span><strong>${escapeHtml(student.course || "Not assigned")} · ${escapeHtml(student.section || "Not assigned")}</strong></div><div><span>Live status</span><strong class="presence-status is-${presence.status}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</strong></div><div class="student-mobile-card-email"><span>Email</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div></div><button class="outline-button" type="button" data-view-student="${escapeHtml(student.uid)}">View profile</button></article>`;
+      return `<article class="student-mobile-card" data-render-key="${escapeHtml(student.uid)}"><div class="student-mobile-card-head"><span class="mini-avatar">${avatar}</span><div><h3>${escapeHtml(fullName)}</h3><p>${escapeHtml(student.accountId)}</p></div><span class="badge ${hasFaceRegistration ? "green" : "gray"}">${hasFaceRegistration ? "Registered" : "Not registered"}</span></div><div class="student-mobile-card-details"><div><span>Course / Section</span><strong>${escapeHtml(student.course || "Not assigned")} · ${escapeHtml(student.section || "Not assigned")}</strong></div><div><span>Live status</span><strong class="presence-status is-${presence.status}"><i class="presence-dot"></i>${escapeHtml(presence.label)}</strong></div><div class="student-mobile-card-email"><span>Email</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div></div><button class="outline-button" type="button" data-view-student="${escapeHtml(student.uid)}">View profile</button></article>`;
     }).join("");
     if (dashboard.studentDirectoryMediaQuery.matches) {
-      dashboard.studentTableBody.innerHTML = "";
-      dashboard.studentMobileCards.innerHTML = studentMobileMarkup;
+      StableListRenderer.render(dashboard.studentTableBody, "");
+      StableListRenderer.render(dashboard.studentMobileCards, studentMobileMarkup);
     } else {
-      dashboard.studentTableBody.innerHTML = studentTableMarkup;
-      dashboard.studentMobileCards.innerHTML = "";
+      StableListRenderer.render(dashboard.studentTableBody, studentTableMarkup);
+      StableListRenderer.render(dashboard.studentMobileCards, "");
     }
     dashboard.renderSelectedStudent();
     dashboard.renderAdminAttendance();

@@ -21,6 +21,7 @@
   <link rel="stylesheet" href="assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="assets/css/button-loading.css?v=20261010-auth-progress">
   <link rel="stylesheet" href="assets/css/hometown-picker.css?v=20261101">
+  <link rel="stylesheet" href="assets/css/legal.css?v=20261101">
 </head>
 <body>
   <div class="launch-intro" aria-hidden="true" hidden>
@@ -118,7 +119,7 @@
 
     <footer>
       <p>© 2026 Presence</p>
-      <p>Southern Leyte State University - Bontoc Campus</p>
+      <nav class="policy-footer" aria-label="Privacy and terms"><a href="pages/privacy-policy.html" target="_blank" rel="noopener">Privacy Policy</a><a href="pages/terms-and-conditions.html" target="_blank" rel="noopener">Terms and Conditions</a></nav>
     </footer>
   </div>
 
@@ -168,6 +169,7 @@
           <legend>Account security</legend>
           <div class="registration-grid"><label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><label>Confirm password<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label></div>
           <p class="registration-security-hint">Use at least 8 characters. Review your details before sending; your account still needs administrator approval.</p>
+          <label class="policy-checkbox"><input type="checkbox" name="policyAgreement" value="2026-11-01-v1" required><span>I agree to the <a href="pages/terms-and-conditions.html" target="_blank" rel="noopener">Terms and Conditions</a> and acknowledge the <a href="pages/privacy-policy.html" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>
           <p>Gender: <strong data-registration-review="gender"></strong></p>
           <dl class="registration-review" aria-label="Review registration details"><div><dt>Student ID</dt><dd data-registration-review="accountId"></dd></div><div><dt>Birthday</dt><dd data-registration-review="birthday"></dd></div><div><dt>Age</dt><dd data-registration-review="age"></dd></div><div><dt>Hometown</dt><dd data-registration-review="hometown"></dd></div><div><dt>First name</dt><dd data-registration-review="firstName"></dd></div><div><dt>Last name</dt><dd data-registration-review="lastName"></dd></div><div><dt>Course</dt><dd data-registration-review="course"></dd></div><div><dt>Section</dt><dd data-registration-review="section"></dd></div></dl>
         </fieldset>

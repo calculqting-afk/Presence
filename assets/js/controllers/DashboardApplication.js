@@ -1,5 +1,8 @@
 import { endPresenceSession } from '../core/PresenceSession.js';
 import { ControllerScope } from '../core/ControllerScope.js';
+import { PolicyAgreementController } from './PolicyAgreementController.js';
+import { PolicyAgreementPolicy as Policy } from '../core/PolicyAgreementPolicy.js';
+import { getDocFromServer } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { StudentIdentityController } from './StudentIdentityController.js';
 import { waitForUser, verifyRole, auth, signOut, wireCommonNavigation, wireNotificationCenter, applyRoleNavigation, dashboardRole, currentUserProfile, currentUserRole, updateDashboardGreeting, sessionState, db, setDoc, doc, serverTimestamp, escapeHtml, openView, showDashboardToast, initializeDashboardHistory } from '../dashboard.js?v=20261011-optimized';
 import { hasPermission } from '../core/permissions.js?v=20261011-optimized';
@@ -61,6 +64,22 @@ export class DashboardApplication {
     if (dashboardRole === 'student') {
       this.identity.save(currentUser.uid, currentUserProfile);
       this.identity.render(currentUserProfile);
+    }
+    if (this.document.body.hasAttribute?.('data-policy-enabled')) {
+      const reference = doc(db, ...Policy.path(currentUser.uid));
+      this.agreement = new PolicyAgreementController({ document: this.document, window: this.window, uid: currentUser.uid,
+        read: async () => { const snapshot = await getDocFromServer(reference); return snapshot.exists() ? snapshot.data() : null; },
+        save: () => setDoc(reference, Policy.receipt(currentUser.uid, serverTimestamp())),
+        signOut: async () => {
+          this.identity.clear();
+          await endPresenceSession({ user: currentUser, state: sessionState, window: this.window, storage: this.window.sessionStorage,
+            write: (collectionName, id, fields) => setDoc(doc(db, collectionName, id), { ...fields, online: false, status: 'logged-out', lastSeen: serverTimestamp(), offlineAt: serverTimestamp() }, { merge: true }) });
+          await signOut(auth);
+          this.window.location.replace('../index.html');
+        }
+      });
+      this.scope.addCleanup(() => this.agreement.dispose());
+      if (!await this.agreement.require() || !isCurrent()) return;
     }
     wireCommonNavigation();
     wireNotificationCenter();

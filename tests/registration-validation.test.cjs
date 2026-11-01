@@ -8,7 +8,7 @@ async function controller() {
   const context = vm.createContext({ FormData: class { constructor(form) { return Object.entries(form.values); } } });
   const entry = new vm.SourceTextModule(fs.readFileSync(path.join(__dirname, '../assets/js/controllers/RegistrationController.js'), 'utf8'), { context });
   await entry.link(specifier => {
-    if (/\/(CoursePolicy|GenderPolicy|StudentPersonalInfo)\.js$/.test(specifier)) return new vm.SourceTextModule(fs.readFileSync(path.join(__dirname, '../assets/js/core', path.basename(specifier)), 'utf8'), { context });
+    if (/\/(CoursePolicy|GenderPolicy|StudentPersonalInfo|PolicyAgreementPolicy)\.js$/.test(specifier)) return new vm.SourceTextModule(fs.readFileSync(path.join(__dirname, '../assets/js/core', path.basename(specifier)), 'utf8'), { context });
     const names = specifier.includes('firebase-auth')
       ? ['createUserWithEmailAndPassword', 'signInWithEmailAndPassword', 'signOut']
       : ['doc', 'getDoc', 'serverTimestamp', 'setDoc', 'updateDoc', 'writeBatch'];
@@ -20,13 +20,20 @@ async function controller() {
   return new entry.namespace.RegistrationController({ document: {} });
 }
 
-const complete = { accountId: '2510001', birthday: '2005-01-01', firstName: 'Test', lastName: 'Student', course: 'BSIT', section: '2A', password: 'password123', confirmPassword: 'password123' };
+const complete = { accountId: '2510001', birthday: '2005-01-01', firstName: 'Test', lastName: 'Student', course: 'BSIT', section: '2A', password: 'password123', confirmPassword: 'password123', policyAgreement: '2026-11-01-v1' };
 const missingMessage = 'Fill all the fields first before proceeding';
+
+test('registration requires an explicit current-version policy agreement', async () => {
+  const registration = await controller();
+  for (const policyAgreement of [undefined, '', 'old', true]) {
+    assert.match(registration.registrationValidationMessage({ ...complete, policyAgreement }), /Please accept the Terms/);
+  }
+});
 
 test('registration requires every field before password validation', async () => {
   const registration = await controller();
   assert.equal(registration.registrationValidationMessage({}), missingMessage);
-  for (const name of Object.keys(complete)) {
+  for (const name of Object.keys(complete).filter(name => name !== 'policyAgreement')) {
     for (const blank of ['', '   ', undefined]) {
       assert.equal(registration.registrationValidationMessage({ ...complete, [name]: blank }), missingMessage, name);
     }

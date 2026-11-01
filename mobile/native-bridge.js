@@ -10,6 +10,10 @@ if (Capacitor.isNativePlatform()) {
     if (isActive) window.dispatchEvent(new Event('focus'));
   });
   App.addListener('backButton', ({ canGoBack }) => {
+    if (document.body?.hasAttribute('data-policy-required')) {
+      window.dispatchEvent(new Event('presence:policy-back'));
+      return;
+    }
     if (canGoBack) window.history.back();
     else App.exitApp();
   });

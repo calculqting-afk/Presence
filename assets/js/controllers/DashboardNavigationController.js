@@ -20,6 +20,7 @@ export class DashboardNavigationController {
     this.closeLogoutModal = this.closeLogoutModal.bind(this);
   }
   dispose() {
+    this.selectionIndicator?.dispose();
     this.scope.dispose();
     this.logoutAction?.dispose(); this.logoutModal?.remove();
     this.historyInitialized = false;
@@ -27,6 +28,8 @@ export class DashboardNavigationController {
   initialize() {
     const dashboard = this;
     if (!dashboard.scope.initialize()) return;
+    this.selectionIndicator = new NavigationIndicatorController({ document: this.document, window: this.window });
+    this.selectionIndicator.initialize();
     dashboard.document.querySelectorAll("[data-view]").forEach(button => dashboard.scope.listen(button, "click", () => openView(button.dataset.view)));
     dashboard.document.querySelectorAll("[data-go-view]").forEach(button => dashboard.scope.listen(button, "click", () => openView(button.dataset.goView)));
     dashboard.document.querySelectorAll("[data-go-back]").forEach(button => dashboard.scope.listen(button, "click", () => openView(previousView)));
@@ -119,7 +122,12 @@ export class DashboardNavigationController {
     setDashboardViewState({
       activeView: viewName
     });
-    dashboard.document.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("active", button.dataset.view === viewName));
+    dashboard.document.querySelectorAll("[data-view]").forEach(button => {
+      const selected = button.dataset.view === viewName;
+      button.classList.toggle("active", selected);
+      if (selected) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    });
     dashboard.document.querySelectorAll("[data-section]").forEach(section => {
       section.hidden = section.dataset.section !== viewName;
     });
@@ -135,7 +143,7 @@ export class DashboardNavigationController {
     }));
     dashboard.window.scrollTo({
       top: 0,
-      behavior: "smooth"
+      behavior: "instant"
     });
   }
   openView(viewName) {
@@ -207,5 +215,116 @@ export class DashboardNavigationController {
   closeLogoutModal() {
     const dashboard = this;
     if (!dashboard.logoutAction.busy) dashboard.logoutModal.hidden = true;
+  }
+}
+
+// Decorative only: view selection and permission checks stay in the navigation controller.
+export class NavigationIndicatorController {
+  constructor({ document, window }) {
+    Object.assign(this, { document, window });
+    this.scope = new ControllerScope();
+    this.entries = [];
+  }
+
+  initialize() {
+    if (!this.scope.initialize()) return;
+    for (const list of this.document.querySelectorAll('.nav-list')) {
+      const indicator = this.document.createElement('span');
+      indicator.className = 'nav-selection-indicator';
+      indicator.setAttribute('aria-hidden', 'true');
+      indicator.hidden = true;
+      list.prepend(indicator);
+      const entry = { list, indicator, positioned: false };
+      this.entries.push(entry);
+      if (this.window.ResizeObserver) {
+        entry.resize = new this.window.ResizeObserver(() => this.schedule());
+        entry.resize.observe(list);
+        list.querySelectorAll('.nav-button').forEach(button => entry.resize.observe(button));
+      }
+      if (this.window.MutationObserver) {
+        entry.mutations = new this.window.MutationObserver(records => {
+          if (records.some(record => record.type === 'childList' || record.target.matches?.('.nav-button'))) this.schedule();
+        });
+        entry.mutations.observe(list, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class'] });
+      }
+    }
+    this.scope.listen(this.window, 'resize', () => this.schedule());
+    this.scope.listen(this.window, 'presence:viewchange', event => {
+      this.selectedView = event.detail.viewName;
+      this.revealSelection = true;
+      this.animateIcon();
+      this.schedule();
+    });
+    this.document.fonts?.ready.then(() => this.schedule());
+    this.schedule();
+  }
+
+  schedule() {
+    if (!this.scope.initialized || this.frame || !this.entries.length) return;
+    this.frame = this.window.requestAnimationFrame(() => {
+      this.frame = undefined;
+      this.position();
+    });
+  }
+
+  selectedButton(list) {
+    return [...list.querySelectorAll('.nav-button[data-view]')].find(button =>
+      !button.hidden && (this.selectedView ? button.dataset.view === this.selectedView : button.classList.contains('active')));
+  }
+
+  position() {
+    const reduced = this.window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    for (const entry of this.entries) {
+      const { list, indicator } = entry;
+      const button = this.selectedButton(list);
+      if (!button || !button.getClientRects().length) {
+        indicator.hidden = true;
+        list.classList.remove('has-nav-indicator');
+        entry.positioned = false;
+        continue;
+      }
+      const bounds = list.getBoundingClientRect(), target = button.getBoundingClientRect();
+      const x = target.left - bounds.left + list.scrollLeft - list.clientLeft;
+      const y = target.top - bounds.top + list.scrollTop - list.clientTop;
+      indicator.style.transition = entry.positioned ? '' : 'none';
+      indicator.style.width = `${target.width}px`;
+      indicator.style.height = `${target.height}px`;
+      indicator.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+      indicator.style.borderRadius = this.window.getComputedStyle(button).borderRadius;
+      indicator.hidden = false;
+      list.classList.add('has-nav-indicator');
+      entry.positioned = true;
+      if (this.revealSelection && list.scrollTo) {
+        const left = x < list.scrollLeft ? x : x + target.width > list.scrollLeft + list.clientWidth ? x + target.width - list.clientWidth : list.scrollLeft;
+        const top = y < list.scrollTop ? y : y + target.height > list.scrollTop + list.clientHeight ? y + target.height - list.clientHeight : list.scrollTop;
+        if (left !== list.scrollLeft || top !== list.scrollTop) list.scrollTo({ left, top, behavior: reduced ? 'instant' : 'smooth' });
+      }
+    }
+    this.revealSelection = false;
+  }
+
+  animateIcon() {
+    this.iconAnimation?.cancel();
+    if (this.window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const button = this.entries.map(entry => this.selectedButton(entry.list)).find(Boolean);
+    const icon = button?.querySelector('.nav-icon');
+    this.iconAnimation = icon?.animate?.([
+      { transform: 'translateY(0) scale(1)' },
+      { transform: 'translateY(-2px) scale(1.08)', offset: .45 },
+      { transform: 'translateY(0) scale(1)' }
+    ], { duration: 180, easing: 'ease-out' });
+  }
+
+  dispose() {
+    this.scope.dispose();
+    this.window.cancelAnimationFrame(this.frame);
+    this.iconAnimation?.cancel();
+    for (const entry of this.entries) {
+      entry.resize?.disconnect();
+      entry.mutations?.disconnect();
+      entry.indicator.remove();
+      entry.list.classList.remove('has-nav-indicator');
+    }
+    this.entries = [];
   }
 }

@@ -1,5 +1,6 @@
 import { attendanceTimeIssue, attendanceReviewLabel } from '../core/AttendanceTimePolicy.js';
 import { ControllerScope } from '../core/ControllerScope.js';
+import { StableListRenderer } from '../core/StableListRenderer.js';
 import { CoursePolicy } from '../core/CoursePolicy.js';
 import { ageLabel, hometownLabel, hometownForm, fillHometownForm } from '../core/StudentPersonalInfo.js';
 import { GenderPolicy } from '../core/GenderPolicy.js';
@@ -596,7 +597,7 @@ export class StudentDashboard {
   }
   updateMarkup(target, markup) {
     if (this.lastMarkup.get(target) === markup) return false;
-    target.innerHTML = markup;
+    StableListRenderer.render(target, markup, 'data-event-group');
     this.lastMarkup.set(target, markup);
     return true;
   }
@@ -663,12 +664,12 @@ export class StudentDashboard {
       return secondTime - firstTime;
     }));
     if (!records.length) {
-      container.innerHTML = AttendanceToolbarController.emptyState({
+      StableListRenderer.render(container, AttendanceToolbarController.emptyState({
         filtered: dashboard.attendance.length > 0
-      });
+      }));
       return;
     }
-    container.innerHTML = records.map(record => {
+    StableListRenderer.render(container, records.map(record => {
       const event = dashboard.eventsById.get(record.eventId) || record;
       const checkedInAt = record.checkedInAt || record.attendedAt;
       const completed = Boolean(record.checkedOutAt);
@@ -680,8 +681,8 @@ export class StudentDashboard {
       const color = timeIssue || partial || readyToCheckOut || status.startsWith('Needs review') ? "orange" : completed ? "green" : status === "Checked in" ? "blue" : "gray";
       const checkInWindow = event.timeIn ? `${formatEventTime(event.timeIn)} – ${formatEventTime(event.checkInCutoff || event.timeOut)}` : "Not recorded";
       const checkOutWindow = event.timeOut ? `${formatEventTime(event.timeOut)} – ${formatEventTime(event.checkOutCutoff || timePlusMinutes(event.timeOut))}` : "Not recorded";
-      return `<article class="history-event-card attendance-record-card"><div class="history-card-top"><span class="event-type-badge">${escapeHtml(record.eventType || "School Event")}</span><div class="attendance-record-badges"><span class="badge ${color}">${escapeHtml(status)}</span>${hasVerifiedCheckIn ? arrivalStatusBadge(record.arrivalStatus) : '<span class="badge orange">Absent in</span>'}${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}</div></div><h3>${escapeHtml(record.eventName || "Attendance event")}</h3><p>${escapeHtml(record.location || "Location not recorded")}</p><div class="event-detail-boxes"><div class="${record.arrivalStatus === 'late' ? 'attendance-time-late' : ''}"><span>${record.arrivalStatus === 'late' ? 'Late IN' : 'Checked in'}</span><strong>${escapeHtml(formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>Checked out</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Arrival</span><strong>${escapeHtml(partial ? 'Absent in' : record.arrivalStatus === "late" ? "Late" : "Present")}</strong></div><div><span>Check-in window</span><strong>${escapeHtml(checkInWindow)}</strong></div><div><span>Checkout window</span><strong>${escapeHtml(checkOutWindow)}</strong></div><div><span>Duration</span><strong>${escapeHtml(hasVerifiedCheckIn ? attendanceDuration(checkedInAt, record.checkedOutAt) : 'Not available')}</strong></div></div>${readyToCheckOut ? `<div class="history-card-actions"><button class="primary-button attendance-action-button" type="button" data-check-out-attendance="${escapeHtml(record.id)}">Check out</button></div>` : ""}</article>`;
-    }).join("");
+      return `<article class="history-event-card attendance-record-card" data-render-key="${escapeHtml(record.id || `${record.studentUid}:${record.eventId}`)}"><div class="history-card-top"><span class="event-type-badge">${escapeHtml(record.eventType || "School Event")}</span><div class="attendance-record-badges"><span class="badge ${color}">${escapeHtml(status)}</span>${hasVerifiedCheckIn ? arrivalStatusBadge(record.arrivalStatus) : '<span class="badge orange">Absent in</span>'}${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}</div></div><h3>${escapeHtml(record.eventName || "Attendance event")}</h3><p>${escapeHtml(record.location || "Location not recorded")}</p><div class="event-detail-boxes"><div class="${record.arrivalStatus === 'late' ? 'attendance-time-late' : ''}"><span>${record.arrivalStatus === 'late' ? 'Late IN' : 'Checked in'}</span><strong>${escapeHtml(formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>Checked out</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Arrival</span><strong>${escapeHtml(partial ? 'Absent in' : record.arrivalStatus === "late" ? "Late" : "Present")}</strong></div><div><span>Check-in window</span><strong>${escapeHtml(checkInWindow)}</strong></div><div><span>Checkout window</span><strong>${escapeHtml(checkOutWindow)}</strong></div><div><span>Duration</span><strong>${escapeHtml(hasVerifiedCheckIn ? attendanceDuration(checkedInAt, record.checkedOutAt) : 'Not available')}</strong></div></div>${readyToCheckOut ? `<div class="history-card-actions"><button class="primary-button attendance-action-button" type="button" data-check-out-attendance="${escapeHtml(record.id)}">Check out</button></div>` : ""}</article>`;
+    }).join(""));
     dashboard.attendanceController.syncLoadingButtons();
   }
   renderFines() {

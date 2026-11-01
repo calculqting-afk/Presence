@@ -10,24 +10,24 @@ async function fixture({ resubmit = false } = {}) {
   const save = async (_, data) => { calls.push(data); await new Promise((resolve, reject) => { resolveSave = resolve; rejectSave = reject; }); };
   const sdk = { createUserWithEmailAndPassword: async () => { calls.push('auth'); if (resubmit) throw Object.assign(Error('Existing account'), { code: 'auth/email-already-in-use' }); return { user: { uid: 'new-user' } }; },
     signInWithEmailAndPassword() { if (!resubmit) throw Error('Unexpected sign-in'); calls.push('sign-in'); return { user: { uid: 'new-user' } }; }, signOut: async () => calls.push('sign-out'),
-    doc: (...args) => args, getDoc: async () => ({ exists: () => true, data: () => ({ uid: 'new-user', status: 'declined' }) }), serverTimestamp: () => 'SERVER',
-    setDoc: save, updateDoc: save, writeBatch() {} };
+    doc: (...args) => args, getDoc: async ref => ({ exists: () => !ref.includes('policyAcceptances'), data: () => ({ uid: 'new-user', status: 'declined' }) }), serverTimestamp: () => 'SERVER',
+    setDoc: save, updateDoc: save, writeBatch() { let data; return { set(ref, value) { if (!ref.includes('policyAcceptances')) data=value; }, update(ref, value) { data=value; }, commit: () => save(null,data) }; } };
   const context = vm.createContext({ FormData: class { constructor(form) { return Object.entries(form.values); } } });
   const entry = new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/controllers/RegistrationController.js'), 'utf8'), { context });
   await entry.link(specifier => {
-    if (/\/(GenderPolicy|StudentPersonalInfo)\.js$/.test(specifier)) return new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/core', path.basename(specifier)), 'utf8'), { context });
+    if (/\/(GenderPolicy|StudentPersonalInfo|PolicyAgreementPolicy)\.js$/.test(specifier)) return new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/core', path.basename(specifier)), 'utf8'), { context });
     const exports = specifier.endsWith('CoursePolicy.js') ? { CoursePolicy: { normalize: value => value } } : sdk;
     return new vm.SyntheticModule(Object.keys(exports), function() { for (const [key, value] of Object.entries(exports)) this.setExport(key, value); }, { context });
   });
   await entry.evaluate();
   const fields = {};
-  for (const name of ['accountId', 'birthday', 'firstName', 'lastName', 'hometownBarangay', 'hometownCity', 'hometownProvince', 'course', 'section', 'password', 'confirmPassword']) {
-    fields[name] = { name, value: '', required: !name.startsWith('hometown'), custom: '', focused: 0, reports: 0,
+  for (const name of ['accountId', 'birthday', 'firstName', 'lastName', 'hometownBarangay', 'hometownCity', 'hometownProvince', 'course', 'section', 'password', 'confirmPassword', 'policyAgreement']) {
+    fields[name] = { name, value: '', checked: false, required: !name.startsWith('hometown'), custom: '', focused: 0, reports: 0,
       setCustomValidity(message) { this.custom = message; }, focus() { this.focused++; }, reportValidity() { this.reports++; },
       get validationMessage() { return this.custom || 'Invalid field'; },
-      checkValidity() { return !this.custom && (!this.required || Boolean(this.value)) && (!name.includes('assword') || this.value.length >= 8) && (name !== 'birthday' || this.value <= this.max); } };
+      checkValidity() { return (name !== 'policyAgreement' || this.checked) && !this.custom && (!this.required || Boolean(this.value)) && (!name.includes('assword') || this.value.length >= 8) && (name !== 'birthday' || this.value <= this.max); } };
   }
-  const panels = [['accountId', 'birthday', 'firstName', 'lastName', 'hometownBarangay', 'hometownCity', 'hometownProvince'], ['course', 'section'], ['password', 'confirmPassword']].map(names => ({ hidden: false, disabled: false, querySelectorAll: () => names.map(name => fields[name]) }));
+  const panels = [['accountId', 'birthday', 'firstName', 'lastName', 'hometownBarangay', 'hometownCity', 'hometownProvince'], ['course', 'section'], ['password', 'confirmPassword', 'policyAgreement']].map(names => ({ hidden: false, disabled: false, querySelectorAll: () => names.map(name => fields[name]) }));
   const indicators = [0, 1, 2].map(() => { const values = new Set(); return { classes: values, classList: { toggle: (name, set) => set ? values.add(name) : values.delete(name), add: name => values.add(name), remove: name => values.delete(name) }, setAttribute(name, value) { this[name] = value; }, removeAttribute(name) { delete this[name]; } }; });
   const next = {}, back = {}, submit = { textContent: 'Send registration request', dataset: {}, disabled: false }, status = {}, error = { textContent: '' };
   const review = ['accountId', 'birthday', 'age', 'hometown', 'firstName', 'lastName', 'course', 'section'].map(name => ({ dataset: { registrationReview: name }, textContent: '' }));
@@ -40,7 +40,7 @@ async function fixture({ resubmit = false } = {}) {
   const wizard = new entry.namespace.RegistrationWizard({ form, error, listen(target, event, handler) { if (!handlers.has(target)) handlers.set(target, {}); handlers.get(target)[event] = handler; }, isBusy: () => registration.registrationBusy });
   registration.registrationForm = form; registration.registrationError = error; registration.registrationDialog = { querySelectorAll: () => [] };
   registration.wizard = wizard; registration.close = () => calls.push('closed'); wizard.initialize();
-  const fill = () => { for (const [name, value] of Object.entries({ accountId: '2510004-1', birthday: '2005-01-01', firstName: 'Test', lastName: 'Student', course: 'BS Info Tech', section: '2A', password: 'password123', confirmPassword: 'password123' })) fields[name].value = value; };
+  const fill = () => { for (const [name, value] of Object.entries({ accountId: '2510004-1', birthday: '2005-01-01', firstName: 'Test', lastName: 'Student', course: 'BS Info Tech', section: '2A', password: 'password123', confirmPassword: 'password123', policyAgreement: '2026-11-01-v1' })) { fields[name].value = value; if(name==='policyAgreement') fields[name].checked=true; } };
   return { registration, wizard, fields, panels, indicators, next, back, submit, status, error, review, handlers, calls, success, fill, resolveSave: () => resolveSave(), rejectSave: () => rejectSave(Error('Save unavailable')) };
 }
 
@@ -66,6 +66,15 @@ test('Back retains entries and passwords in memory; final validation exposes the
   f.wizard.reset(); assert.equal(f.fields.password.value, ''); assert.equal(f.fields.confirmPassword.value, '');
   assert.equal(f.fields.accountId.value, '2510004-1');
 });
+
+test('registration security step requires the unchecked agreement and resets it on a new attempt', async () => {
+  const f = await fixture(); f.fill(); f.wizard.next(); f.wizard.next();
+  f.fields.policyAgreement.checked = false;
+  assert.equal(f.wizard.validateAll(), false); assert.match(f.error.textContent, /Please accept the Terms/);
+  assert.equal(f.calls.length, 0);
+  f.fields.policyAgreement.checked = true; assert.equal(f.wizard.validateAll(), true);
+  f.wizard.reset(); assert.equal(f.fields.policyAgreement.checked, false);
+});
 test('Enter advances early steps without reaching Firebase; duplicate final submission is blocked until save acknowledgement', async () => {
   const f = await fixture(); f.fill(); const event = { preventDefault() {} };
   await f.registration.submitRegistration(event); assert.equal(f.wizard.step, 1); assert.equal(f.calls.length, 0);
@@ -73,6 +82,7 @@ test('Enter advances early steps without reaching Firebase; duplicate final subm
   const pending = f.registration.submitRegistration(event); await Promise.resolve();
   assert.equal(f.registration.registrationBusy, true); assert.equal(f.submit.disabled, true); assert.equal(f.panels[0].disabled, true);
   await f.registration.submitRegistration(event); assert.equal(f.calls.filter(item => item === 'auth').length, 1);
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(f.success.length, 0); assert.ok(!f.indicators[2].classes.has('is-complete'));
   assert.ok(!Object.hasOwn(f.calls.find(item => typeof item === 'object'), 'password'));
   f.resolveSave(); await pending;

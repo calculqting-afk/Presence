@@ -1168,6 +1168,119 @@ test('shared navigation history is idempotent and cleans up modal and popstate l
   controller.dispose(); assert.equal(browser.document.querySelector('#confirmLogout').handlers.get('click').size, 0);
 });
 
+async function navigationIndicatorFixture(reduced = false) {
+  const names = ['dashboardRole', 'pageCopy', 'currentUser', 'currentUserRole', 'currentUserProfile', 'activeView', 'previousView', 'sessionState', 'ROLE_VIEWS', 'ROLE_ACCESS_LABELS', 'roleLabel', 'renderView', 'openView', 'setDashboardViewState', 'auth', 'db', 'signOut', 'setDoc', 'doc', 'serverTimestamp', 'showDashboardToast'];
+  const shared = Object.fromEntries(names.map(name => [name, () => {}]));
+  const browser = fakeBrowser(), frames = [], observers = [], animations = [];
+  browser.window.requestAnimationFrame = callback => { frames.push(callback); return frames.length; };
+  browser.window.getComputedStyle = () => ({ borderRadius: '12px' });
+  browser.window.matchMedia = () => ({ matches: reduced });
+  browser.window.ResizeObserver = class {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe() {} disconnect() { this.disconnected = true; }
+  };
+  const list = browser.document.querySelector('nav');
+  Object.assign(list, { scrollLeft: 40, scrollTop: 15, clientLeft: 1, clientTop: 1, clientWidth: 400, clientHeight: 100,
+    getBoundingClientRect: () => ({ left: 10, top: 20 }), prepend(node) { this.indicator = node; } });
+  const buttons = ['dashboard', 'events'].map((view, index) => {
+    const icon = { animate() { const animation = { cancel() { this.cancelled = true; } }; animations.push(animation); return animation; } };
+    return { dataset: { view }, hidden: false, classList: { contains: () => index === 0 },
+      getClientRects: () => [1], getBoundingClientRect: () => ({ left: 11 + index * 90, top: 21, width: 80, height: 50 }), querySelector: () => icon };
+  });
+  list.querySelectorAll = () => buttons;
+  browser.document.querySelectorAll = selector => selector === '.nav-list' ? [list] : [];
+  const { NavigationIndicatorController } = await isolatedModule('assets/js/controllers/DashboardNavigationController.js', shared, browser);
+  const controller = new NavigationIndicatorController(browser);
+  controller.initialize();
+  return { browser, controller, list, buttons, frames, observers, animations };
+}
+
+test('navigation highlight coalesces rapid selections and cancels the previous icon animation', async () => {
+  const { browser, controller, list, frames, animations } = await navigationIndicatorFixture();
+  frames.shift()();
+  assert.equal(list.indicator.style.transform, 'translate3d(40px, 15px, 0)');
+  assert.equal(list.indicator.style.transition, 'none');
+  browser.window.emit('events'); browser.window.emit('dashboard'); browser.window.emit('events');
+  assert.equal(frames.length, 1);
+  frames.shift()();
+  assert.equal(list.indicator.style.transform, 'translate3d(130px, 15px, 0)');
+  assert.equal(list.indicator.style.transition, '');
+  assert.equal(animations.length, 3); assert.ok(animations[0].cancelled && animations[1].cancelled);
+  controller.dispose(); assert.equal(animations[2].cancelled, true);
+});
+
+test('navigation indicator respects reduced motion, remeasures and hides unavailable selections', async () => {
+  const { browser, controller, list, buttons, frames, observers, animations } = await navigationIndicatorFixture(true);
+  frames.shift()();
+  browser.window.emit('events'); frames.shift()();
+  assert.equal(animations.length, 0);
+  buttons[1].getBoundingClientRect = () => ({ left: 11, top: 91, width: 180, height: 45 });
+  observers[0].callback(); frames.shift()();
+  assert.equal(list.indicator.style.transform, 'translate3d(40px, 85px, 0)');
+  assert.equal(list.indicator.style.width, '180px');
+  buttons[1].hidden = true;
+  observers[0].callback(); frames.shift()(); assert.equal(list.indicator.hidden, true);
+  controller.dispose(); assert.equal(observers[0].disconnected, true);
+  browser.window.emit('dashboard'); assert.equal(frames.length, 0);
+});
+
+function liveListFixture() {
+  const document = { activeElement: null };
+  let parses = 0;
+  const container = {
+    ownerDocument: document, children: [],
+    get firstElementChild() { return this.children[0] || null; },
+    insertBefore(node, cursor) {
+      if (node.parentElement) node.remove();
+      const index = cursor ? this.children.indexOf(cursor) : this.children.length;
+      assert.ok(index >= 0);
+      this.children.splice(index, 0, node); node.parentElement = this;
+    },
+    replaceChildren(fragment) { this.children.forEach(node => { node.parentElement = null; }); this.children = []; fragment.children.forEach(node => this.insertBefore(node, null)); }
+  };
+  const makeNode = ({ key, text }) => ({
+    key, outerHTML: JSON.stringify({ key, text }), parentElement: null,
+    getAttribute() { return key || null; }, querySelectorAll: () => [],
+    get nextElementSibling() { return this.parentElement?.children[this.parentElement.children.indexOf(this) + 1] || null; },
+    remove() { if (this.parentElement) { const rows = this.parentElement.children; rows.splice(rows.indexOf(this), 1); this.parentElement = null; } },
+    replaceWith(node) { const parent = this.parentElement, index = parent.children.indexOf(this); parent.children[index] = node; node.parentElement = parent; this.parentElement = null; }
+  });
+  document.createRange = () => ({
+    selectNodeContents(target) { assert.equal(target, container); },
+    createContextualFragment(markup) { parses++; return { children: JSON.parse(markup).map(makeNode) }; }
+  });
+  return { container, parses: () => parses, markup: rows => JSON.stringify(rows.map(([key, text]) => ({ key, text }))) };
+}
+
+test('live list refresh retains unchanged rows, updates changed rows, and reorders without duplicates', async () => {
+  const { StableListRenderer } = await import('../assets/js/core/StableListRenderer.js');
+  const { container, markup, parses } = liveListFixture();
+  StableListRenderer.render(container, markup([['a', 'Present'], ['b', 'Checked in']]));
+  const [first, second] = container.children;
+  StableListRenderer.render(container, markup([['a', 'Present'], ['b', 'Completed']]));
+  assert.equal(container.children[0], first);
+  assert.notEqual(container.children[1], second);
+  const updated = container.children[1];
+  StableListRenderer.render(container, markup([['c', 'Late'], ['b', 'Completed'], ['a', 'Present']]));
+  assert.equal(container.children[1], updated); assert.equal(container.children[2], first);
+  StableListRenderer.render(container, markup([['a', 'Present']]));
+  assert.deepEqual(container.children, [first]);
+  const before = parses();
+  StableListRenderer.render(container, markup([['a', 'Present']]));
+  assert.equal(parses(), before);
+});
+
+test('live list renderer safely replaces empty states and duplicate or missing keys', async () => {
+  const { StableListRenderer } = await import('../assets/js/core/StableListRenderer.js');
+  const { container, markup } = liveListFixture();
+  StableListRenderer.render(container, markup([[null, 'Loading'], [null, 'Other placeholder']]));
+  StableListRenderer.render(container, markup([['a', 'Present']]));
+  assert.equal(container.children.length, 1); assert.equal(container.children[0].key, 'a');
+  StableListRenderer.render(container, markup([['a', 'First'], ['a', 'Duplicate']]));
+  assert.equal(container.children.length, 2);
+  StableListRenderer.render(container, '[]'); assert.equal(container.children.length, 0);
+});
+
 async function loadingControllerClass(name = 'DashboardLoadingController') {
   const shared = Object.fromEntries([
     'waitForUser', 'verifyRole', 'auth', 'signOut', 'wireCommonNavigation',
