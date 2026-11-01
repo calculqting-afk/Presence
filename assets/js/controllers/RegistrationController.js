@@ -1,6 +1,7 @@
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import { doc, getDoc, serverTimestamp, setDoc, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 import { CoursePolicy } from '../core/CoursePolicy.js';
+import { ageLabel, hometownFields, hometownLabel } from '../core/StudentPersonalInfo.js';
 import { GenderPolicy } from '../core/GenderPolicy.js';
 
 export class RegistrationController {
@@ -97,6 +98,7 @@ export class RegistrationController {
     }
     if (values.password !== values.confirmPassword) return 'Passwords do not match.';
     if (!GenderPolicy.valid(values.gender)) return 'Choose Male, Female, or Not specified for gender.';
+    try { hometownFields(values); } catch (error) { return error.message; }
     if (String(values.password).length < 8) return 'Use a password with at least 8 characters.';
     return '';
   }
@@ -129,7 +131,7 @@ export class RegistrationController {
             throw new Error('This Student ID already has an account or a pending registration request.');
           }
           await updateDoc(doc(this.provisioningDb, 'registrationRequests', accountIdKey), {
-            birthday: values.birthday, firstName: values.firstName.trim(), lastName: values.lastName.trim(), gender: GenderPolicy.normalize(values.gender),
+            ...hometownFields(values), birthday: values.birthday, firstName: values.firstName.trim(), lastName: values.lastName.trim(), gender: GenderPolicy.normalize(values.gender),
             course: CoursePolicy.normalize(values.course), section: values.section, status: 'pending', updatedAt: serverTimestamp()
           });
           form.reset(); this.wizard?.complete(); this.close(this.registrationDialog, true);
@@ -140,7 +142,7 @@ export class RegistrationController {
       try {
         await setDoc(doc(this.provisioningDb, 'registrationRequests', accountIdKey), {
           uid: credential.user.uid, accountId: values.accountId.trim(), accountIdKey,
-          birthday: values.birthday, firstName: values.firstName.trim(), lastName: values.lastName.trim(), gender: GenderPolicy.normalize(values.gender),
+          ...hometownFields(values), birthday: values.birthday, firstName: values.firstName.trim(), lastName: values.lastName.trim(), gender: GenderPolicy.normalize(values.gender),
           course: CoursePolicy.normalize(values.course), section: values.section, status: 'pending',
           requestedAt: serverTimestamp(), updatedAt: serverTimestamp()
         });
@@ -193,7 +195,7 @@ export class RegistrationController {
     const batch = writeBatch(this.db);
     batch.set(doc(this.db, 'students', user.uid), {
       uid: user.uid, accountId: data.accountId, accountIdKey, authEmail: this.studentIdToEmail(data.accountId),
-      birthday: data.birthday, firstName: data.firstName, lastName: data.lastName, middleName: '', gender: GenderPolicy.normalize(data.gender),
+      ...hometownFields(data), birthday: data.birthday, firstName: data.firstName, lastName: data.lastName, middleName: '', gender: GenderPolicy.normalize(data.gender),
       course: CoursePolicy.normalize(data.course), section: data.section, role: 'student', active: true,
       mustChangePassword: true,
       createdAt: serverTimestamp(), updatedAt: serverTimestamp()
@@ -261,6 +263,8 @@ export class RegistrationWizard {
   }
   updateReview() {
     this.form.querySelectorAll('[data-registration-review]').forEach(node => {
+      if (node.dataset.registrationReview === 'age') { node.textContent = ageLabel(this.form.elements.namedItem('birthday')?.value); return; }
+      if (node.dataset.registrationReview === 'hometown') { node.textContent = hometownLabel(Object.fromEntries(Object.keys(hometownFields()).map(key => [key, this.form.elements.namedItem(key)?.value]))); return; }
       const value = this.form.elements.namedItem(node.dataset.registrationReview)?.value;
       node.textContent = node.dataset.registrationReview === 'gender' ? GenderPolicy.label(value) : String(value || '').trim();
     });

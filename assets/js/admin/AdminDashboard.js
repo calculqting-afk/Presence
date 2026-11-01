@@ -7,6 +7,7 @@ import { ActivityHistoryController } from '../controllers/ActivityHistoryControl
 import { ArrivalRecalculationController } from '../controllers/ArrivalRecalculationController.js';
 import { activityRecord, activitySnapshot } from '../controllers/ActivityRecordPolicy.js';
 import { CoursePolicy } from '../core/CoursePolicy.js';
+import { ageLabel, hometownLabel, hometownForm, fillHometownForm } from '../core/StudentPersonalInfo.js';
 import { GenderPolicy } from '../core/GenderPolicy.js';
 import { PasswordResetApi } from '../controllers/PasswordResetApi.js';
 import { EmailAuthProvider, reauthenticateWithCredential } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
@@ -41,11 +42,13 @@ export class AdminDashboard {
   constructor({
     document = globalThis.document,
     window = globalThis.window,
-    sessionStorage = globalThis.sessionStorage
+    sessionStorage = globalThis.sessionStorage,
+    loading
   } = {}) {
     this.document = document;
     this.window = window;
     this.sessionStorage = sessionStorage;
+    this.loading = loading;
     this.scope = new ControllerScope();
     this.recentLogin = new AdminRecentLogin({ getUser: () => auth.currentUser, document });
     this.can = this.can.bind(this);
@@ -215,6 +218,7 @@ export class AdminDashboard {
     dashboard.applyActionPermissions();
     dashboard.subscriptions = new ScopedSubscriptions({
       onError: (error, key) => {
+        dashboard.loading?.settle(key);
         console.error(key, error);
         if (key === 'attendance') dashboard.updateAttendanceSyncStatus({ state: 'error', error });
         if (key === 'students') { dashboard.studentsLoaded = false; dashboard.attendanceReport?.refreshContext(); }
@@ -726,11 +730,15 @@ export class AdminDashboard {
   listen(key, views, reference, callback) {
     const dashboard = this;
     if (['presence-sessions', 'legacy-presence', 'faces'].includes(key) && !dashboard.can('viewStudents')) return;
-    dashboard.subscriptions.register(key, views, (guard, onError) => key === 'students'
+    const receive = snapshot => {
+      callback(snapshot);
+      if (!snapshot.metadata?.fromCache) dashboard.loading?.settle(key);
+    };
+    dashboard.subscriptions.register(key, views, (guard, onError) => ['students', 'events'].includes(key)
     // Readiness depends on fromCache, including server confirmation with unchanged documents.
     ? onSnapshot(reference, {
       includeMetadataChanges: true
-    }, guard(callback), onError) : onSnapshot(reference, guard(callback), onError));
+    }, guard(receive), onError) : onSnapshot(reference, guard(receive), onError));
   }
   initializePresenceExpiry() {
     // Presence leases expire even when Firestore sends no new snapshot.
@@ -830,6 +838,7 @@ export class AdminDashboard {
   }) {
     const dashboard = this;
     if (!history) {
+      if (state === 'live' || state === 'error') dashboard.loading?.settle('attendance');
       dashboard.attendanceConfirmed = state === 'live';
       dashboard.attendanceVerificationState = state;
       // Records arrive before their metadata status. Redraw once that status
@@ -1378,6 +1387,7 @@ export class AdminDashboard {
     if (dashboard.can('viewAbsences')) profileActions?.insertAdjacentHTML("afterbegin", `<button class="outline-button" type="button" data-view-student-absences="${escapeHtml(student.uid)}">View absences${absenceCount ? ` (${absenceCount})` : ""}</button>`);
     dashboard.adminStudentDetail.querySelector(".student-info-boxes")?.insertAdjacentHTML("afterbegin", `<div class="student-info-box"><span>Birthday</span><strong>${escapeHtml(formatBirthday(student.birthday))}</strong></div>`);
     dashboard.adminStudentDetail.hidden = false;
+    dashboard.adminStudentDetail.querySelector('.student-info-boxes')?.insertAdjacentHTML('afterbegin', `<div class="student-info-box"><span>Age</span><strong>${escapeHtml(ageLabel(student.birthday))}</strong></div><div class="student-info-box"><span>Hometown</span><strong>${escapeHtml(hometownLabel(student))}</strong></div>`);
     dashboard.adminStudentDetail.querySelector('.student-info-boxes')?.insertAdjacentHTML('afterbegin', `<div class="student-info-box"><span>Gender</span><strong>${GenderPolicy.label(student.gender)}</strong></div>`);
     dashboard.applyActionPermissions();
   }
@@ -1666,6 +1676,7 @@ export class AdminDashboard {
     dashboard.document.querySelector("#managedMiddleName").value = student.middleName || "";
     dashboard.document.querySelector("#managedBirthday").value = student.birthday || "";
     dashboard.document.querySelector("#managedGender").value = GenderPolicy.normalize(student.gender);
+    fillHometownForm(dashboard.document, 'managed', student);
     dashboard.document.querySelector("#managedBirthday").required = false;
     dashboard.document.querySelector("#managedLastName").value = student.lastName;
     dashboard.document.querySelector("#managedSection").value = student.section;
@@ -2346,7 +2357,11 @@ export class AdminDashboard {
     submitEvent.preventDefault();
     if (dashboard.studentAccountBusy) return;
     const uid = dashboard.document.querySelector("#originalStudentId").value;
+    let hometown;
+    try { hometown = hometownForm(dashboard.document, 'managed'); }
+    catch (error) { showDashboardToast('Invalid hometown', error.message); return; }
     const student = {
+      ...hometown,
       accountId: dashboard.document.querySelector("#managedStudentId").value.trim(),
       firstName: dashboard.document.querySelector("#managedFirstName").value.trim(),
       middleName: dashboard.document.querySelector("#managedMiddleName").value.trim(),

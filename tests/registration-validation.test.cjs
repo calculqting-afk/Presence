@@ -8,7 +8,7 @@ async function controller() {
   const context = vm.createContext({ FormData: class { constructor(form) { return Object.entries(form.values); } } });
   const entry = new vm.SourceTextModule(fs.readFileSync(path.join(__dirname, '../assets/js/controllers/RegistrationController.js'), 'utf8'), { context });
   await entry.link(specifier => {
-    if (/\/(CoursePolicy|GenderPolicy)\.js$/.test(specifier)) return new vm.SourceTextModule(fs.readFileSync(path.join(__dirname, '../assets/js/core', path.basename(specifier)), 'utf8'), { context });
+    if (/\/(CoursePolicy|GenderPolicy|StudentPersonalInfo)\.js$/.test(specifier)) return new vm.SourceTextModule(fs.readFileSync(path.join(__dirname, '../assets/js/core', path.basename(specifier)), 'utf8'), { context });
     const names = specifier.includes('firebase-auth')
       ? ['createUserWithEmailAndPassword', 'signInWithEmailAndPassword', 'signOut']
       : ['doc', 'getDoc', 'serverTimestamp', 'setDoc', 'updateDoc', 'writeBatch'];

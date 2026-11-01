@@ -1,0 +1,437 @@
+.hometown-field {
+  grid-column: 1 / -1;
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  text-align: left;
+}
+.hometown-field > label {
+  font: inherit;
+  font-size: .85rem;
+  font-weight: 700;
+}
+.hometown-open {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 54px;
+  padding: 13px 16px;
+  border: 1px solid #b9c9df;
+  border-radius: 12px;
+  background: #f7faff;
+  color: #5a6e8a;
+  font: inherit;
+  font-size: .88rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .18s, box-shadow .18s;
+}
+.hometown-open [data-hometown-value] {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.hometown-open.has-value {
+  color: #17335d;
+}
+.hometown-open:hover {
+  border-color: #2875e8;
+  box-shadow: 0 0 0 3px #2875e814;
+}
+.hometown-open:focus-visible,
+.hometown-dialog button:focus-visible,
+.hometown-dialog input:focus-visible,
+.hometown-options:focus-visible {
+  outline: 3px solid #79adff;
+  outline-offset: 3px;
+}
+.hometown-dialog {
+  --home-bg: #fff;
+  --home-soft: #f4f7fc;
+  --home-text: #183153;
+  --home-muted: #5d708c;
+  --home-line: #dce5f1;
+  --home-blue: #1766d7;
+  --home-selected: #eaf2ff;
+  box-sizing: border-box;
+  width: min(560px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 40px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--home-line);
+  border-radius: 24px;
+  background: var(--home-bg);
+  color: var(--home-text);
+  box-shadow: 0 28px 90px #03102b40;
+  overflow: hidden;
+  font-family: "DM Sans", sans-serif;
+  animation: hometown-enter .24s cubic-bezier(.2, .8, .2, 1);
+}
+.hometown-dialog::backdrop {
+  background: #06132d99;
+  backdrop-filter: blur(5px);
+  animation: hometown-fade .2s ease;
+}
+.hometown-sheet {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 42px);
+  height: min(680px, calc(100dvh - 42px));
+}
+.hometown-header {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--home-line);
+}
+.hometown-dialog button {
+  font-family: inherit;
+  cursor: pointer;
+}
+.hometown-back {
+  flex: 0 0 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--home-blue);
+  font-size: 1.8rem;
+}
+.hometown-back:hover {
+  background: var(--home-soft);
+}
+.hometown-current {
+  margin: 12px 24px 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--home-soft);
+  color: var(--home-muted);
+  font-size: .72rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.hometown-current[hidden] {
+  display: none;
+}
+.hometown-selection {
+  box-sizing: border-box;
+  padding: 8px 24px 16px;
+  flex: 0 0 auto;
+  max-height: min(260px, 34dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.hometown-selection-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  color: var(--home-muted);
+  font-size: .75rem;
+}
+.hometown-reset {
+  border: 0;
+  background: transparent;
+  color: var(--home-blue);
+  font-size: .8rem;
+  min-height: 40px;
+  padding: 8px 0 8px 16px;
+}
+.hometown-trail {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hometown-trail li {
+  position: relative;
+  margin: 0;
+  padding: 0;
+}
+.hometown-trail li:not(:last-child)::after {
+  position: absolute;
+  content: "";
+  top: 27px;
+  bottom: -22px;
+  left: 18px;
+  width: 1px;
+  background: var(--home-line);
+  pointer-events: none;
+}
+.hometown-trail button {
+  position: relative;
+  width: 100%;
+  min-height: 42px;
+  margin: 0;
+  padding: 9px 12px 9px 42px;
+  background: transparent;
+  color: var(--home-text);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  text-align: left;
+  font-size: .88rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.hometown-trail button::before {
+  content: "";
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  left: 14px;
+  top: 16px;
+  background: var(--home-line);
+  border-radius: 50%;
+}
+.hometown-trail .is-current button {
+  margin-top: 4px;
+  color: var(--home-blue);
+  border-color: var(--home-line);
+  min-height: 48px;
+  background: var(--home-bg);
+}
+.hometown-trail .is-current button::before {
+  background: var(--home-blue);
+  box-shadow: 0 0 0 3px var(--home-bg), 0 0 0 4px var(--home-blue);
+  top: 19px;
+}
+.hometown-trail .is-complete button:hover {
+  color: var(--home-blue);
+}
+.hometown-dialog button:disabled {
+  cursor: default;
+  opacity: .5;
+}
+.hometown-search-wrap {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+}
+.hometown-search-wrap label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.hometown-search-wrap input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 46px;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--home-line);
+  border-radius: 12px;
+  background: var(--home-soft);
+  color: var(--home-text);
+  font: inherit;
+  font-size: 16px;
+}
+.hometown-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 24px;
+  background: var(--home-soft);
+  color: var(--home-muted);
+  font-size: .75rem;
+  min-height: 20px;
+  flex: 0 0 auto;
+}
+.hometown-status.is-loading::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--home-line);
+  border-top-color: var(--home-blue);
+  border-radius: 50%;
+  animation: hometown-spin .8s linear infinite;
+}
+.hometown-status button,
+.hometown-cancel {
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 1px solid var(--home-line);
+  border-radius: 10px;
+  color: var(--home-text);
+  background: var(--home-soft);
+  font-weight: 700;
+}
+.hometown-options {
+  flex: 1;
+  min-height: 70px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0;
+  scrollbar-width: thin;
+}
+.hometown-option {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 14px 24px;
+  border: 0;
+  border-bottom: 1px solid var(--home-line);
+  border-radius: 0;
+  text-align: left;
+  background: transparent;
+  color: var(--home-text);
+  font-size: .9rem;
+  transition: background .15s, color .15s;
+}
+.hometown-option > span:nth-child(2) {
+  overflow-wrap: anywhere;
+}
+.hometown-letter {
+  color: var(--home-muted);
+  font-size: .75rem;
+  opacity: .7;
+}
+.hometown-option > span:last-child {
+  color: var(--home-blue);
+}
+.hometown-option:hover,
+.hometown-option.is-selected {
+  background: var(--home-selected);
+  color: var(--home-blue);
+}
+.hometown-footer {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  margin: 0;
+  padding: 12px 24px max(16px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--home-line);
+}
+.hometown-footer > span {
+  flex: 1;
+  color: var(--home-muted);
+  font-size: .72rem;
+  line-height: 1.5;
+}
+.hometown-dialog.is-closing {
+  animation: hometown-exit .16s ease-in forwards;
+}
+.hometown-dialog.is-closing::backdrop {
+  animation: hometown-fade .16s ease reverse forwards;
+}
+:root[data-theme=dark] .hometown-open {
+  background: #0d1c31;
+  border-color: #3b506b;
+  color: #b5c3d7;
+}
+:root[data-theme=dark] .hometown-open.has-value {
+  color: #eaf1ff;
+}
+:root[data-theme=dark] .hometown-dialog {
+  --home-bg: #16263d;
+  --home-soft: #0e1f36;
+  --home-text: #eaf1ff;
+  --home-muted: #b0c0d5;
+  --home-line: #354a65;
+  --home-blue: #86b5ff;
+  --home-selected: #213b5e;
+  color-scheme: dark;
+}
+@keyframes hometown-enter {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes hometown-exit {
+  to {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+@keyframes hometown-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes hometown-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 600px) {
+  .hometown-dialog {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    margin: 0;
+    max-height: 100dvh;
+    border-radius: 0;
+    border: 0;
+    animation-name: hometown-slide;
+  }
+  .hometown-sheet {
+    height: 100%;
+    max-height: 100%;
+  }
+  .hometown-header {
+    padding: max(12px, env(safe-area-inset-top)) 14px 12px;
+    gap: 8px;
+  }
+  .hometown-current {
+    margin-inline: 18px;
+  }
+  .hometown-selection {
+    padding-inline: 18px;
+  }
+  .hometown-status {
+    padding-inline: 18px;
+  }
+  .hometown-option {
+    padding-inline: 18px;
+  }
+  .hometown-footer {
+    padding-inline: 18px;
+  }
+  .hometown-dialog.is-closing {
+    animation-name: hometown-sheet-exit;
+  }
+  @keyframes hometown-slide {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+  @keyframes hometown-sheet-exit {
+    to {
+      opacity: 0;
+      transform: translateY(30%);
+    }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hometown-dialog,
+  .hometown-dialog::backdrop,
+  .hometown-status.is-loading::before {
+    animation: none !important;
+  }
+  .hometown-open,
+  .hometown-option {
+    transition: none;
+  }
+}

@@ -1,6 +1,7 @@
 import { attendanceTimeIssue, attendanceReviewLabel } from '../core/AttendanceTimePolicy.js';
 import { ControllerScope } from '../core/ControllerScope.js';
 import { CoursePolicy } from '../core/CoursePolicy.js';
+import { ageLabel, hometownLabel, hometownForm, fillHometownForm } from '../core/StudentPersonalInfo.js';
 import { GenderPolicy } from '../core/GenderPolicy.js';
 import { PasswordResetApi } from '../controllers/PasswordResetApi.js';
 import { signInWithEmailAndPassword as signInAfterPasswordReset } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
@@ -27,12 +28,14 @@ export class StudentDashboard {
     document = globalThis.document,
     window = globalThis.window,
     sessionStorage = globalThis.sessionStorage,
-    metrics
+    metrics,
+    loading
   } = {}) {
     this.document = document;
     this.window = window;
     this.sessionStorage = sessionStorage;
     this.metrics = metrics;
+    this.loading = loading;
     this.identity = new StudentIdentityController({ document, storage: sessionStorage });
     this.scope = new ControllerScope();
     this.lastMarkup = new WeakMap();
@@ -144,6 +147,7 @@ export class StudentDashboard {
     dashboard.subscriptions = new ScopedSubscriptions({
       isEnabled: key => key === 'profile' || (dashboard.studentProfile || currentUserProfile)?.passwordResetRequired !== true,
       onError: (error, key) => {
+        dashboard.loading?.settle(key);
         if (key === 'events') dashboard.eventsConfirmed = false;
         if (key === 'attendance') dashboard.attendanceConfirmed = false;
         dashboard.studentSummary?.render();
@@ -395,9 +399,14 @@ export class StudentDashboard {
   }
   listen(key, views, reference, callback) {
     const dashboard = this;
+    const receive = snapshot => {
+      const result = callback(snapshot);
+      if (key === 'profile' || !snapshot.metadata?.fromCache) dashboard.loading?.settle(key);
+      return result;
+    };
     return dashboard.subscriptions.register(key, views, (guard, onError) => ['attendance', 'events'].includes(key)
-      ? onSnapshot(reference, { includeMetadataChanges: true }, guard(callback), onError)
-      : onSnapshot(reference, guard(callback), onError));
+      ? onSnapshot(reference, { includeMetadataChanges: true }, guard(receive), onError)
+      : onSnapshot(reference, guard(receive), onError));
   }
   changeSubscriptions(event) {
     const dashboard = this;
@@ -739,6 +748,7 @@ export class StudentDashboard {
     const profileVisual = dashboard.studentProfile.photoDataUrl ? `<img src="${escapeHtml(dashboard.studentProfile.photoDataUrl)}" alt="${escapeHtml(fullName)} profile photo">` : escapeHtml(initials);
     const fineCount = dashboard.fines.length;
     container.innerHTML = `<div class="profile-grid"><article class="panel student-profile-card"><header class="student-profile-header"><div class="student-profile-identity"><div class="profile-avatar">${profileVisual}</div><div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(dashboard.studentProfile.accountId)}</p><span>Course Registered · <strong>${escapeHtml(dashboard.studentProfile.course || "Not assigned")}</strong></span></div></div><button class="primary-button" type="button" id="editStudentProfile">Edit profile</button></header><div class="student-profile-details"><div class="profile-fact"><span>Birthday</span><strong>${escapeHtml(formatBirthday(dashboard.studentProfile.birthday))}</strong></div><div class="profile-fact"><span>Course</span><strong>${escapeHtml(dashboard.studentProfile.course || "Not assigned")}</strong></div><div class="profile-fact"><span>Section</span><strong>${escapeHtml(dashboard.studentProfile.section)}</strong></div><div class="profile-fact"><span>Account</span><strong>Active</strong></div><div class="profile-fact"><span>Student ID</span><strong>${escapeHtml(dashboard.studentProfile.accountId)}</strong></div><div class="profile-fact"><span>Phone</span><strong>${escapeHtml(dashboard.studentProfile.phone || "Not provided")}</strong></div><div class="profile-fact profile-fact-wide"><span>Email</span><strong>${escapeHtml(dashboard.studentProfile.email || "Not provided")}</strong></div></div><footer class="student-profile-actions"><button class="outline-button" type="button" id="checkStudentFines">Check attendance fines${fineCount ? ` (${fineCount})` : ""}</button></footer></article></div>`;
+    container.querySelector('.student-profile-details')?.insertAdjacentHTML('afterbegin', `<div class="profile-fact"><span>Age</span><strong>${escapeHtml(ageLabel(dashboard.studentProfile.birthday))}</strong></div><div class="profile-fact profile-fact-wide"><span>Hometown</span><strong>${escapeHtml(hometownLabel(dashboard.studentProfile))}</strong></div>`);
     container.querySelector('.student-profile-details')?.insertAdjacentHTML('afterbegin', `<div class="profile-fact"><span>Gender</span><strong>${GenderPolicy.label(dashboard.studentProfile.gender)}</strong></div>`);
   }
   serviceRecordMarkup(fine) {
@@ -908,6 +918,7 @@ export class StudentDashboard {
     dashboard.document.querySelector("#profileLastName").value = dashboard.studentProfile.lastName || "";
     dashboard.document.querySelector("#profileBirthday").value = dashboard.studentProfile.birthday || "";
     dashboard.document.querySelector("#profileGender").value = GenderPolicy.normalize(dashboard.studentProfile.gender);
+    fillHometownForm(dashboard.document, 'profile', dashboard.studentProfile);
     dashboard.document.querySelector("#profileCourse").value = CoursePolicy.normalize(dashboard.studentProfile.course);
     dashboard.document.querySelector("#profileSection").value = dashboard.studentProfile.section || "1A";
     dashboard.document.querySelector("#profileEmail").value = dashboard.studentProfile.email || "";
@@ -933,6 +944,7 @@ export class StudentDashboard {
     }
     try {
       const updateData = {
+        ...hometownForm(dashboard.document, 'profile'),
         firstName: dashboard.document.querySelector("#profileFirstName").value.trim(),
         middleName: dashboard.document.querySelector("#profileMiddleName").value.trim(),
         lastName: dashboard.document.querySelector("#profileLastName").value.trim(),

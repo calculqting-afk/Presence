@@ -1,0 +1,15 @@
+Philippine Standard Geographic Code (PSGC), 2026-Q3 snapshot.
+Source: Philippine Statistics Authority (PSA).
+Source publication: https://psa.gov.ph/system/files/scd/PSGC-3Q-2026-Publication-Datafile.xlsx
+Source page: https://psa.gov.ph/classification/psgc
+Retrieved through: https://psgc.billyjamesramos.com/api/v1/
+Provider source: https://github.com/rbillyjames0221/psgc-api
+Reference counts: 18 regions, 82 provinces, 149 cities, 1493 municipalities, 42010 barangays.
+Refresh tool: node tools/import-hometown-data.cjs
+
+Only public geographic names and codes are bundled. No student data is sent
+to the provider. Runtime selection loads the single local locations.json file.
+Five broad browsing groups simplify the UI; they are not official PSGC regions.
+Independent cities are grouped separately from administrative provinces.
+NCR skips the province step. Manila barangays are included under Manila.
+Names may change in later PSGC releases; this is a versioned snapshot.

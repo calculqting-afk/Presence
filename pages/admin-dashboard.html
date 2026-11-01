@@ -16,15 +16,16 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261028-arrival-recalculation">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261101-skeleton">
   <link rel="stylesheet" href="../assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261024-transparent-toast">
   <link rel="stylesheet" href="../assets/css/button-loading.css?v=20261010-auth-progress">
   <link rel="stylesheet" href="../assets/css/survey.css?v=20261011-survey-archive">
   <link rel="stylesheet" href="../assets/css/attendance-report.css?v=20261026">
   <link rel="stylesheet" href="../assets/css/event-audience.css?v=20261020">
+  <link rel="stylesheet" href="../assets/css/hometown-picker.css?v=20261101">
 </head>
-<body data-dashboard="admin">
+<body data-dashboard="admin" data-dashboard-loading>
   <div class="app-shell">
     <aside class="sidebar" style="--nav-count: 14">
       <a class="brand" href="../index.html" data-dashboard-home><span class="brand-mark"><span></span></span><span>Presence</span></a>
@@ -59,7 +60,22 @@
         <span id="themeToggleLabel">Dark</span>
       </button><span class="date-pill" data-current-date></span><button class="notification-bell" id="notificationBell" type="button" aria-label="Open notifications" aria-expanded="false">🔔<span class="notification-count" id="notificationCount" hidden>0</span></button><button class="topbar-profile" type="button" data-go-view="profile" aria-label="Open administrator profile"><span class="avatar"><img data-admin-photo alt="" hidden><span data-admin-initials>AD</span></span><span class="profile-name" data-admin-name>School Admin</span></button></div>
       </header>
-      <div class="content">
+      <div class="content" aria-busy="true">
+        <div class="dashboard-loading" role="status" aria-live="polite">
+          <div class="dashboard-skeleton-shapes" aria-hidden="true">
+            <div class="skeleton-card skeleton-welcome"><div class="skeleton-identity"><span class="skeleton-circle"></span><div><span class="skeleton-line skeleton-medium"></span><span class="skeleton-line skeleton-short"></span></div></div><span class="skeleton-line"></span><span class="skeleton-line skeleton-medium"></span></div>
+            <div class="skeleton-stats"><div class="skeleton-card skeleton-stat"><span class="skeleton-line skeleton-medium"></span><span class="skeleton-line skeleton-number"></span><span class="skeleton-line"></span><span class="skeleton-line skeleton-short"></span></div><div class="skeleton-card skeleton-stat"><span class="skeleton-line skeleton-medium"></span><span class="skeleton-line skeleton-number"></span><span class="skeleton-line"></span><span class="skeleton-line skeleton-short"></span></div><div class="skeleton-card skeleton-stat"><span class="skeleton-line skeleton-medium"></span><span class="skeleton-line skeleton-number"></span><span class="skeleton-line"></span><span class="skeleton-line skeleton-short"></span></div><div class="skeleton-card skeleton-stat"><span class="skeleton-line skeleton-medium"></span><span class="skeleton-line skeleton-number"></span><span class="skeleton-line"></span><span class="skeleton-line skeleton-short"></span></div></div>
+            <div class="skeleton-panels">
+              <div class="skeleton-card"><span class="skeleton-line skeleton-medium"></span><div class="skeleton-row"><div class="skeleton-identity"><span class="skeleton-circle"></span><div><span class="skeleton-line skeleton-medium"></span><span class="skeleton-line skeleton-short"></span></div></div><span class="skeleton-line skeleton-short"></span></div><div class="skeleton-row"><div class="skeleton-identity"><span class="skeleton-circle"></span><div><span class="skeleton-line skeleton-medium"></span><span class="skeleton-line skeleton-short"></span></div></div><span class="skeleton-line skeleton-short"></span></div><div class="skeleton-row"><div class="skeleton-identity"><span class="skeleton-circle"></span><div><span class="skeleton-line skeleton-medium"></span><span class="skeleton-line skeleton-short"></span></div></div><span class="skeleton-line skeleton-short"></span></div></div>
+              <div class="skeleton-card"><span class="skeleton-line skeleton-medium"></span><div class="skeleton-chart"></div><span class="skeleton-line skeleton-short"></span></div>
+            </div>
+          </div>
+          <div class="dashboard-loading-feedback">
+            <span data-dashboard-loading-message>Loading your dashboard…</span>
+            <button class="outline-button" data-dashboard-loading-retry type="button" hidden>Try again</button>
+            <noscript>Enable JavaScript to load your dashboard.</noscript>
+          </div>
+        </div>
         <section class="view-section" data-section="dashboard">
           <div class="welcome-card">
             <div class="welcome-copy"><p class="eyebrow" data-dashboard-greeting>Good morning</p><h2 data-dashboard-greeting-title>Good morning, Admin.</h2><p data-dashboard-greeting-message>Start the day prepared and stay on top of attendance.</p></div>
@@ -161,6 +177,7 @@
                 <div class="field"><label for="managedMiddleName">Middle name</label><input id="managedMiddleName"></div>
                 <div class="field"><label for="managedBirthday">Birthday</label><input id="managedBirthday" type="date" required></div>
                 <div class="field"><label for="managedGender">Gender</label><select id="managedGender"><option value="">Not specified</option><option value="Male">Male</option><option value="Female">Female</option></select></div>
+          <div class="hometown-field" data-hometown-picker><label id="managedHometownLabel">Hometown</label><button id="managedHometown" type="button" class="hometown-open" data-hometown-open aria-haspopup="dialog" aria-expanded="false" aria-labelledby="managedHometownLabel managedHometownValue"><span aria-hidden="true">⌖</span><span id="managedHometownValue" data-hometown-value>Select region, city and barangay</span><span aria-hidden="true">›</span></button><input type="hidden" id="managedHometownBarangay" data-hometown-key="hometownBarangay"><input type="hidden" id="managedHometownCity" data-hometown-key="hometownCity"><input type="hidden" id="managedHometownProvince" data-hometown-key="hometownProvince"></div>
                 <div class="field"><label for="managedStudentId">Student ID number</label><input id="managedStudentId" required pattern="[A-Za-z0-9._-]+" title="Use only letters, numbers, periods, underscores, or dashes" placeholder="e.g. 25100-1"></div>
                 <div class="field"><label for="managedSection">Section</label><select id="managedSection" required><option value="" selected disabled>Select a section</option><option value="1A">1A</option><option value="1B">1B</option><option value="2A">2A</option><option value="2B">2B</option><option value="3A">3A</option><option value="3B">3B</option><option value="4A">4A</option><option value="4B">4B</option></select></div>
                 <div class="field"><label for="managedCourse">Course</label><select id="managedCourse" required><option value="" selected disabled>Select a course</option><option value="BS Info Tech">BS Info Tech</option><option value="BSA">BSA</option><option value="BSFI">BSFI</option><option value="BSMB">BSMB</option></select></div>
@@ -438,5 +455,6 @@
     </div><div class="form-actions"><button class="outline-button" type="button" data-close-revocation>Cancel</button><button class="primary-button" type="submit" id="confirmAttendanceRevocation">Revoke attendance</button></div></form>
   </section>
 </div>
+  <script type="module" src="../assets/js/controllers/HometownPickerController.js?v=20261101"></script>
 </body>
 </html>

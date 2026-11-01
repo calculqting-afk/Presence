@@ -21,10 +21,15 @@ export class DashboardApplication {
     this.scope = new ControllerScope();
     this.identity = new StudentIdentityController({ document });
     this.metrics = new DashboardPerformanceController({ role: dashboardRole, performance: window.performance });
+    this.loading = new DashboardLoadingController({ document, window });
   }
   initialize() {
     if (this.initialization) return this.initialization;
-    this.initialization = this.start();
+    this.loading.start();
+    this.initialization = this.start().catch(error => {
+      this.loading.fail();
+      throw error;
+    });
     return this.initialization;
   }
   async start() {
@@ -71,12 +76,16 @@ export class DashboardApplication {
     const dashboard = new Dashboard({
       document: this.document,
       window: this.window,
-      metrics: this.metrics
+      metrics: this.metrics,
+      loading: this.loading
     });
     this.dashboard = dashboard;
     sessionState.dashboard = this;
     this.scope.addCleanup(() => dashboard.dispose());
     dashboard.initialize();
+    this.pullRefresh = new DashboardPullRefreshController({ document: this.document, window: this.window });
+    this.pullRefresh.initialize();
+    this.scope.addCleanup(() => this.pullRefresh.dispose());
     if (currentUserRole === 'student' || hasPermission(currentUserRole, 'manageSurveys')) {
       const surveys = new LazySurveyController({ document: this.document, window: this.window, openView, showToast: showDashboardToast,
         load: async () => {
@@ -92,6 +101,7 @@ export class DashboardApplication {
       this.scope.addCleanup(() => surveys.dispose());
       if (surveys.pendingEventId) {
         initializeDashboardHistory();
+        this.loading.completeStartup(dashboard);
         this.metrics.finish('startup');
         openView('surveys');
         this.scope.listen(this.window, 'beforeunload', () => this.dispose(), {
@@ -104,15 +114,192 @@ export class DashboardApplication {
       once: true
     });
     initializeDashboardHistory();
+    this.loading.completeStartup(dashboard);
     this.metrics.finish('startup');
   }
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.loading.dispose();
     try {
       this.scope.dispose();
     } finally {
       this.cleanupShared();
     }
+  }
+}
+
+// Shared Android gesture; normal scrolling and interactive controls keep their own gestures.
+export class DashboardPullRefreshController {
+  constructor({ document, window }) {
+    Object.assign(this, { document, window });
+    this.scope = new ControllerScope();
+    this.dirtyForms = new Set();
+  }
+
+  initialize() {
+    if (!/Android/i.test(this.window.navigator?.userAgent || '') && !this.window.PresenceNative?.isNative) return;
+    if (!this.scope.initialize()) return;
+    this.indicator = this.document.createElement('div');
+    this.indicator.className = 'dashboard-pull-refresh';
+    this.indicator.setAttribute('role', 'status');
+    this.indicator.setAttribute('aria-live', 'polite');
+    this.indicator.hidden = true;
+    this.document.body.append(this.indicator);
+    this.document.documentElement.classList.add('android-pull-refresh');
+    this.scope.listen(this.document, 'input', event => {
+      const form = event.target.closest?.('form');
+      if (form && event.target.type !== 'search' && !/filter/i.test(`${form.id} ${form.className}`)) this.dirtyForms.add(form);
+    });
+    this.scope.listen(this.document, 'reset', event => this.dirtyForms.delete(event.target));
+    this.scope.listen(this.document, 'touchstart', event => this.start(event), { passive: true });
+    this.scope.listen(this.document, 'touchmove', event => this.move(event), { passive: false });
+    this.scope.listen(this.document, 'touchend', () => this.release(), { passive: true });
+    this.scope.listen(this.document, 'touchcancel', () => this.reset(), { passive: true });
+  }
+
+  blocked() {
+    return this.refreshing || this.document.body.hasAttribute('data-dashboard-loading') ||
+      [...this.document.querySelectorAll('[role="dialog"], dialog[open]')].some(node => node.getClientRects().length && this.window.getComputedStyle(node).visibility !== 'hidden') ||
+      [...this.document.querySelectorAll('video')].some(video => video.srcObject) ||
+      [...this.dirtyForms].some(form => form.isConnected && form.getClientRects().length);
+  }
+
+  start(event) {
+    this.reset();
+    if (event.touches.length !== 1 || this.blocked()) return;
+    const target = event.target;
+    if (target.closest?.('input, textarea, select, button, a, form, [contenteditable], video, canvas, .sidebar, .leaflet-container')) return;
+    const scroll = this.document.scrollingElement || this.document.documentElement;
+    if (scroll.scrollTop > 0) return;
+    // A list, modal, or other nested scrolling area must never refresh the whole screen.
+    for (let node = target; node && node !== this.document.body; node = node.parentElement) {
+      if (node.scrollHeight > node.clientHeight + 1 && /auto|scroll/.test(this.window.getComputedStyle(node).overflowY)) return;
+    }
+    this.origin = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+  }
+
+  move(event) {
+    if (!this.origin || this.refreshing) return;
+    if (event.touches.length !== 1 || this.blocked()) { this.reset(); return; }
+    const dy = event.touches[0].clientY - this.origin.y;
+    const dx = Math.abs(event.touches[0].clientX - this.origin.x);
+    if (dy < 0 || dx > 24 && dx > dy) { this.reset(); return; }
+    if (dy < 12) return;
+    if (!event.cancelable) { this.reset(); return; }
+    event.preventDefault();
+    this.distance = Math.min(100, dy * .5);
+    this.indicator.hidden = false;
+    this.indicator.style.setProperty('--pull-distance', `${this.distance}px`);
+    const ready = this.distance >= 72;
+    this.indicator.classList.toggle('is-ready', ready);
+    const label = ready ? 'Release to refresh' : 'Pull down to refresh';
+    if (this.indicator.textContent !== label) this.indicator.textContent = label;
+  }
+
+  release() {
+    if (!this.origin || this.refreshing) return;
+    if (this.distance < 72 || this.blocked()) { this.reset(); return; }
+    if (this.window.navigator?.onLine === false) {
+      this.reset();
+      showDashboardToast('You are offline', 'Reconnect to the internet, then pull down to refresh.');
+      return;
+    }
+    this.refreshing = true;
+    this.origin = null;
+    this.indicator.textContent = 'Refreshing…';
+    this.indicator.classList.add('is-refreshing');
+    // Keep the current URL/history view; the normal startup flow reconciles fresh data.
+    this.frame = this.window.requestAnimationFrame(() => {
+      this.frame = this.window.requestAnimationFrame(() => this.window.location.reload());
+    });
+  }
+
+  reset() {
+    this.origin = null;
+    this.distance = 0;
+    if (!this.indicator || this.refreshing) return;
+    this.indicator.hidden = true;
+    this.indicator.classList.remove('is-ready');
+  }
+
+  dispose() {
+    this.scope.dispose();
+    this.window.cancelAnimationFrame(this.frame);
+    this.indicator?.remove();
+    this.document.documentElement?.classList.remove('android-pull-refresh');
+    this.dirtyForms.clear();
+  }
+}
+
+// Initial-page loading only. Later snapshots never replace visible dashboard data.
+export class DashboardLoadingController {
+  constructor({ document, window }) {
+    this.document = document;
+    this.window = window;
+    this.enabled = document.body?.hasAttribute?.('data-dashboard-loading') === true;
+    this.settledSources = new Set();
+    this.finished = false;
+    this.disposed = false;
+  }
+
+  start() {
+    if (!this.enabled || this.timer) return;
+    this.status = this.document.querySelector('[data-dashboard-loading-message]');
+    this.retry = this.document.querySelector('[data-dashboard-loading-retry]');
+    this.retryHandler = () => this.window.location.reload();
+    this.retry?.addEventListener('click', this.retryHandler);
+    this.timer = this.window.setTimeout(() => {
+      if (this.finished || this.disposed) return;
+      this.status.textContent = 'Still connecting. Check your internet connection or try again.';
+      this.retry.hidden = false;
+    }, 12000);
+  }
+
+  settle(source) {
+    if (!this.enabled || this.finished || this.disposed) return;
+    this.settledSources.add(source);
+    this.finishWhenReady();
+  }
+
+  completeStartup(dashboard) {
+    if (!this.enabled || this.finished || this.disposed) return;
+    const primarySources = new Set(['profile', 'students', 'events', 'attendance']);
+    this.expectedSources = [...(dashboard.subscriptions?.entries || [])]
+      .filter(([key, entry]) => primarySources.has(key) && entry.unsubscribe)
+      .map(([key]) => key);
+    this.finishWhenReady();
+  }
+
+  finishWhenReady() {
+    if (!this.expectedSources || this.expectedSources.some(key => !this.settledSources.has(key))) return;
+    if (this.finished || this.disposed) return;
+    this.finished = true;
+    this.window.clearTimeout(this.timer);
+    // Let scheduled card/row rendering finish before revealing the dashboard.
+    this.frame = this.window.requestAnimationFrame(() => {
+      this.frame = this.window.requestAnimationFrame(() => {
+        if (this.disposed) return;
+        this.document.body.removeAttribute('data-dashboard-loading');
+        this.document.body.classList.add('dashboard-content-ready');
+        this.document.querySelector('.content')?.removeAttribute('aria-busy');
+        this.retry?.removeEventListener('click', this.retryHandler);
+      });
+    });
+  }
+
+  fail() {
+    if (!this.enabled || this.disposed) return;
+    this.window.clearTimeout(this.timer);
+    this.document.querySelector('.dashboard-loading')?.classList.add('has-error');
+    if (this.status) this.status.textContent = 'Unable to load Presence. Check your connection and try again.';
+    if (this.retry) this.retry.hidden = false;
+  }
+
+  dispose() {
+    this.disposed = true;
+    this.window.clearTimeout(this.timer);
+    this.window.cancelAnimationFrame(this.frame);
+    this.retry?.removeEventListener('click', this.retryHandler);
   }
 }

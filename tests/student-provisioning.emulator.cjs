@@ -53,5 +53,20 @@ const profile = id => ({ uid:id,accountId:id,accountIdKey:id,authEmail:`${id}@ex
   await commit([write('registrationRequests/gender-reapply',{uid:'gender-reapply',accountId:'gender-reapply',accountIdKey:'gender-reapply',birthday:'2005-01-01',firstName:'Test',lastName:'Student',course:'BS Info Tech',section:'2A',status:'declined',requestedAt:SERVER,updatedAt:SERVER})], 'owner');
   await commit([write('registrationRequests/gender-reapply',{gender:'invalid',status:'pending',updatedAt:SERVER},['gender','status','updatedAt'])], 'gender-reapply',false);
   await commit([write('registrationRequests/gender-reapply',{gender:'Female',status:'pending',updatedAt:SERVER},['gender','status','updatedAt'])], 'gender-reapply');
+  const home={hometownBarangay:'San Juan',hometownCity:'Bontoc',hometownProvince:'Southern Leyte'};
+  await commit([write('students/home-self',profile('home-self'))],'owner');
+  await commit([write('students/home-self',{...home,updatedAt:SERVER},[...Object.keys(home),'updatedAt'])],'home-self');
+  await commit([write('students/home-self',{hometownBarangay:'Other'},['hometownBarangay'])],'student',false);
+  await commit([write('students/home-self',{hometownProvince:'Leyte'},['hometownProvince'])],'manager');
+  await commit([write('students/home-self',{age:'21'},['age'])],'home-self',false);
+  for (const [key,limit] of Object.entries({hometownBarangay:80,hometownCity:120,hometownProvince:120})) {
+    for(const value of [true,'a'.repeat(limit+1)])await commit([write('students/home-self',{[key]:value},[key])],'home-self',false);
+  }
+  const homeRequest={uid:'home-new',accountId:'home-new',accountIdKey:'home-new',birthday:'2005-01-01',firstName:'Test',lastName:'Student',course:'BS Info Tech',section:'2A',status:'pending',requestedAt:SERVER,updatedAt:SERVER,...home};
+  await commit([write('registrationRequests/home-new',homeRequest)],'home-new');
+  await commit([write('registrationRequests/home-new',{status:'declined'},['status'])],'owner');
+  await commit([write('registrationRequests/home-new',{...home,hometownCity:'Maasin',status:'pending',updatedAt:SERVER},[...Object.keys(home),'status','updatedAt'])],'home-new');
+  await commit([write('registrationRequests/home-bad',{...homeRequest,uid:'home-bad',accountIdKey:'home-bad',hometownProvince:true})],'home-bad',false);
+  console.log('Hometown Rules passed: self/manager updates and reapplication, type/length validation, no stored age and no cross-student edits.');
   console.log('Student provisioning and gender Rules passed: creation/approval/legacy, self and manager edits, registration/reapplication, invalid values and unauthorized edits.');
 })().catch(error=>{console.error(error.message);process.exitCode=1});

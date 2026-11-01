@@ -1168,6 +1168,116 @@ test('shared navigation history is idempotent and cleans up modal and popstate l
   controller.dispose(); assert.equal(browser.document.querySelector('#confirmLogout').handlers.get('click').size, 0);
 });
 
+async function loadingControllerClass(name = 'DashboardLoadingController') {
+  const shared = Object.fromEntries([
+    'waitForUser', 'verifyRole', 'auth', 'signOut', 'wireCommonNavigation',
+    'wireNotificationCenter', 'applyRoleNavigation', 'dashboardRole',
+    'currentUserProfile', 'currentUserRole', 'updateDashboardGreeting',
+    'sessionState', 'db', 'setDoc', 'doc', 'serverTimestamp', 'escapeHtml',
+    'openView', 'showDashboardToast', 'initializeDashboardHistory'
+  ].map(name => [name, () => {}]));
+  return (await isolatedModule('assets/js/controllers/DashboardApplication.js', shared, fakeBrowser()))[name];
+}
+
+test('Android pull refresh requires a deliberate downward release at the top and reloads only once', async () => {
+  const Controller = await loadingControllerClass('DashboardPullRefreshController');
+  const browser = fakeBrowser(), frames = [];
+  let reloads = 0, prevented = 0;
+  browser.window.navigator = { userAgent: 'Android', onLine: true };
+  browser.window.location = { reload: () => reloads++ };
+  browser.window.requestAnimationFrame = callback => { frames.push(callback); return frames.length; };
+  browser.window.getComputedStyle = () => ({ overflowY: 'visible' });
+  browser.document.documentElement = browser.document.querySelector('html');
+  browser.document.scrollingElement = { scrollTop: 0 };
+  browser.document.body.hasAttribute = () => false;
+  const controller = new Controller(browser);
+  controller.initialize();
+  controller.indicator.style.setProperty = () => {};
+  const target = { closest: () => null, parentElement: browser.document.body, scrollHeight: 10, clientHeight: 10 };
+  const start = () => controller.start({ target, touches: [{ clientX: 10, clientY: 10 }] });
+  const move = (x, y) => controller.move({ touches: [{ clientX: x, clientY: y }], cancelable: true, preventDefault: () => prevented++ });
+  start(); move(10, 80); controller.release();
+  assert.equal(frames.length, 0); assert.equal(controller.indicator.hidden, true);
+  start(); move(100, 40); controller.release(); assert.equal(frames.length, 0);
+  browser.document.scrollingElement.scrollTop = 20;
+  start(); move(10, 190); controller.release(); assert.equal(frames.length, 0);
+  browser.document.scrollingElement.scrollTop = 0;
+  start(); move(10, 190); controller.release(); controller.release();
+  assert.equal(frames.length, 1); assert.ok(prevented > 0);
+  frames.shift()(); frames.shift()(); assert.equal(reloads, 1);
+  controller.dispose();
+});
+
+test('pull refresh excludes desktop, edited forms, nested scroll areas and open dialogs', async () => {
+  const Controller = await loadingControllerClass('DashboardPullRefreshController');
+  const browser = fakeBrowser();
+  const desktop = new Controller(browser); desktop.initialize(); assert.equal(desktop.indicator, undefined);
+  browser.window.navigator = { userAgent: 'Android' };
+  browser.window.getComputedStyle = () => ({ overflowY: 'auto', visibility: 'visible' });
+  browser.document.documentElement = browser.document.querySelector('html');
+  browser.document.scrollingElement = { scrollTop: 0 };
+  browser.document.body.hasAttribute = () => false;
+  const controller = new Controller(browser); controller.initialize();
+  const target = { closest: () => null, scrollHeight: 200, clientHeight: 100, parentElement: browser.document.body };
+  const event = { target, touches: [{ clientX: 0, clientY: 0 }] };
+  controller.start(event); assert.equal(controller.origin, null);
+  target.scrollHeight = 100;
+  controller.dirtyForms.add({ isConnected: true, getClientRects: () => [1] });
+  controller.start(event); assert.equal(controller.origin, null);
+  controller.dirtyForms.clear();
+  browser.document.querySelectorAll = selector => selector.includes('dialog') ? [{ getClientRects: () => [1] }] : [];
+  controller.start(event); assert.equal(controller.origin, null);
+  controller.dispose();
+});
+
+test('startup skeleton waits for active data sources and never returns during background refresh', async () => {
+  const DashboardLoadingController = await loadingControllerClass();
+  const browser = fakeBrowser();
+  const attributes = new Set(['data-dashboard-loading']);
+  browser.document.body.hasAttribute = key => attributes.has(key);
+  browser.document.body.removeAttribute = key => attributes.delete(key);
+  const frames = [];
+  browser.window.requestAnimationFrame = callback => { frames.push(callback); return frames.length; };
+  const loading = new DashboardLoadingController(browser);
+  loading.start();
+  // A callback can finish before history activates the final initial view.
+  loading.settle('events');
+  loading.completeStartup({ subscriptions: { entries: new Map([
+    ['events', { unsubscribe() {} }],
+    ['attendance', { unsubscribe() {} }],
+    ['students', { unsubscribe: null }]
+  ]) } });
+  assert.equal(frames.length, 0);
+  assert.ok(attributes.has('data-dashboard-loading'));
+  loading.settle('attendance');
+  assert.equal(frames.length, 1);
+  frames.shift()(); frames.shift()();
+  assert.ok(!attributes.has('data-dashboard-loading'));
+  loading.settle('events'); loading.settle('attendance');
+  assert.equal(frames.length, 0);
+  loading.dispose();
+});
+
+test('startup skeleton offers retry on slow/failed startup and ignores readiness after disposal', async () => {
+  const DashboardLoadingController = await loadingControllerClass();
+  const browser = fakeBrowser();
+  browser.document.body.hasAttribute = () => true;
+  let slowTimeout;
+  browser.window.setTimeout = callback => { slowTimeout = callback; return 1; };
+  const loading = new DashboardLoadingController(browser);
+  loading.start(); slowTimeout();
+  assert.equal(browser.document.querySelector('[data-dashboard-loading-retry]').hidden, false);
+  assert.match(browser.document.querySelector('[data-dashboard-loading-message]').textContent, /Still connecting/);
+  let failedClass;
+  browser.document.querySelector('.dashboard-loading').classList.add = name => { failedClass = name; };
+  loading.fail();
+  assert.match(browser.document.querySelector('[data-dashboard-loading-message]').textContent, /Unable to load/);
+  assert.equal(failedClass, 'has-error');
+  loading.dispose();
+  loading.settle('events');
+  assert.equal(loading.settledSources.size, 0);
+});
+
 test('application boot is idempotent and disposes its role controller without late initialization', async () => {
   const browser = fakeBrowser(); browser.window.location = { replace() {} };
   let created = 0, initialized = 0, disposed = 0, sharedCleanups = 0;
@@ -2077,12 +2187,13 @@ test('Add Student derives birthday password and marks only the new profile for f
     updateProfile:async()=>{}, signOut:async()=>{}, showDashboardToast:(...args)=>toasts.push(args),
     writeBatch:()=>({set:(ref,data)=>writes.push({ref,data}),commit:async()=>{}}) });
   const { AdminDashboard } = await isolatedModule('assets/js/admin/AdminDashboard.js', shared, browser);
-  for (const [id,value] of Object.entries({managedStudentId:'12345678',managedFirstName:'Anne',managedLastName:'Test',managedBirthday:'2005-01-02',managedSection:'2A',managedCourse:'BSA',managedPassword:'ignored input'})) browser.document.querySelector('#'+id).value=value;
+  for (const [id,value] of Object.entries({managedStudentId:'12345678',managedFirstName:'Anne',managedLastName:'Test',managedBirthday:'2005-01-02',managedSection:'2A',managedCourse:'BSA',managedPassword:'ignored input',managedHometownBarangay:' San Juan ',managedHometownCity:'Bontoc',managedHometownProvince:'Southern Leyte'})) browser.document.querySelector('#'+id).value=value;
   let resets=0;
   const state={document:browser.document,can:()=>true,students:[],resetStudentForm:()=>resets++};
   await AdminDashboard.prototype.handleStudentFormSubmit.call(state,{preventDefault(){}});
   assert.equal(credentials[0].password,'01022005'); assert.equal(credentials[0].email,'12345678@students.test');
   const saved=writes.find(w=>w.ref.collection==='students').data;
+  assert.equal(saved.hometownBarangay,'San Juan'); assert.equal(saved.hometownCity,'Bontoc'); assert.equal(saved.hometownProvince,'Southern Leyte'); assert.equal(Object.hasOwn(saved,'age'),false);
   assert.equal(saved.mustChangePassword,true); assert.equal(saved.birthday,'2005-01-02'); assert.equal('password' in saved,false); assert.equal(resets,1);
   assert.equal(state.studentAccountBusy,false); assert.equal(browser.document.querySelector('#studentSubmitButton').disabled,false);
   browser.document.querySelector('#managedBirthday').value='';

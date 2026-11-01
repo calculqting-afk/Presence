@@ -342,7 +342,16 @@ exports.assignUserRole = onCall(async (request) => {
   return { ok: true, role };
 });
 
+function validatedHometown(data) {
+  return Object.fromEntries(Object.entries({ hometownBarangay: 80, hometownCity: 120, hometownProvince: 120 }).map(([key, max]) => {
+    const value = data[key] === undefined ? '' : data[key];
+    if (typeof value !== 'string' || value.length > max) throw new HttpsError('invalid-argument', 'Enter valid hometown information.');
+    return [key, value.trim()];
+  }));
+}
+
 async function validateStudent(data) {
+  validatedHometown(data);
   const required = ["accountId", "firstName", "lastName", "section"];
   const allowedSections = new Set(["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"]);
   for (const field of required) {
@@ -416,7 +425,7 @@ function validateRegistrationRequest(data) {
   if (!firstName || !lastName || !course || !new Set(["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"]).has(section)) {
     throw new HttpsError("invalid-argument", "Complete your name, course, and section.");
   }
-  return { accountId, accountIdKey: normalizedStudentId(accountId), birthday, password, firstName, lastName, course, section };
+  return { ...validatedHometown(data), accountId, accountIdKey: normalizedStudentId(accountId), birthday, password, firstName, lastName, course, section };
 }
 
 // Student passwords are sent only to Firebase Authentication. The request document
@@ -435,6 +444,7 @@ exports.requestStudentRegistration = onCall(async (request) => {
   const user = await firebaseAuth.createUser({ email: authEmail, password: registration.password, displayName, disabled: true });
   try {
     await firestore.doc(`registrationRequests/${registration.accountIdKey}`).set({
+      ...validatedHometown(registration),
       uid: user.uid,
       accountId: registration.accountId,
       accountIdKey: registration.accountIdKey,
@@ -493,6 +503,7 @@ exports.resolveStudentRegistration = onCall(async (request) => {
   try {
     const batch = firestore.batch();
     batch.set(firestore.doc(`students/${registration.uid}`), {
+      ...validatedHometown(registration),
       uid: registration.uid, accountId: registration.accountId, accountIdKey: registration.accountIdKey,
       authEmail: studentIdToEmail(registration.accountId), birthday: registration.birthday,
       firstName: registration.firstName, lastName: registration.lastName, middleName: "",
@@ -566,7 +577,7 @@ exports.manageStudent = onCall(async (request) => {
     }
 
     await validateStudent(data.student || {});
-    const student = data.student;
+    const student = { ...data.student, ...validatedHometown(data.student) };
     const authEmail = studentIdToEmail(student.accountId);
     const accountIdKey = student.accountId.trim().toLowerCase();
 

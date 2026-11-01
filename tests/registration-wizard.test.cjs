@@ -15,22 +15,22 @@ async function fixture({ resubmit = false } = {}) {
   const context = vm.createContext({ FormData: class { constructor(form) { return Object.entries(form.values); } } });
   const entry = new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/controllers/RegistrationController.js'), 'utf8'), { context });
   await entry.link(specifier => {
-    if (specifier.endsWith('GenderPolicy.js')) return new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/core/GenderPolicy.js'), 'utf8'), { context });
+    if (/\/(GenderPolicy|StudentPersonalInfo)\.js$/.test(specifier)) return new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/core', path.basename(specifier)), 'utf8'), { context });
     const exports = specifier.endsWith('CoursePolicy.js') ? { CoursePolicy: { normalize: value => value } } : sdk;
     return new vm.SyntheticModule(Object.keys(exports), function() { for (const [key, value] of Object.entries(exports)) this.setExport(key, value); }, { context });
   });
   await entry.evaluate();
   const fields = {};
-  for (const name of ['accountId', 'birthday', 'firstName', 'lastName', 'course', 'section', 'password', 'confirmPassword']) {
-    fields[name] = { name, value: '', required: true, custom: '', focused: 0, reports: 0,
+  for (const name of ['accountId', 'birthday', 'firstName', 'lastName', 'hometownBarangay', 'hometownCity', 'hometownProvince', 'course', 'section', 'password', 'confirmPassword']) {
+    fields[name] = { name, value: '', required: !name.startsWith('hometown'), custom: '', focused: 0, reports: 0,
       setCustomValidity(message) { this.custom = message; }, focus() { this.focused++; }, reportValidity() { this.reports++; },
       get validationMessage() { return this.custom || 'Invalid field'; },
-      checkValidity() { return !this.custom && Boolean(this.value) && (!name.includes('assword') || this.value.length >= 8) && (name !== 'birthday' || this.value <= this.max); } };
+      checkValidity() { return !this.custom && (!this.required || Boolean(this.value)) && (!name.includes('assword') || this.value.length >= 8) && (name !== 'birthday' || this.value <= this.max); } };
   }
-  const panels = [['accountId', 'birthday', 'firstName', 'lastName'], ['course', 'section'], ['password', 'confirmPassword']].map(names => ({ hidden: false, disabled: false, querySelectorAll: () => names.map(name => fields[name]) }));
+  const panels = [['accountId', 'birthday', 'firstName', 'lastName', 'hometownBarangay', 'hometownCity', 'hometownProvince'], ['course', 'section'], ['password', 'confirmPassword']].map(names => ({ hidden: false, disabled: false, querySelectorAll: () => names.map(name => fields[name]) }));
   const indicators = [0, 1, 2].map(() => { const values = new Set(); return { classes: values, classList: { toggle: (name, set) => set ? values.add(name) : values.delete(name), add: name => values.add(name), remove: name => values.delete(name) }, setAttribute(name, value) { this[name] = value; }, removeAttribute(name) { delete this[name]; } }; });
   const next = {}, back = {}, submit = { textContent: 'Send registration request', dataset: {}, disabled: false }, status = {}, error = { textContent: '' };
-  const review = ['accountId', 'birthday', 'firstName', 'lastName', 'course', 'section'].map(name => ({ dataset: { registrationReview: name }, textContent: '' }));
+  const review = ['accountId', 'birthday', 'age', 'hometown', 'firstName', 'lastName', 'course', 'section'].map(name => ({ dataset: { registrationReview: name }, textContent: '' }));
   const nodes = { '[data-registration-next]': next, '[data-registration-back]': back, '[type="submit"]': submit, '[data-registration-step-status]': status };
   const form = { elements: { namedItem: name => fields[name] }, querySelector: selector => nodes[selector],
     querySelectorAll: selector => selector === '[data-registration-step]' ? panels : selector === '[data-registration-indicator]' ? indicators : selector === '[data-registration-review]' ? review : [],
@@ -79,6 +79,25 @@ test('Enter advances early steps without reaching Firebase; duplicate final subm
   assert.equal(f.success.length, 1); assert.match(f.success[0][1], /administrator approval/);
   assert.ok(f.indicators[2].classes.has('is-complete')); assert.equal(f.submit.disabled, false); assert.equal(f.panels[0].disabled, false);
 });
+test('optional hometown survives new registrations and declined resubmissions without storing age', async () => {
+  for (const resubmit of [false, true]) {
+    const f = await fixture({ resubmit }); f.fill();
+    f.fields.hometownBarangay.value = ' San Juan ';
+    f.fields.hometownCity.value = 'Bontoc';
+    f.fields.hometownProvince.value = 'Southern Leyte';
+    f.wizard.next(); f.wizard.next();
+    const pending = f.registration.submitRegistration({ preventDefault() {} });
+    await new Promise(resolve => setImmediate(resolve));
+    const saved = f.calls.find(item => typeof item === 'object');
+    assert.equal(saved.hometownBarangay, 'San Juan');
+    assert.equal(saved.hometownCity, 'Bontoc');
+    assert.equal(saved.hometownProvince, 'Southern Leyte');
+    assert.equal(Object.hasOwn(saved, 'age'), false);
+    f.resolveSave(); await pending;
+    assert.equal(f.success.length, 1);
+  }
+});
+
 test('failed final save stays on security step and preserves entries without a success or completed third circle', async () => {
   const f = await fixture(); f.fill(); f.wizard.next(); f.wizard.next();
   const pending = f.registration.submitRegistration({ preventDefault() {} }); await new Promise(resolve => setImmediate(resolve));
