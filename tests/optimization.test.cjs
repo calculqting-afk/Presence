@@ -4,6 +4,17 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
+test('navigation grace reuses a listener but expires and cleans it on disposal', async () => {
+ const {ScopedSubscriptions}=await import('../assets/js/core/ScopedSubscriptions.js');
+ let starts=0,stops=0,sequence=0;const timers=new Map();
+ const scope=new ScopedSubscriptions({linger:()=>15000,schedule:fn=>{timers.set(++sequence,fn);return sequence;},cancel:id=>timers.delete(id)});
+ scope.register('students',['directory'],()=>{starts++;return()=>{stops++;};});
+ scope.setView('directory');scope.setView('dashboard');scope.setView('directory');
+ assert.equal(starts,1);assert.equal(stops,0);assert.equal(timers.size,0);
+ scope.setView('dashboard');const [id,expire]=[...timers.entries()][0];timers.delete(id);expire();assert.equal(stops,1);
+ scope.setView('directory');scope.setView('dashboard');scope.stop();
+ assert.equal(starts,2);assert.equal(stops,2);assert.equal(timers.size,0);
+});
 async function loadModule(relative) {
   const context = vm.createContext({ URL, console });
   const modules = new Map();

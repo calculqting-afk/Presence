@@ -3,6 +3,11 @@ export class DailyAttendanceClock {
   static dateKey(date = new Date()) {
     return new Date(date.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
   }
+  static attendanceRange(events = [], closeDate, now = new Date()) {
+    const to = this.dateKey(now);
+    const ongoing = events.filter(event => event.date < to && closeDate(event)?.getTime() >= now.getTime());
+    return { from: ongoing.reduce((date, event) => event.date < date ? event.date : date, to), to };
+  }
   constructor({ window, document, onDayChange, now = () => new Date() }) {
     Object.assign(this, { window, document, onDayChange, now });
   }

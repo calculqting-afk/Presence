@@ -6,7 +6,9 @@
   "workers_dev": true,
   "preview_urls": false,
   "observability": { "enabled": false },
-  "triggers": { "crons": ["* * * * *"] },
+  // Password completion checks the exact expiry on every request. This job only
+  // performs cleanup/credential rotation for expired, already restricted resets.
+  "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
     "ALLOWED_ORIGINS": "http://127.0.0.1:5500,http://localhost:5500,https://localhost,https://presence-a873f.web.app,https://presence-a873f.firebaseapp.com,https://calculqting-afk.github.io",
     "RESET_ENABLED": "true",

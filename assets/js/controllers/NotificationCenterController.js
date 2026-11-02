@@ -1,4 +1,5 @@
 import { ControllerScope } from '../core/ControllerScope.js';
+import { orderBy, limit } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { db, currentUser, currentUserRole, dashboardRole, escapeHtml, formatNotificationTime, query, collection, where, onSnapshot, setDoc, doc, serverTimestamp, writeBatch, showDashboardToast, openView, canReceiveNotification } from '../dashboard.js?v=20261011-optimized';
 export class NotificationCenterController {
   constructor({
@@ -29,6 +30,9 @@ export class NotificationCenterController {
     dashboard.isAdminDashboard = dashboardRole === "admin";
     dashboard.document.body.insertAdjacentHTML("beforeend", `<section class="notification-panel" id="notificationPanel" hidden aria-label="Notifications"><div class="notification-panel-head"><div><h2>Notifications</h2><p>Stay up to date with Presence.</p></div><button class="modal-close" id="closeNotifications" type="button" aria-label="Close notifications">×</button></div><div class="notification-tools"><div class="notification-filters"><button class="notification-filter active" type="button" data-notification-filter="all">All</button><button class="notification-filter" type="button" data-notification-filter="unread">Unread</button><button class="notification-filter" type="button" data-notification-filter="attendance">Attendance</button><button class="notification-filter" type="button" data-notification-filter="service">Service</button><button class="notification-filter" type="button" data-notification-filter="face">Face</button><button class="notification-filter" type="button" data-notification-filter="system">System</button></div>${dashboard.isAdminDashboard ? '<input class="notification-search" id="notificationSearch" type="search" placeholder="Search student, ID, or section">' : ""}</div><div class="notification-actions"><button class="link-button" type="button" id="markNotificationsRead">Mark all as read</button><button class="link-button" type="button" id="clearReadNotifications">Clear read</button></div><div class="notification-list" id="notificationList"><div class="empty-state">No notifications yet.</div></div></section>`);
     dashboard.panel = dashboard.document.querySelector("#notificationPanel");
+    dashboard.panel.querySelector('p').textContent = 'Latest 100 notifications';
+    dashboard.document.querySelector('#markNotificationsRead').textContent = 'Mark displayed as read';
+    dashboard.document.querySelector('#clearReadNotifications').textContent = 'Clear displayed read';
     dashboard.list = dashboard.document.querySelector("#notificationList");
     dashboard.search = dashboard.document.querySelector("#notificationSearch");
     dashboard.notificationRecords = [];
@@ -142,9 +146,13 @@ export class NotificationCenterController {
     dashboard.scope.listen(dashboard.document, "keydown", event => {
       if (event.key === "Escape" && !dashboard.panel.hidden) dashboard.close();
     });
-    dashboard.scope.listen(dashboard.window, "online", dashboard.subscribeToNotifications);
+    const resume = () => {
+      if (dashboard.notificationsBlocked || dashboard.unsubscribeNotifications || dashboard.retryNotificationsTimer != null) return;
+      dashboard.subscribeToNotifications();
+    };
+    dashboard.scope.listen(dashboard.window, "online", resume);
     dashboard.scope.listen(dashboard.document, "visibilitychange", () => {
-      if (dashboard.document.visibilityState === "visible") dashboard.subscribeToNotifications();
+      if (dashboard.document.visibilityState === "visible") resume();
     });
     dashboard.scope.listen(dashboard.window, "beforeunload", () => {
       dashboard.window.clearTimeout(dashboard.retryNotificationsTimer);
@@ -174,13 +182,14 @@ export class NotificationCenterController {
   }
   subscribeToNotifications() {
     const dashboard = this;
-    if (!dashboard.scope.initialized) return;
+    if (!dashboard.scope.initialized || dashboard.notificationsBlocked || dashboard.unsubscribeNotifications) return;
     const generation = dashboard.subscriptionGeneration = (dashboard.subscriptionGeneration || 0) + 1;
     dashboard.window.clearTimeout(dashboard.retryNotificationsTimer);
-    dashboard.unsubscribeNotifications?.();
-    const notificationQuery = query(collection(db, "notifications"), where("recipientUid", "==", currentUser.uid));
+    dashboard.retryNotificationsTimer = null;
+    const notificationQuery = query(collection(db, "notifications"), where("recipientUid", "==", currentUser.uid), orderBy('createdAt', 'desc'), limit(100));
     dashboard.unsubscribeNotifications = onSnapshot(notificationQuery, snapshot => {
       if (!dashboard.scope.initialized || generation !== dashboard.subscriptionGeneration) return;
+      dashboard.notificationRetryCount = 0;
       dashboard.notificationRecords = snapshot.docs.map(item => ({
         id: item.id,
         ...item.data()
@@ -188,14 +197,20 @@ export class NotificationCenterController {
       dashboard.render();
     }, error => {
       if (!dashboard.scope.initialized || generation !== dashboard.subscriptionGeneration) return;
+      dashboard.unsubscribeNotifications?.(); dashboard.unsubscribeNotifications = null;
       // A listener error is terminal. Keep cached records and retry transient failures.
       console.error("Notification listener failed", {
         code: error.code,
         message: error.message
       });
-      // A rules or auth-token change can resolve a permission error without a
-      // page reload, so every terminal listener error is retried silently.
-      dashboard.retryNotificationsTimer = dashboard.window.setTimeout(dashboard.subscribeToNotifications, 5000);
+      const retryable = ['unavailable', 'deadline-exceeded', 'aborted', 'internal', 'unknown', 'offline'].includes(error.code);
+      dashboard.notificationRetryCount = (dashboard.notificationRetryCount || 0) + 1;
+      if (!retryable || dashboard.notificationRetryCount > 4) {
+        dashboard.notificationsBlocked = true;
+        return; // Re-authenticate/reload after a permission, quota or exhausted retry failure.
+      }
+      const delay = 15000 * 2 ** (dashboard.notificationRetryCount - 1);
+      dashboard.retryNotificationsTimer = dashboard.window.setTimeout(dashboard.subscribeToNotifications, delay);
     });
   }
 }

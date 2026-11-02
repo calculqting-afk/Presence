@@ -974,7 +974,7 @@ for (const role of ['Student', 'Admin']) {
       browser.window.emit('modify-students');
       assert.equal(active.has('presenceSessions'), true); assert.equal(active.has('faceRegistrations'), true);
       browser.window.emit('dashboard'); assert.equal(active.has('presenceSessions'), false);
-      browser.window.emit('geofence'); assert.equal(active.has('students'), false);
+      browser.window.emit('geofence'); assert.equal(active.has('students'), true); // short navigation grace
       browser.window.emit('create'); assert.equal(active.has('students'), true);
       const queued = new Map(); let token = 0, filtered = 0;
       browser.window.setTimeout = (handler, delay) => { assert.equal(delay, 200); queued.set(++token, handler); return token; };
@@ -1154,6 +1154,24 @@ test('notification center initializes once, unsubscribes on dispose and ignores 
   callback({ docs: [] }); failure({ code: 'offline' }); controller.subscribeToNotifications();
   assert.equal(subscribed, 1); assert.equal(controller.notificationRecords.length, 1);
   assert.equal(browser.document.querySelector('#notificationBell').handlers.get('click').size, 0);
+});
+
+test('notifications reuse visibility subscriptions, back off transient failures and stop permission retries', async () => {
+ const browser=fakeBrowser();let subscribed=0,failure;const timers=new Map();let sequence=0;
+ browser.window.setTimeout=(fn,delay)=>{timers.set(++sequence,{fn,delay});return sequence;};
+ browser.window.clearTimeout=id=>timers.delete(id);
+ const shared={db:{},currentUser:{uid:'s'},currentUserRole:'student',dashboardRole:'student',escapeHtml:String,
+  formatNotificationTime:()=>'',query:x=>x,collection:()=> 'notifications',where(){},
+  onSnapshot:(_,next,error)=>{subscribed++;failure=error;return()=>{};},setDoc(){},doc(){},serverTimestamp(){},writeBatch(){},showDashboardToast(){},openView(){},canReceiveNotification:()=>true};
+ const {NotificationCenterController}=await isolatedModule('assets/js/controllers/NotificationCenterController.js',shared,browser);
+ const controller=new NotificationCenterController(browser);controller.initialize();
+ controller.subscribeToNotifications();assert.equal(subscribed,1);
+ failure({code:'unavailable'});assert.equal([...timers.values()][0].delay,15000);
+ const [id,timer]=[...timers.entries()][0];timers.delete(id);timer.fn();assert.equal(subscribed,2);
+ failure({code:'unavailable'});assert.equal([...timers.values()][0].delay,30000);
+ const [nextId,next]=[...timers.entries()][0];timers.delete(nextId);next.fn();
+ failure({code:'permission-denied'});assert.equal(timers.size,0);
+ controller.subscribeToNotifications();assert.equal(subscribed,3);controller.dispose();
 });
 
 test('shared navigation history is idempotent and cleans up modal and popstate listeners', async () => {
@@ -1807,6 +1825,20 @@ test('history reads are bounded, date-filtered, and use server document cursors'
   assert.match(JSON.stringify(requests[0]), /eventDate.*desc/); assert.match(JSON.stringify(requests[0]), /2026-10-01/); assert.match(JSON.stringify(requests[0]), /limit/);
   await repository.page({ cursor: result.cursor });
   assert.equal(requests[1].some(item => item?.cursor === result.cursor), true);
+  await repository.page({event:'day',eventIds:['day','day_afternoon'],from:'2026-10-01',to:'2026-10-01'});
+  assert.match(JSON.stringify(requests[2]), /eventId.*in.*day_afternoon/);
+  await repository.page({event:'single'});
+  assert.match(JSON.stringify(requests[3]), /eventId.*==.*single/);
+});
+
+test('dashboard attendance range follows Philippine midnight and retains only unfinished earlier dates', async () => {
+ const {DailyAttendanceClock}=await import('../assets/js/controllers/DailyAttendanceClock.js');
+ const now=new Date('2026-11-03T00:10:00+08:00'),close=e=>new Date(e.close);
+ const events=[{date:'2026-10-01',close:'2026-10-01T17:00:00+08:00'},
+   {date:'2026-11-02',close:'2026-11-03T00:30:00+08:00'}];
+ assert.deepEqual(DailyAttendanceClock.attendanceRange(events,close,now),{from:'2026-11-02',to:'2026-11-03'});
+ assert.deepEqual(DailyAttendanceClock.attendanceRange(events,close,new Date('2026-11-03T00:31:00+08:00')),{from:'2026-11-03',to:'2026-11-03'});
+ assert.deepEqual(DailyAttendanceClock.attendanceRange([],close,now),{from:'2026-11-03',to:'2026-11-03'});
 });
 
 test('history filters use historical sections and pagination discards stale responses', async () => {

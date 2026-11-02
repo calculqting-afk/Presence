@@ -6,8 +6,11 @@ import { AttendanceViews } from './AttendanceViews.js';
 
 export class AttendanceRepository {
   constructor(db, fetch = getDocsFromServer) { this.db = db; this.fetch = fetch; }
-  reference({ from = '', to = '', event = '', cursor = null, size = 100 }) {
+  reference({ from = '', to = '', event = '', eventIds, cursor = null, size = 100 }) {
     const constraints = [orderBy('eventDate', 'desc')];
+    const ids = [...new Set(eventIds || (event && event !== 'all' ? [event] : []))];
+    if (ids.length > 30) throw Error('Choose at most 30 event sessions.');
+    if (ids.length) constraints.push(where('eventId', ids.length === 1 ? '==' : 'in', ids.length === 1 ? ids[0] : ids));
     if (from) constraints.push(where('eventDate', '>=', from));
     if (to) constraints.push(where('eventDate', '<=', to));
     if (cursor) constraints.push(startAfter(cursor));
@@ -50,7 +53,7 @@ export class AttendanceHistoryController {
     // Searching and selecting from already-loaded history should feel instant.
     // Date windows are server-backed, so only they restart the subscription.
     this.onLocalFilter = () => {
-      this.applied = this.filters();
+      this.applied = { ...this.filters(), eventIds: this.applied?.eventIds };
       this.page = 0;
       this.draw();
     };
@@ -165,7 +168,9 @@ export class AttendanceHistoryController {
     if (filters.from && filters.to && filters.from > filters.to) {
       this.notify('Invalid date range', 'The start date must not be after the end date.'); return;
     }
-    this.applied = filters;
+    // Keep the selected event's session pair in one bounded query so switching
+    // Morning/Afternoon/Both remains local and does not re-read the same event.
+    this.applied = { ...filters, eventIds: this.selectedSessions({ ...filters, session: 'both' }).map(event => event.id) };
     this.suspend(); this.records = []; this.cursor = null; this.page = 0; this.more = true;
     this.verified = false;
     if (this.requireEvent && (!filters.event || filters.event === 'all')) {

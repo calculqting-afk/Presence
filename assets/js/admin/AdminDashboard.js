@@ -195,6 +195,7 @@ export class AdminDashboard {
     void this.loadAccountApprovals().catch(() => {});
     void this.loadCorrectionRequests().catch(() => {});
     this.dailyClock = new DailyAttendanceClock({ window: this.window, document: this.document, onDayChange: () => {
+      this.refreshDashboardAttendance();
       this.renderAdminAttendance();
       this.renderAttendanceLine();
       this.scheduleStudentsRender();
@@ -221,6 +222,7 @@ export class AdminDashboard {
     };
     dashboard.applyActionPermissions();
     dashboard.subscriptions = new ScopedSubscriptions({
+      linger: key => ['students', 'geofences', 'faces', 'presence-authority'].includes(key) ? 15000 : 0,
       onError: (error, key) => {
         dashboard.loading?.settle(key);
         console.error(key, error);
@@ -647,6 +649,7 @@ export class AdminDashboard {
           }
         } : {})
       }));
+      dashboard.refreshDashboardAttendance();
       if (["dashboard", "modify-events"].includes(activeView)) dashboard.renderAdminEvents();
       if (activeView === "past-events") dashboard.renderPastEvents();
       dashboard.renderGeofenceEventOptions();
@@ -668,7 +671,7 @@ export class AdminDashboard {
       if (activeView === "dashboard") dashboard.renderAdminAttendance();
       if (["dashboard", "attendance-line"].includes(activeView)) dashboard.renderAttendanceLine();
     });
-    dashboard.listen('presence-sessions', ["modify-students"], collection(db, "presenceSessions"), snapshot => {
+    dashboard.listen('presence-sessions', ["modify-students"], () => query(collection(db, "presenceSessions"), where('lastSeen', '>=', Timestamp.fromMillis(Date.now() - 135000))), snapshot => {
       dashboard.setPresenceSessions(snapshot);
       dashboard.scheduleStudentsRender();
     });
@@ -677,11 +680,11 @@ export class AdminDashboard {
       dashboard.presenceAuthorityByUid = new Map(snapshot.docs.map(item => [item.id, item.data()]));
       dashboard.scheduleStudentsRender();
     });
-    dashboard.listen('legacy-presence', ["modify-students"], collection(db, "presence"), snapshot => {
+    dashboard.listen('legacy-presence', ["modify-students"], () => query(collection(db, "presence"), where('lastSeen', '>=', Timestamp.fromMillis(Date.now() - 135000))), snapshot => {
       dashboard.legacyPresenceByUid = new Map(snapshot.docs.map(item => [item.id, item.data()]));
       dashboard.scheduleStudentsRender();
     });
-    dashboard.attendanceSyncService = new AttendanceSyncService({
+    const attendanceOptions = {
       onRecords(records) {
         dashboard.attendance = records;
         dashboard.scheduleStudentsRender();
@@ -694,8 +697,14 @@ export class AdminDashboard {
       },
       reference: collection(db, 'attendance'),
       onStatus: dashboard.updateAttendanceSyncStatus
+    };
+    dashboard.attendanceSyncService = new AttendanceSyncService(attendanceOptions);
+    dashboard.liveAttendanceSyncService = new AttendanceSyncService(attendanceOptions);
+    dashboard.subscriptions.register('dashboard-attendance', ['dashboard'], () => {
+      dashboard.refreshDashboardAttendance(true);
+      return () => { dashboard.liveAttendanceSyncService.stop(); dashboard.dashboardAttendanceKey = ''; };
     });
-    dashboard.subscriptions.register('attendance', ['dashboard', 'modify-students', 'modify-events', 'past-events', 'profile', 'assign-fine'], () => {
+    dashboard.subscriptions.register('attendance', ['modify-students', 'modify-events', 'past-events', 'profile', 'assign-fine'], () => {
       dashboard.attendanceSyncService.start();
       return () => dashboard.attendanceSyncService.stop();
     });
@@ -729,6 +738,15 @@ export class AdminDashboard {
     const dashboard = this;
     return hasPermission(currentUserRole, action);
   }
+  refreshDashboardAttendance(force = false) {
+    if (activeView !== 'dashboard' || !this.liveAttendanceSyncService) return;
+    const { from, to } = DailyAttendanceClock.attendanceRange(this.events, eventCheckoutCloseDate);
+    const key = `${from}:${to}`;
+    if (!force && key === this.dashboardAttendanceKey) return;
+    this.dashboardAttendanceKey = key;
+    this.attendance = [];
+    this.liveAttendanceSyncService.start(query(collection(db, 'attendance'), where('eventDate', '>=', from), where('eventDate', '<=', to)));
+  }
   applyActionPermissions() {
     const dashboard = this;
     return Object.entries(dashboard.actionSelectors).forEach(([action, selector]) => {
@@ -744,11 +762,14 @@ export class AdminDashboard {
       callback(snapshot);
       if (!snapshot.metadata?.fromCache) dashboard.loading?.settle(key);
     };
-    dashboard.subscriptions.register(key, views, (guard, onError) => ['students', 'events', 'presence-authority'].includes(key)
+    dashboard.subscriptions.register(key, views, (guard, onError) => {
+      const source = typeof reference === 'function' ? reference() : reference;
+      return ['students', 'events', 'presence-authority'].includes(key)
     // Readiness depends on fromCache, including server confirmation with unchanged documents.
-    ? onSnapshot(reference, {
+    ? onSnapshot(source, {
       includeMetadataChanges: true
-    }, guard(receive), onError) : onSnapshot(reference, guard(receive), onError));
+    }, guard(receive), onError) : onSnapshot(source, guard(receive), onError);
+    });
   }
   initializePresenceExpiry() {
     // Presence leases expire even when Firestore sends no new snapshot.
@@ -917,6 +938,7 @@ export class AdminDashboard {
     const nextStatusChange = Math.min(...dashboard.events.flatMap(event => [eventOpenDate(event).getTime(), eventCheckInCloseDate(event).getTime(), eventCloseDate(event).getTime(), eventCheckoutCloseDate(event).getTime()]).filter(time => time > now));
     if (!Number.isFinite(nextStatusChange)) return;
     dashboard.adminEventStatusTimer = dashboard.window.setTimeout(() => {
+      dashboard.refreshDashboardAttendance();
       if (["dashboard", "modify-events"].includes(activeView)) dashboard.renderAdminEvents();
       if (activeView === "past-events") dashboard.renderPastEvents();
       if (['dashboard', 'attendance-line'].includes(activeView)) dashboard.renderAttendanceLine();
@@ -1082,7 +1104,9 @@ export class AdminDashboard {
     const previous = dashboard.events.find(event => event.id === selectedEvent);
     filter.value = previous ? AttendanceViews.related(previous,dashboard.events)[0].id : "";
     dashboard.historyController?.syncSessionControl();
-    const records = dashboard.attendance.filter(record => record.eventDate === DailyAttendanceClock.dateKey()).sort((first, second) => (second.checkedInAt?.seconds || second.attendedAt?.seconds || 0) - (first.checkedInAt?.seconds || first.attendedAt?.seconds || 0));
+    const today = DailyAttendanceClock.dateKey();
+    const overnight = new Set(dashboard.events.filter(event => event.date < today && eventCheckoutCloseDate(event).getTime() >= Date.now()).map(event => event.id));
+    const records = dashboard.attendance.filter(record => record.eventDate === today || overnight.has(record.eventId)).sort((first, second) => (second.checkedInAt?.seconds || second.attendedAt?.seconds || 0) - (first.checkedInAt?.seconds || first.attendedAt?.seconds || 0));
     if (activeView === 'attendance-line') dashboard.historyController.draw();
     StableListRenderer.render(dashboard.document.querySelector("#adminDashboardAttendanceLine"), dashboard.attendanceLineMarkup(records.slice(0, 5)));
   }
@@ -1940,7 +1964,7 @@ export class AdminDashboard {
     if (!dashboard.attendanceSyncService) return;
     dashboard.syncAttendanceNow.disabled = true;
     try {
-      if (activeView === 'attendance-line') await dashboard.historyController.reload();else await dashboard.attendanceSyncService.syncNow();
+      if (activeView === 'attendance-line') await dashboard.historyController.reload();else await (activeView === 'dashboard' ? dashboard.liveAttendanceSyncService : dashboard.attendanceSyncService).syncNow();
       showDashboardToast("Attendance synced", "The Attendance Line was refreshed from Firestore.");
     } catch (error) {
       const message = firebaseErrorCode(error) === "permission-denied" ? "Firestore denied this server refresh. Confirm the deployed rules recognize your active attendance-management role, then sign out and sign in again." : "Firestore could not refresh attendance. Check your connection and try again.";
@@ -2807,7 +2831,8 @@ export class AdminDashboard {
     button.classList.add("is-refreshing");
     button.textContent = "↻ Refreshing…";
     try {
-      const [studentSnapshot, presenceSnapshot, legacyPresenceSnapshot, attendanceSnapshot, authoritySnapshot] = await Promise.all([getDocsFromServer(collection(db, "students")), getDocsFromServer(collection(db, "presenceSessions")), getDocsFromServer(collection(db, "presence")), getDocsFromServer(collection(db, "attendance")), getDocsFromServer(collection(db, "accountSessions"))]);
+      const recent = name => query(collection(db, name), where('lastSeen', '>=', Timestamp.fromMillis(Date.now() - 135000)));
+      const [studentSnapshot, presenceSnapshot, legacyPresenceSnapshot, attendanceSnapshot, authoritySnapshot] = await Promise.all([getDocsFromServer(collection(db, "students")), getDocsFromServer(recent('presenceSessions')), getDocsFromServer(recent('presence')), getDocsFromServer(collection(db, "attendance")), getDocsFromServer(collection(db, "accountSessions"))]);
       dashboard.presenceAuthorityByUid = new Map(authoritySnapshot.docs.map(item => [item.id, item.data()]));
       dashboard.students = studentSnapshot.docs.map(item => CoursePolicy.profile({
         uid: item.id,

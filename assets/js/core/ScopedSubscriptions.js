@@ -1,10 +1,12 @@
 // Owns listener lifetimes and ignores callbacks from a previous view.
 export class ScopedSubscriptions {
-  constructor({ onError = console.error, isEnabled = () => true } = {}) {
+  constructor({ onError = console.error, isEnabled = () => true, linger = () => 0,
+    schedule = (callback, delay) => setTimeout(callback, delay), cancel = timer => clearTimeout(timer) } = {}) {
     this.entries = new Map();
     this.view = null;
     this.onError = onError;
     this.isEnabled = isEnabled;
+    Object.assign(this, { linger, schedule, cancel });
   }
 
   register(key, views, subscribe) {
@@ -17,6 +19,7 @@ export class ScopedSubscriptions {
     this.view = view;
     for (const [key, entry] of this.entries) {
       const needed = this.isEnabled(key) && (entry.views.includes('*') || entry.views.includes(view));
+      if (needed && entry.stopTimer != null) { this.cancel(entry.stopTimer); entry.stopTimer = null; }
       if (needed && !entry.unsubscribe) {
         const generation = ++entry.generation;
         const guard = callback => (...args) => {
@@ -28,6 +31,13 @@ export class ScopedSubscriptions {
           this.onError(error, key);
         }
       } else if (!needed && entry.unsubscribe) {
+        const delay = this.isEnabled(key) ? this.linger(key) : 0;
+        if (delay > 0) {
+          if (entry.stopTimer == null) entry.stopTimer = this.schedule(() => {
+            entry.stopTimer = null; ++entry.generation; entry.unsubscribe?.(); entry.unsubscribe = null;
+          }, delay);
+          continue;
+        }
         ++entry.generation;
         entry.unsubscribe();
         entry.unsubscribe = null;
@@ -37,6 +47,8 @@ export class ScopedSubscriptions {
 
   stop() {
     for (const entry of this.entries.values()) {
+      if (entry.stopTimer != null) this.cancel(entry.stopTimer);
+      entry.stopTimer = null;
       ++entry.generation;
       entry.unsubscribe?.();
       entry.unsubscribe = null;
