@@ -18,6 +18,13 @@ async function read(path,token,allowed){const result=await fetch(base+'/'+path,{
  await write('accountSessions/'+uid,{sessionId:old});
  await read('accountSessions/'+uid,legacy,true); // own lock bootstrap only
  await read('accountSessions/'+uid,jwt('stranger'),false);
+ const heartbeat = { studentUid:uid, sessionId:uid+'_tab', accountSessionId:old, online:true, status:'online', lastSeen:new Date() };
+ await write('presenceSessions/'+uid+'_tab',heartbeat,current,true);
+ await write('presenceSessions/'+uid+'_tab',{...heartbeat,accountSessionId:next},current,false);
+ await write('students/device-manager',{active:true,role:'student_manager'});
+ await read('accountSessions',jwt('device-manager'),true);
+ await read('accountSessions',current,false);
+ await write('accountSessions/'+uid,{sessionId:next},jwt('device-manager'),false);
  await write('accountSessions/'+uid,{sessionId:next},current,false);
  await read('events/device-demo',legacy,false);await read('events/device-demo',current,true);
  await read('attendance/'+uid+'_device-demo',current,true);

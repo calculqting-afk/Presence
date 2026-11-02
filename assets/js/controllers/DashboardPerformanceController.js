@@ -8,6 +8,11 @@ export class DashboardPerformanceController {
     this.pending.add(stage);
     this.performance?.mark?.(`presence:${this.role}:${stage}:start`);
   }
+  async run(stage, operation) {
+    this.start(stage);
+    try { return await operation(); }
+    finally { this.finish(stage); }
+  }
   finish(stage) {
     if (!this.pending.delete(stage)) return;
     const name = `presence:${this.role}:${stage}`;

@@ -9,17 +9,19 @@ export async function requireActiveDevice(db, claims) {
 export class DeviceSessionService {
   constructor(db, now = () => Date.now()) { Object.assign(this, { db, now }); }
   async account(claims) {
-    const user = await this.db.user(claims.sub);
+    const [user, profile] = await Promise.all([
+      this.db.user(claims.sub), this.db.get('students/' + claims.sub)
+    ]);
     if (!user || user.disabled || !Number.isFinite(sessionAuthTime(claims)) || sessionAuthTime(claims) < Number(user.validSince || 0)) throw new SafeError(401, 'Sign in again to continue.');
     let superAdmin = false;
     try { superAdmin = JSON.parse(user.customAttributes || '{}').superAdmin === true; } catch {}
-    const profile = await this.db.get('students/' + claims.sub);
     if (!superAdmin && (profile?.active !== true || !['student', 'viewer', 'head_admin', 'attendance_admin', 'student_manager'].includes(profile.role || 'student'))) throw new SafeError(403, 'An active account is required.');
     return user;
   }
   async status(claims) {
-    await this.account(claims);
-    const active = await this.db.get('accountSessions/' + claims.sub);
+    const [, active] = await Promise.all([
+      this.account(claims), this.db.get('accountSessions/' + claims.sub)
+    ]);
     return { enrolled: Boolean(active), active: Boolean(active?.sessionId), current: Boolean(active?.sessionId && active.sessionId === claims.presenceSession) };
   }
   async acquire(claims, body) {
@@ -34,7 +36,9 @@ export class DeviceSessionService {
     let sessionId = crypto.randomUUID();
     let conflict;
     await this.db.transaction(async get => {
-      const active = await get('accountSessions/' + claims.sub), limit = await get('accountSessionLimits/' + claims.sub);
+      const [active, limit] = await Promise.all([
+        get('accountSessions/' + claims.sub), get('accountSessionLimits/' + claims.sub)
+      ]);
       if (body.transferRevision && active?.sessionId !== body.transferRevision) throw new SafeError(409, 'The active device changed. Check again before transferring.');
       if (active?.sessionId && active.deviceHash !== deviceHash && body.transferRevision !== active.sessionId) {
         conflict = active.sessionId; return [];

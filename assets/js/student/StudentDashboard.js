@@ -1,4 +1,5 @@
 import { DeviceSessionController } from '../controllers/DeviceSessionController.js';
+import { refreshMascotContext } from '../controllers/PresenceMascotController.js';
 import { SessionToastFeedback } from '../controllers/DashboardToastController.js';
 import { AttendanceReadinessController } from '../controllers/AttendanceReadinessController.js';
 import { attendanceTimeIssue, attendanceReviewLabel } from '../core/AttendanceTimePolicy.js';
@@ -452,9 +453,11 @@ export class StudentDashboard {
       offlineAt: online ? deleteField() : serverTimestamp()
     };
     try {
+      const accountSessionId = (await auth.currentUser.getIdTokenResult()).claims.presenceSession;
       await setDoc(doc(db, "presenceSessions", sessionState.presenceSessionId), {
         studentUid: currentUser.uid,
         sessionId: sessionState.presenceSessionId,
+        ...(accountSessionId ? { accountSessionId } : {}),
         ...statusPayload
       }, {
         merge: true
@@ -552,6 +555,7 @@ export class StudentDashboard {
   }
   renderEvents() {
     const dashboard = this;
+    refreshMascotContext(dashboard.document);
     if (!['dashboard', 'events', 'history'].includes(dashboard.view)) return;
     if (dashboard.view === 'history') { dashboard.renderAttendanceSummary(); return; }
     const attendanceByEventId = new Map(dashboard.attendance.map(record => [record.eventId, record]));

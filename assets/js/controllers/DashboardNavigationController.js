@@ -102,6 +102,16 @@ export class DashboardNavigationController {
             sessionState.dashboard?.dispose();
             dashboard.window.location.replace("../index.html");
           } catch (error) {
+            // A failed server release leaves the account signed in. Resume its
+            // heartbeat so the visible status does not falsely report logout.
+            if (auth.currentUser && dashboardRole === 'student') {
+              sessionState.studentLoggedOut = false;
+              void sessionState.dashboard?.dashboard?.updatePresence?.('online');
+              dashboard.window.clearInterval(sessionState.presenceHeartbeatTimer);
+              sessionState.presenceHeartbeatTimer = dashboard.window.setInterval(() => {
+                void sessionState.dashboard?.dashboard?.updatePresence?.('online');
+              }, 60000);
+            }
             console.error("LOGOUT FAILED:", error);
             showDashboardToast("Unable to log out", "Firebase could not end this session. Please try again.");
             return false;

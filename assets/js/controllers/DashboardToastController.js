@@ -1,3 +1,5 @@
+import { mascotMarkup, mascotStateForFeedback, emitMascot } from './PresenceMascotController.js';
+
 export class DashboardToastController {
   constructor({
     document = globalThis.document,
@@ -11,15 +13,16 @@ export class DashboardToastController {
     });
     this.timer = null;
   }
-  show(title, message, { attendanceSuccess = false } = {}) {
+  show(title, message, options = {}) {
     this.dispose();
     const toast = this.document.querySelector('#dashboardToast');
     const mark = toast.querySelector('.toast-mark');
-    if (mark && attendanceSuccess) {
-      const asset = name => new URL(`../../emoji/${name}`, import.meta.url).href;
-      mark.classList.add('is-attendance-success');
+    const state = mascotStateForFeedback(title, options);
+    emitMascot(this.document, state);
+    if (mark) {
+      mark.classList.add('is-mascot');
       mark.setAttribute('aria-hidden', 'true');
-      mark.innerHTML = `<picture><source media="(prefers-reduced-motion: reduce)" srcset="${asset('presence-check-in.png')}"><source type="image/webp" srcset="${asset('presence-check-in-smooth.webp')}"><img src="${asset('presence-check-in-128.gif')}" alt="" width="64" height="64"></picture>`;
+      mark.innerHTML = mascotMarkup(state);
       this.mark = mark;
     }
     this.document.querySelector('#dashboardToastTitle').textContent = title;
@@ -38,7 +41,7 @@ export class DashboardToastController {
   }
   clearMark() {
     if (!this.mark) return;
-    this.mark.classList.remove('is-attendance-success');
+    this.mark.classList.remove('is-mascot');
     this.mark.textContent = '✓';
     this.mark = null;
   }

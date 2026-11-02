@@ -2,6 +2,27 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const load = () => import('../assets/js/core/PresenceSession.js');
 const flush = () => new Promise(resolve => setImmediate(resolve));
+const timestamp = value => ({ toMillis: () => value });
+
+test('transfers exclude old browser heartbeats, and release overrides every stale online record', async () => {
+  const { authorizedPresenceSessions } = await load();
+  const sessions = [
+    { online: true, accountSessionId: 'old', lastSeen: timestamp(3000) },
+    { online: true, accountSessionId: 'current', lastSeen: timestamp(3000) }
+  ];
+  assert.deepEqual(authorizedPresenceSessions(sessions, { sessionId: 'current' }), [sessions[1]]);
+  assert.deepEqual(authorizedPresenceSessions(sessions, { sessionId: null }), []);
+  // Re-entering on another device must not revive either previous heartbeat.
+  assert.deepEqual(authorizedPresenceSessions(sessions, { sessionId: 'next' }), []);
+});
+
+test('unenrolled accounts retain legacy presence; older APK heartbeats must follow lock start', async () => {
+  const { authorizedPresenceSessions } = await load();
+  const sessions = [{ lastSeen: timestamp(1000) }, { lastSeen: timestamp(3000) }];
+  assert.deepEqual(authorizedPresenceSessions(sessions, undefined), sessions);
+  assert.deepEqual(authorizedPresenceSessions(sessions, { sessionId: 'current', startedAt: timestamp(2000) }), [sessions[1]]);
+  assert.deepEqual(authorizedPresenceSessions(sessions, { sessionId: 'current' }), []);
+});
 function deadline() {
   let expire, cleared;
   return { options: { setTimer: callback => { expire = callback; return 7; }, clearTimer: id => { cleared = id; } },

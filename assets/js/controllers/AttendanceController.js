@@ -1,5 +1,5 @@
 import { collection, onSnapshot, getDocsFromServer } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
-import { db } from '../../../config/firebase-config.js?v=20261005-operational-reset';
+import { db } from '../../../config/firebase-config.js';
 import { currentUser, currentUserRole, formatEventTime } from '../dashboard.js?v=20261011-optimized';
 
 export class AttendancePolicy {

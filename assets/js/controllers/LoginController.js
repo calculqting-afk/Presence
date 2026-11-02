@@ -1,5 +1,6 @@
 import { DeviceSessionController } from './DeviceSessionController.js';
 import { SessionToastFeedback } from './DashboardToastController.js';
+import { mascotMarkup, mascotStateForFeedback } from './PresenceMascotController.js';
 import { db, studentIdToEmail, studentProvisioningAuth, studentProvisioningDb } from '../../../config/firebase-config.js';
 import { ControllerScope } from '../core/ControllerScope.js';
 import { AuthActionController } from './AuthActionController.js';
@@ -8,6 +9,7 @@ import { SurveyLinkService } from './SurveyLinkService.js';
 import { SurveyEntryController } from './SurveyEntryController.js';
 import { RegistrationController } from './RegistrationController.js';
 import { LoginSessionService } from './LoginSessionService.js';
+import { DashboardPerformanceController } from './DashboardPerformanceController.js';
 import { clearPhoneReminders } from './PhoneAttendanceReminders.js';
 
 /** Owns the login page lifecycle, form actions, help dialog, and login feedback. */
@@ -18,6 +20,7 @@ export class LoginController {
     registration, surveyEntry, deviceSession } = {}) {
     Object.assign(this, { document, window, storage, sessionService, loginAction, identity });
     this.scope = new ControllerScope();
+    this.metrics = sessionService.metrics || new DashboardPerformanceController({ role: 'login', performance: window.performance });
     this.deviceSession = deviceSession || new DeviceSessionController({ document, window, authentication: sessionService.auth });
     this.registration = registration || new RegistrationController({ document, db,
       provisioningAuth: studentProvisioningAuth, provisioningDb: studentProvisioningDb,
@@ -75,18 +78,29 @@ export class LoginController {
     this.passwordToggle.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
   }
 
-  showToast(title, message) {
+  showToast(title, message, { persistent = false, ...options } = {}) {
     if (this.disposed) return;
     this.hideToast();
     this.toastTitle.textContent = title;
     this.toastMessage.textContent = message;
+    this.toastMark = this.toast.querySelector?.('.toast-icon');
+    if (this.toastMark) {
+      this.toastMark.classList.add('is-mascot');
+      this.toastMark.setAttribute('aria-hidden', 'true');
+      this.toastMark.innerHTML = mascotMarkup(mascotStateForFeedback(title, options));
+    }
     this.toast.classList.add('show');
-    this.toastTimer = this.window.setTimeout(() => this.hideToast(), 5000);
+    if (!persistent) this.toastTimer = this.window.setTimeout(() => this.hideToast(), 5000);
   }
   hideToast() {
     if (this.toastTimer != null) this.window.clearTimeout(this.toastTimer);
     this.toastTimer = null;
     this.toast?.classList.remove('show');
+    if (this.toastMark) {
+      this.toastMark.classList.remove('is-mascot');
+      this.toastMark.textContent = '✓';
+      this.toastMark = null;
+    }
   }
   openHelp() { this.helpDialog.hidden = false; this.document.querySelector('#passwordHelpContact').focus(); }
   closeHelp() { this.helpDialog.hidden = true; this.document.querySelector('#helpButton').focus(); }
@@ -98,16 +112,18 @@ export class LoginController {
     if (!accountId) this.setFieldError(this.accountInput, this.accountError, 'Please enter your student ID or admin email.');
     if (!password) this.setFieldError(this.passwordInput, this.passwordError, 'Please enter your password.');
     if (!accountId || !password) return;
-    await this.loginAction.run({ buttons: [this.submitButton], label: 'Signing in…', successLabel: 'Signed in',
-      action: () => this.authenticate({ accountId, password, remember: this.form.elements.remember.checked }) });
+    await this.metrics.run('total', () => this.loginAction.run({ buttons: [this.submitButton], label: 'Signing in…', successLabel: 'Signed in',
+      action: () => this.authenticate({ accountId, password, remember: this.form.elements.remember.checked }) }));
   }
 
   async authenticate(credentials) {
     try {
+      this.showToast('Signing in', 'Checking your account…', { persistent: true, mascotState: 'checking' });
       const result = await this.sessionService.authenticate({ ...credentials,
         completeRegistration: input => this.registration.completeApprovedRegistration(input) });
       if (this.disposed) return false;
-      result.user = await this.deviceSession.bind(result.user, { allowTransfer: true });
+      this.loginAction.loading?.update('auth', 'Securing session…');
+      result.user = await this.metrics.run('device-session', () => this.deviceSession.bind(result.user, { allowTransfer: true }));
       if (this.disposed) return false;
       this.storage.setItem('presenceSession', JSON.stringify(result.session));
       const role = result.session.role;
@@ -120,6 +136,7 @@ export class LoginController {
     } catch (error) {
       await this.sessionService.logOut?.(this.sessionService.auth).catch(() => {});
       if (!this.disposed) {
+        this.showToast('Unable to sign in', this.sessionService.errorMessage(error));
         this.setFieldError(this.passwordInput, this.passwordError, this.sessionService.errorMessage(error));
         this.passwordInput.focus();
       }

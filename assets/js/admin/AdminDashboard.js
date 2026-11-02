@@ -1,4 +1,6 @@
 import { DeviceSessionController } from '../controllers/DeviceSessionController.js';
+import { authorizedPresenceSessions } from '../core/PresenceSession.js';
+import { refreshMascotContext } from '../controllers/PresenceMascotController.js';
 import { AttendanceRevocationController } from '../controllers/AttendanceRevocationController.js';
 import { AdminRecentLogin } from '../controllers/AdminRecentLogin.js';
 import { attendanceTimeIssue, attendanceReviewLabel } from '../core/AttendanceTimePolicy.js';
@@ -635,6 +637,7 @@ export class AdminDashboard {
       if (["dashboard", "modify-events", "past-events"].includes(activeView)) dashboard.renderAdminEvents();
     });
     dashboard.listen('events', ["*"], query(collection(db, "events"), orderBy("openAt", "asc")), snapshot => {
+      dashboard.mascotEventsConfirmed = !snapshot.metadata?.fromCache && !snapshot.metadata?.hasPendingWrites;
       dashboard.events = snapshot.docs.map(item => ({
         id: item.id,
         ...item.data(),
@@ -667,6 +670,11 @@ export class AdminDashboard {
     });
     dashboard.listen('presence-sessions', ["modify-students"], collection(db, "presenceSessions"), snapshot => {
       dashboard.setPresenceSessions(snapshot);
+      dashboard.scheduleStudentsRender();
+    });
+    dashboard.listen('presence-authority', ["modify-students"], collection(db, "accountSessions"), snapshot => {
+      if (snapshot.metadata?.fromCache) return;
+      dashboard.presenceAuthorityByUid = new Map(snapshot.docs.map(item => [item.id, item.data()]));
       dashboard.scheduleStudentsRender();
     });
     dashboard.listen('legacy-presence', ["modify-students"], collection(db, "presence"), snapshot => {
@@ -731,12 +739,12 @@ export class AdminDashboard {
   }
   listen(key, views, reference, callback) {
     const dashboard = this;
-    if (['presence-sessions', 'legacy-presence', 'faces'].includes(key) && !dashboard.can('viewStudents')) return;
+    if (['presence-sessions', 'presence-authority', 'legacy-presence', 'faces'].includes(key) && !dashboard.can('viewStudents')) return;
     const receive = snapshot => {
       callback(snapshot);
       if (!snapshot.metadata?.fromCache) dashboard.loading?.settle(key);
     };
-    dashboard.subscriptions.register(key, views, (guard, onError) => ['students', 'events'].includes(key)
+    dashboard.subscriptions.register(key, views, (guard, onError) => ['students', 'events', 'presence-authority'].includes(key)
     // Readiness depends on fromCache, including server confirmation with unchanged documents.
     ? onSnapshot(reference, {
       includeMetadataChanges: true
@@ -1080,6 +1088,7 @@ export class AdminDashboard {
   }
   renderAdminEvents() {
     const dashboard = this;
+    refreshMascotContext(dashboard.document);
     dashboard.document.querySelector("#eventCount").textContent = dashboard.events.length;
     const timeline = dashboard.document.querySelector("#adminEventTimeline");
     if (!dashboard.events.length) {
@@ -1239,7 +1248,8 @@ export class AdminDashboard {
     const sessions = [...(dashboard.presenceByUid.get(uid) || [])];
     const legacyPresence = dashboard.legacyPresenceByUid.get(uid);
     if (legacyPresence) sessions.push(legacyPresence);
-    const activeSessions = sessions.filter(session => session.online === true && Date.now() - (session.lastSeen?.toMillis?.() || 0) < 135000);
+    const authority = dashboard.presenceAuthorityByUid?.get(uid);
+    const activeSessions = (dashboard.presenceAuthorityByUid ? authorizedPresenceSessions(sessions, authority) : []).filter(session => session.online === true && Date.now() - (session.lastSeen?.toMillis?.() || 0) < 135000);
     const latestSession = sessions.reduce((latest, session) => {
       const sessionTime = session.offlineAt?.toMillis?.() || session.lastSeen?.toMillis?.() || 0;
       const latestTime = latest?.offlineAt?.toMillis?.() || latest?.lastSeen?.toMillis?.() || 0;
@@ -1253,8 +1263,8 @@ export class AdminDashboard {
       hour: "numeric",
       minute: "2-digit"
     }).format(inactiveTimestamp)}` : "No activity recorded";
-    const deviceText = activeSessions.length > 1 ? `Active on ${activeSessions.length} devices` : "Active now";
-    const isLoggedOut = !isOnline && latestSession?.status === "logged-out";
+    const deviceText = authority?.sessionId ? "Active on the current device" : "Active now";
+    const isLoggedOut = !isOnline && (authority !== undefined ? !authority.sessionId : latestSession?.status === "logged-out");
     return {
       isOnline,
       status: isOnline ? "online" : isLoggedOut ? "logged-out" : "offline",
@@ -2797,7 +2807,8 @@ export class AdminDashboard {
     button.classList.add("is-refreshing");
     button.textContent = "↻ Refreshing…";
     try {
-      const [studentSnapshot, presenceSnapshot, legacyPresenceSnapshot, attendanceSnapshot] = await Promise.all([getDocsFromServer(collection(db, "students")), getDocsFromServer(collection(db, "presenceSessions")), getDocsFromServer(collection(db, "presence")), getDocsFromServer(collection(db, "attendance"))]);
+      const [studentSnapshot, presenceSnapshot, legacyPresenceSnapshot, attendanceSnapshot, authoritySnapshot] = await Promise.all([getDocsFromServer(collection(db, "students")), getDocsFromServer(collection(db, "presenceSessions")), getDocsFromServer(collection(db, "presence")), getDocsFromServer(collection(db, "attendance")), getDocsFromServer(collection(db, "accountSessions"))]);
+      dashboard.presenceAuthorityByUid = new Map(authoritySnapshot.docs.map(item => [item.id, item.data()]));
       dashboard.students = studentSnapshot.docs.map(item => CoursePolicy.profile({
         uid: item.id,
         ...item.data()

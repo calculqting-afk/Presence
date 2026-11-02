@@ -61,7 +61,43 @@ test('location proof rejects unassigned students but preserves checkout for a re
 });
 test('cache configuration uses memory and attempts legacy IndexedDB cleanup without removing academic self edits',()=>{
   const fs=require('node:fs'),config=fs.readFileSync('config/firebase-config.js','utf8');
-  assert.match(config,/localCache: memoryLocalCache\(\)/);assert.match(config,/await clearIndexedDbPersistence\(db\)/);
+  assert.match(config,/export const db = runtime.db \|\|= getFirestore\(app\)/);assert.match(config,/clearIndexedDbPersistence\(db\)/);
+  assert.doesNotMatch(config,/initializeFirestore\(/);
   assert.ok(!config.includes('persistentLocalCache'));
   const rules=fs.readFileSync('firestore.rules','utf8');assert.match(rules,/"course", "section", "email", "phone"/);
+});
+
+test('concurrent Firebase config aliases share initialization and memory-cache cleanup', async () => {
+  const vm = require('node:vm'), fs = require('node:fs');
+  let initialized = 0, cleared = 0, listeners = 0;
+  const database = {}, apps = new Map(), databases = new Map();
+  const context = vm.createContext({ console, window: { addEventListener() { listeners++; } } });
+  const api = {
+    initializeApp: (_config, name = 'default') => { if (!apps.has(name)) apps.set(name, {name}); return apps.get(name); },
+    getAuth: app => ({app}), getFirestore: app => { if (!databases.has(app.name)) { initialized++; databases.set(app.name,app.name === 'default' ? database : {app}); } return databases.get(app.name); },
+    clearIndexedDbPersistence: async () => { cleared++; await Promise.resolve(); }
+  };
+  const sdk = new vm.SyntheticModule(Object.keys(api), function () { for (const [key, value] of Object.entries(api)) this.setExport(key,value); }, {context});
+  const source = fs.readFileSync('config/firebase-config.js','utf8');
+  const modules = ['config/firebase-config.js', 'config/firebase-config.js?v=old'].map(identifier => new vm.SourceTextModule(source,{context,identifier}));
+  await Promise.all(modules.map(module => module.link(() => sdk)));
+  await Promise.all(modules.map(module => module.evaluate()));
+  assert.equal(initialized,2); assert.equal(cleared,1); assert.equal(listeners,1);
+  assert.equal(modules[0].namespace.db, modules[1].namespace.db);
+  assert.equal(modules[0].namespace.auth, modules[1].namespace.auth);
+  assert.equal(modules[0].namespace.studentProvisioningDb, modules[1].namespace.studentProvisioningDb);
+  assert.equal(modules[0].namespace.legacyCacheCleared,true);
+});
+
+test('Firebase config reuses an existing SDK instance even without its runtime guard', async () => {
+  const vm = require('node:vm'), fs = require('node:fs');
+  const existing = {cache:'memory'}, app = {}, context = vm.createContext({console,window:{addEventListener(){}}});
+  let clears = 0;
+  const api = { initializeApp: () => app, getAuth: () => ({}), getFirestore: () => existing,
+    clearIndexedDbPersistence: async db => { assert.equal(db,existing); clears++; },
+    initializeFirestore: () => { throw Error('initializeFirestore() has already been called with different options.'); } };
+  const sdk = new vm.SyntheticModule(Object.keys(api),function(){for(const [key,value] of Object.entries(api))this.setExport(key,value);},{context});
+  const module = new vm.SourceTextModule(fs.readFileSync('config/firebase-config.js','utf8'),{context});
+  await module.link(() => sdk); await module.evaluate();
+  assert.equal(module.namespace.db,existing); assert.equal(clears,1);
 });

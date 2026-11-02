@@ -1391,6 +1391,19 @@ test('startup skeleton offers retry on slow/failed startup and ignores readiness
   assert.equal(loading.settledSources.size, 0);
 });
 
+test('a session lost during role verification cannot initialize the dashboard', async () => {
+  const browser = fakeBrowser(); let complete, initialized=0;
+  const shared = {waitForUser:async()=>({uid:'manager'}), verifyRole:()=>new Promise(resolve=>{complete=resolve;}),
+    dashboardRole:'admin',currentUserRole:'student_manager',currentUserProfile:{},sessionState:{},auth:{},signOut(){},
+    wireCommonNavigation(){},wireNotificationCenter(){},applyRoleNavigation(){},updateDashboardGreeting(){},initializeDashboardHistory(){},
+    db:{},setDoc(){},doc(){},serverTimestamp(){},escapeHtml:String,openView(){},showDashboardToast(){}};
+  const { DashboardApplication } = await isolatedModule('assets/js/controllers/DashboardApplication.js', shared, browser);
+  const app = new DashboardApplication({...browser,loadDashboard:async()=>({AdminDashboard:class {initialize(){initialized++;}dispose(){}}})});
+  const pending=app.initialize();await new Promise(resolve=>setImmediate(resolve));
+  app.sessionLost=true;complete(true);await pending;
+  assert.equal(initialized,0);app.dispose();
+});
+
 test('application boot is idempotent and disposes its role controller without late initialization', async () => {
   const browser = fakeBrowser(); browser.window.location = { replace() {} };
   let created = 0, initialized = 0, disposed = 0, sharedCleanups = 0;
@@ -2444,10 +2457,19 @@ test('presence expires without another write while another recent device remains
   const shared = Object.fromEntries(names.map(name => [name, () => '']));
   const { AdminDashboard } = await isolatedModule('assets/js/admin/AdminDashboard.js', shared);
   const stamp = milliseconds => ({ toMillis: () => milliseconds, toDate: () => new Date(milliseconds) });
-  const state = { presenceByUid: new Map([['s', [{ online: true, lastSeen: stamp(Date.now() - 150000) }]]]), legacyPresenceByUid: new Map() };
+  const state = { presenceAuthorityByUid: new Map(), presenceByUid: new Map([['s', [{ online: true, lastSeen: stamp(Date.now() - 150000) }]]]), legacyPresenceByUid: new Map() };
   assert.equal(AdminDashboard.prototype.getStudentPresence.call(state, 's').isOnline, false);
   state.presenceByUid.get('s').push({ online: true, lastSeen: stamp(Date.now()) });
   state.presenceByUid.get('s').push({ online: false, status: 'logged-out', lastSeen: stamp(Date.now()) });
+  assert.equal(AdminDashboard.prototype.getStudentPresence.call(state, 's').isOnline, true);
+  state.presenceAuthorityByUid.set('s', { sessionId: 'current' });
+  state.presenceByUid.set('s', [1,2].map(() => ({online:true,accountSessionId:'current',lastSeen:stamp(Date.now())})));
+  assert.equal(AdminDashboard.prototype.getStudentPresence.call(state, 's').detail, 'Active on the current device');
+  state.presenceAuthorityByUid.set('s', { sessionId: null });
+  assert.equal(AdminDashboard.prototype.getStudentPresence.call(state, 's').label, 'Logged out');
+  state.presenceAuthorityByUid.set('s', { sessionId: 'new', startedAt: stamp(Date.now() + 1000) });
+  assert.equal(AdminDashboard.prototype.getStudentPresence.call(state, 's').isOnline, false);
+  state.presenceByUid.get('s').push({ online: true, accountSessionId: 'new', lastSeen: stamp(Date.now()) });
   assert.equal(AdminDashboard.prototype.getStudentPresence.call(state, 's').isOnline, true);
 });
 

@@ -1,7 +1,10 @@
+import { emitMascot } from './PresenceMascotController.js';
+
 // Owns presentation state independently of attendance persistence and verification.
 export class ButtonLoadingController {
   constructor({ document: ownerDocument = globalThis.document } = {}) {
     this.operations = new Map();
+    this.document = ownerDocument;
     if (ownerDocument?.createElement && ownerDocument.body?.append) {
       this.announcer = ownerDocument.createElement('div');
       this.announcer.className = 'attendance-progress-announcer';
@@ -17,6 +20,7 @@ export class ButtonLoadingController {
     this.operations.set(key, { label, buttons: new Map() });
     this.attach(key, button);
     this.announce(label);
+    emitMascot(this.document, 'checking');
     return true;
   }
   attach(key, button) {
@@ -49,6 +53,7 @@ export class ButtonLoadingController {
     this.announce(label);
     for (const button of operation.buttons.keys()) this.paint(button, label, false);
     this.operations.delete(key);
+    if (!this.operations.size) emitMascot(this.document, 'idle', { onlyIfChecking: true });
   }
   reset(key) {
     const operation = this.operations.get(key);
@@ -63,6 +68,7 @@ export class ButtonLoadingController {
       }
     }
     this.operations.delete(key);
+    if (!this.operations.size) emitMascot(this.document, 'idle', { onlyIfChecking: true });
   }
   dispose() { for (const key of this.operations.keys()) this.reset(key); this.announcer?.remove(); this.announcer = null; }
 }

@@ -5,10 +5,10 @@ const path=require('node:path');
 test('dark theme keeps animated attendance logos transparent without changing regular toast marks',()=>{
   const root=path.resolve(__dirname,'..');
   const theme=fs.readFileSync(path.join(root,'assets/css/dashboard-theme.css'),'utf8');
-  const css=fs.readFileSync(path.join(root,'assets/css/dashboard.css'),'utf8');
-  assert.match(theme, /:root\[data-theme="dark"\] \.toast-mark:not\(\.is-attendance-success\) \{[^}]*background: #168653;/);
+  const css=fs.readFileSync(path.join(root,'assets/css/mascot.css'),'utf8');
+  assert.match(theme, /:root\[data-theme="dark"\] \.toast-mark:not\(\.is-mascot\) \{[^}]*background: #168653;/);
   assert.doesNotMatch(theme, /:root\[data-theme="dark"\] \.toast-mark\s*\{/);
-  assert.match(css, /\.toast-mark\.is-attendance-success \{[^}]*background: transparent;/);
+  assert.match(css, /\.toast-mark\.is-mascot, \.toast-icon\.is-mascot \{[^}]*background: transparent;/);
 });
 test('attendance success toast opts into smooth animation, supports reduced motion and clears hidden animations',async()=>{
   const {DashboardToastController}=await import('../assets/js/controllers/DashboardToastController.js');
@@ -19,11 +19,9 @@ test('attendance success toast opts into smooth animation, supports reduced moti
   const controller=new DashboardToastController({document:{querySelector:id=>id==='#dashboardToast'?toast:id==='#dashboardToastTitle'?title:message},schedule:fn=>{timers.set(++sequence,fn);return sequence;},cancel:id=>timers.delete(id)});
   controller.show('Attendance recorded','Saved',{attendanceSuccess:true});
   assert.equal(title.textContent,'Attendance recorded');assert.equal(message.textContent,'Saved');
-  assert.equal(classes.has('show'),true);assert.equal(markClasses.has('is-attendance-success'),true);
-  assert.match(html,/prefers-reduced-motion: reduce/);assert.match(html,/presence-check-in\.png/);
-  assert.match(html,/type="image\/webp".*presence-check-in-smooth\.webp/);assert.match(html,/presence-check-in-128\.gif/);
-  assert.ok(html.indexOf('prefers-reduced-motion')<html.indexOf('image/webp'));
-  controller.show('Unable to save','Try again');assert.equal(mark.textContent,'✓');assert.equal(markClasses.size,0);assert.equal(timers.size,1);
+  assert.equal(classes.has('show'),true);assert.equal(markClasses.has('is-mascot'),true);
+  assert.match(html,/data-mascot-state="success"/);
+  controller.show('Unable to save','Try again');assert.match(html,/data-mascot-state="attention"/);assert.equal(markClasses.size,1);assert.equal(timers.size,1);
   controller.show('Checkout recorded','Saved',{attendanceSuccess:true});timers.get(sequence)();
   assert.equal(classes.has('show'),false);assert.equal(mark.textContent,'✓');assert.equal(html,'');
   controller.show('Saved','Done',{attendanceSuccess:true});controller.dispose();assert.equal(html,'');

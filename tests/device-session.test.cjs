@@ -1,5 +1,37 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const { webcrypto } = require('node:crypto'); globalThis.crypto ||= webcrypto;
+
+test('logout waits for confirmed server release and surfaces failure without refreshing the token', async () => {
+ const { DeviceSessionController } = await import('../assets/js/controllers/DeviceSessionController.js');
+ const events=[], window={dispatchEvent:event=>events.push(event.type)}, user={uid:'student'};
+ let finish, ended=false;
+ const api={call:(path,actor,body,options)=>{
+   assert.equal(path,'/v1/session/release');assert.equal(actor,user);
+   assert.deepEqual(options,{forceRefresh:false});
+   return new Promise(resolve=>{finish=resolve;});
+ }};
+ const pending=DeviceSessionController.release(user,{api,window}).then(()=>{ended=true;});
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(ended,false);
+ finish({released:true});await pending;assert.equal(ended,true);
+ await assert.rejects(DeviceSessionController.release(user,{window,api:{call:async()=>{throw Error('offline');}}}),/offline/);
+ assert.equal(events.at(-1),'presence:device-signout-failed');
+ await assert.rejects(DeviceSessionController.release(user,{window,api:{call:async()=>({released:false})}}),/could not be ended/);
+});
+
+test('Firebase diagnostics identify failing operations without exposing account data or credentials', async () => {
+ const { FirebaseGateway } = await import('../workers/admin-api/src/firebase.js');
+ const logs = [], original = console.error;
+ console.error = message => logs.push(JSON.parse(message));
+ try {
+  const gateway = new FirebaseGateway(JSON.stringify({project_id:'presence-a873f',client_email:'presence-password-reset@presence-a873f.iam.gserviceaccount.com'}), async () => Response.json({error:{status:'PERMISSION_DENIED',message:'Permission datastore.entities.get denied for private-student-id token=private-secret'}},{status:403}));
+  gateway.access = async () => 'private-secret';
+  await assert.rejects(gateway.get('students/private-student-id'), /Firebase operation failed/);
+  assert.deepEqual(logs[0], {event:'firebase-request-failed',service:'firestore.googleapis.com',operation:':get',httpStatus:403,status:'PERMISSION_DENIED',permission:'datastore.entities.get'});
+  assert.doesNotMatch(JSON.stringify(logs), /private-student-id|private-secret/);
+  gateway.fetcher = async () => Response.json({error:{status:'RESOURCE_EXHAUSTED'}},{status:429});
+  await assert.rejects(gateway.get('students/private-student-id'), /capacity is temporarily exhausted/);
+ } finally { console.error = original; }
+});
 async function fixture() {
   const { DeviceSessionService, requireActiveDevice, sessionAuthTime } = await import('../workers/admin-api/src/device-session.js');
   const store = new Map([['students/student', { active: true, role: 'student' }]]), signed=[];
@@ -62,9 +94,51 @@ test('client cancellation leaves the current device untouched; confirmation bind
  let signs=0;
  const client=new DeviceSessionController({window:{localStorage:storage},document:{},api,authentication:{},signIn:async(_,token)=>{assert.equal(token,'signed-token');signs++;return {user};}});
  client.confirmTransfer=async()=>false;
- await assert.rejects(client.bind(user,{allowTransfer:true}),/cancelled/);assert.equal(signs,0);assert.equal(calls.length,2);
+ await assert.rejects(client.bind(user,{allowTransfer:true}),/cancelled/);assert.equal(signs,0);assert.equal(calls.length,1);
  calls.length=0;client.confirmTransfer=async()=>true;await client.bind(user,{allowTransfer:true});
- assert.equal(signs,1);assert.equal(calls.length,3);assert.equal(calls[2].body.transferRevision,'11111111-1111-4111-8111-111111111111');
+ assert.equal(signs,1);assert.equal(calls.length,2);assert.equal(calls[1].body.transferRevision,'11111111-1111-4111-8111-111111111111');
+});
+
+test('fresh password login acquires directly while restored sessions refresh authority once', async () => {
+ const { DeviceSessionController }=await import('../assets/js/controllers/DeviceSessionController.js');
+ const refreshes=[],calls=[],storage=new Map();
+ const user={uid:'student',getIdTokenResult:async force=>{refreshes.push(force);return {claims:{firebase:{sign_in_provider:'password'}}};}};
+ const signedUser={uid:'student'};
+ const client=new DeviceSessionController({document:{},window:{localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)}},authentication:{},
+  api:{call:async(path,_user,_body,options)=>{calls.push({path,options});return {customToken:'signed-token'};}},signIn:async()=>({user:signedUser})});
+ assert.equal(await client.bind(user),signedUser);
+ assert.deepEqual(calls,[{path:'/v1/session/acquire',options:{forceRefresh:false}}]);
+ assert.deepEqual(refreshes,[undefined]);
+ calls.length=0;refreshes.length=0;
+ user.getIdTokenResult=async force=>{refreshes.push(force);return {claims:{presenceSession:'current',firebase:{sign_in_provider:'custom'}}};};
+ client.api.call=async(path,_user,_body,options)=>{calls.push({path,options});return {current:true};};
+ assert.equal(await client.bind(user),user);
+ assert.deepEqual(refreshes,[undefined,true]);
+ assert.deepEqual(calls,[{path:'/v1/session/status',options:{forceRefresh:false}}]);
+});
+
+test('session status overlaps independent reads but still rejects a revoked account', async () => {
+ const { DeviceSessionService }=await import('../workers/admin-api/src/device-session.js');
+ const started=[],pending=new Map();
+ const wait=key=>{started.push(key);return new Promise(resolve=>pending.set(key,resolve));};
+ const service=new DeviceSessionService({user:()=>wait('auth'),get:path=>wait(path)});
+ const status=service.status({sub:'student',auth_time:1000});
+ assert.deepEqual(started,['auth','students/student','accountSessions/student']);
+ pending.get('auth')({validSince:'1001'});pending.get('students/student')({active:true,role:'student'});pending.get('accountSessions/student')({sessionId:'current'});
+ await assert.rejects(status,/Sign in again/);
+});
+
+test('parallel backend reads share one authorization exchange and failed exchanges can retry', async () => {
+ const { FirebaseGateway }=await import('../workers/admin-api/src/firebase.js');
+ const gateway=new FirebaseGateway(JSON.stringify({project_id:'presence-a873f',client_email:'presence-password-reset@presence-a873f.iam.gserviceaccount.com',private_key_id:crypto.randomUUID()}));
+ let count=0,complete;
+ gateway.authorize=()=>{count++;return new Promise(resolve=>{complete=resolve;});};
+ const first=gateway.access(),second=gateway.access(),third=gateway.access();
+ assert.equal(count,1);complete('opaque-token');assert.deepEqual(await Promise.all([first,second,third]),['opaque-token','opaque-token','opaque-token']);
+ gateway.authorize=async()=>{count++;throw Error('temporary outage');};
+ await assert.rejects(gateway.access(),/temporary outage/);
+ gateway.authorize=async()=>{count++;return 'recovered-token';};
+ assert.equal(await gateway.access(),'recovered-token');assert.equal(count,3);
 });
 test('displaced refresh-token sessions cannot silently reclaim a device on reload',async()=>{
  const { DeviceSessionController }=await import('../assets/js/controllers/DeviceSessionController.js');

@@ -1,5 +1,6 @@
 import { DeviceSessionController } from './DeviceSessionController.js';
 import { SessionToastFeedback } from './DashboardToastController.js';
+import { PresenceMascotController } from './PresenceMascotController.js';
 import { endPresenceSession } from '../core/PresenceSession.js';
 import { ControllerScope } from '../core/ControllerScope.js';
 import { PolicyAgreementController } from './PolicyAgreementController.js';
@@ -40,7 +41,7 @@ export class DashboardApplication {
   async start() {
     if (!this.scope.initialize()) return;
     this.metrics.start('startup'); this.metrics.start('profile'); this.metrics.start('events-first-data');
-    const isCurrent = () => this.scope.initialized;
+    const isCurrent = () => this.scope.initialized && !this.sessionLost;
     // Download code while authentication/profile verification is in flight.
     // Capture failures now; only surface them after access has been verified.
     const dashboardModule = Promise.resolve().then(() => this.loadDashboard(dashboardRole))
@@ -53,18 +54,26 @@ export class DashboardApplication {
       const lost = async () => {
         if (this.sessionLost) return;
         this.sessionLost = true;
+        this.scope.dispose();
         this.identity.clear();
         SessionToastFeedback.save(this.window.sessionStorage, 'sessionEnded');
         this.dashboard?.dispose();
         if (auth.currentUser?.uid === currentUser.uid) await signOut(auth);
         this.window.location.replace('../index.html');
       };
-      try { currentUser = await this.deviceSession.bind(currentUser); }
+      try { currentUser = await this.metrics.run('device-session', () => this.deviceSession.bind(currentUser)); }
       catch { await lost(); return; }
       await this.deviceSession.watch(currentUser, () => { void lost(); });
+      if (!isCurrent()) return;
     }
     if (currentUser && dashboardRole === 'student') this.identity.restore(currentUser.uid);
-    const authorized = currentUser && (await verifyRole(currentUser));
+    // These are independent, server-verified reads. Do not render the agreement
+    // or start dashboard subscriptions until role verification succeeds.
+    const policyReference = currentUser && this.document.body.hasAttribute?.('data-policy-enabled')
+      ? doc(db, ...Policy.path(currentUser.uid)) : null;
+    let initialReceipt = policyReference ? this.metrics.run('agreement-read', () => getDocFromServer(policyReference))
+      .then(snapshot => ({ snapshot }), error => ({ error })) : null;
+    const authorized = currentUser && (await this.metrics.run('role-verification', () => verifyRole(currentUser)));
     if (!isCurrent()) return;
     if (!authorized) {
       this.identity.clear();
@@ -84,9 +93,14 @@ export class DashboardApplication {
       this.identity.render(currentUserProfile);
     }
     if (this.document.body.hasAttribute?.('data-policy-enabled')) {
-      const reference = doc(db, ...Policy.path(currentUser.uid));
+      const reference = policyReference;
       this.agreement = new PolicyAgreementController({ document: this.document, window: this.window, uid: currentUser.uid,
-        read: async () => { const snapshot = await getDocFromServer(reference); return snapshot.exists() ? snapshot.data() : null; },
+        read: async () => {
+          const first = initialReceipt; initialReceipt = null;
+          const result = first ? await first : { snapshot: await getDocFromServer(reference) };
+          if (result.error) throw result.error;
+          return result.snapshot.exists() ? result.snapshot.data() : null;
+        },
         save: () => setDoc(reference, Policy.receipt(currentUser.uid, serverTimestamp())),
         signOut: async () => {
           this.identity.clear();
@@ -101,6 +115,12 @@ export class DashboardApplication {
       this.scope.addCleanup(() => this.agreement.dispose());
       if (!await this.agreement.require() || !isCurrent()) return;
     }
+    const mascot = new PresenceMascotController({ document: this.document, getContext: () => ({
+      events: this.dashboard?.events || [], role: dashboardRole,
+      ready: dashboardRole === 'student' ? this.dashboard?.eventsConfirmed === true : Boolean(this.dashboard?.mascotEventsConfirmed),
+      student: { ...(this.dashboard?.studentProfile || currentUserProfile), uid: currentUser.uid }
+    }) }).initialize();
+    this.scope.addCleanup(() => mascot.dispose());
     const feedback = SessionToastFeedback.take(this.window.sessionStorage, 'login', currentUser.uid);
     if (feedback) showDashboardToast(...feedback);
     wireCommonNavigation();
@@ -124,6 +144,7 @@ export class DashboardApplication {
     sessionState.dashboard = this;
     this.scope.addCleanup(() => dashboard.dispose());
     dashboard.initialize();
+    this.scope.listen(this.window, 'presence:viewchange', () => mascot.refreshContext());
     this.pullRefresh = new DashboardPullRefreshController({ document: this.document, window: this.window });
     this.pullRefresh.initialize();
     this.scope.addCleanup(() => this.pullRefresh.dispose());

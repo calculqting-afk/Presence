@@ -61,6 +61,10 @@ test('dashboard timing records a completed stage once without transmitting anyth
   const metrics = new DashboardPerformanceController({ role: 'student', performance: { mark: name => marks.push(name), measure: (...args) => measures.push(args), clearMarks() {} } });
   metrics.start('profile'); metrics.start('profile'); metrics.finish('profile'); metrics.finish('profile');
   assert.equal(marks.length, 2); assert.equal(measures.length, 1); assert.equal(measures[0][0], 'presence:student:profile');
+  assert.equal(await metrics.run('session', async () => 'ready'), 'ready');
+  await assert.rejects(metrics.run('failed-read', async () => { throw Error('offline'); }), /offline/);
+  assert.equal(metrics.pending.size, 0);
+  assert.equal(measures.length, 3);
 });
 test('QR code library loads once on demand, preserves project paths and retries failures', async () => {
   const { QrCodeLoader } = await loadModule('assets/js/controllers/QrCodeLoader.js');

@@ -22,6 +22,16 @@ test('browser fetch keeps its global receiver for reset and password completion'
     assert.equal(calls[0].options.headers.Authorization,'Bearer test-token');
   } finally { globalThis.fetch = originalFetch; }
 });
+test('session calls reuse SDK-managed tokens without weakening the reset default', async()=>{
+  const { PasswordResetApi } = await import('../assets/js/controllers/PasswordResetApi.js');
+  const refreshes=[];
+  const user={getIdToken:async force=>{refreshes.push(force);return 'opaque-test-token';}};
+  const api=new PasswordResetApi({fetcher:async()=>Response.json({ok:true})});
+  await api.call('/v1/session/status',user,{}, {forceRefresh:false});
+  await api.reset(user,'student','Verified request');
+  assert.deepEqual(refreshes,[false,true]);
+});
+
 test('Firebase gateway keeps the runtime fetch receiver for server requests', async()=>{
   const { FirebaseGateway } = await import('../workers/admin-api/src/firebase.js');
   const originalFetch = globalThis.fetch;

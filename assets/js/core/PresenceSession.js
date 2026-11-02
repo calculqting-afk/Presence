@@ -1,3 +1,17 @@
+/** A heartbeat is online only while it belongs to the server-authorized device. */
+export function authorizedPresenceSessions(sessions, authority) {
+  if (authority === undefined) return sessions; // Older, unenrolled accounts.
+  if (!authority.sessionId) return [];
+  return sessions.filter(session => {
+    if (session.accountSessionId) return session.accountSessionId === authority.sessionId;
+    // Older APKs have no session claim on their heartbeat. A heartbeat before
+    // the current lock started cannot belong to its device.
+    const started = authority.startedAt?.toMillis?.();
+    const seen = session.lastSeen?.toMillis?.();
+    return Number.isFinite(started) && Number.isFinite(seen) && seen >= started;
+  });
+}
+
 /** Optional cleanup must never hold authentication open waiting for the network. */
 export async function bestEffortCleanup(task, {
   timeoutMs = 1500,

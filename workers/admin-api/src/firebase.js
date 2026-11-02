@@ -54,6 +54,13 @@ export class FirebaseGateway {
   }
   async access() {
     if (cachedAccess?.id === this.key.private_key_id && cachedAccess.until > Date.now()) return cachedAccess.token;
+    // Concurrent account/profile/session reads share one OAuth exchange.
+    if (!this.accessPending) this.accessPending = this.authorize();
+    const pending = this.accessPending;
+    try { return await pending; }
+    finally { if (this.accessPending === pending) this.accessPending = null; }
+  }
+  async authorize() {
     const now = Math.floor(Date.now() / 1000);
     const unsigned = segment({ alg: 'RS256', typ: 'JWT' }) + '.' + segment({ iss: this.key.client_email, scope: 'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/identitytoolkit', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 });
     const pem = this.key.private_key.replace(/-----[^-]+-----|\s/g, '');
@@ -69,7 +76,18 @@ export class FirebaseGateway {
       headers: { Authorization: `Bearer ${await this.access()}`, 'Content-Type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(15000) });
     if (allowMissing && response.status === 404) { await response.body?.cancel();return null; }
-    if (!response.ok) { await response.body?.cancel();throw new SafeError(response.status === 409 ? 409 : 503, response.status === 409 ? 'Another request changed this account. Retry.' : 'Firebase operation failed. Retry or contact the administrator.'); }
+    if (!response.ok) {
+      // Keep credentials, account IDs and Google response bodies out of logs and clients.
+      const failure = await response.json().catch(() => ({}));
+      const status = /^[A-Z_]{1,40}$/.test(failure.error?.status || '') ? failure.error.status : 'UNKNOWN';
+      const endpoint = new URL(url);
+      const operation = endpoint.pathname.includes('/documents') ? endpoint.pathname.split('/documents')[1].split('/')[0] || ':get' : 'accounts';
+      const permission = /\b(?:datastore|firebaseauth)\.[a-zA-Z.]+/.exec(failure.error?.message || '')?.[0];
+      console.error(JSON.stringify({ event: 'firebase-request-failed', service: endpoint.hostname, operation, httpStatus: response.status, status, ...(permission ? { permission } : {}) }));
+      throw new SafeError(response.status === 409 ? 409 : 503, response.status === 409 ? 'Another request changed this account. Retry.'
+        : status === 'RESOURCE_EXHAUSTED' ? 'Attendance service capacity is temporarily exhausted. Please try again later.'
+          : 'Firebase operation failed. Retry or contact the administrator.');
+    }
     return response.json();
   }
   async user(uid) {

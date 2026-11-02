@@ -1,5 +1,6 @@
 import { auth, db, studentIdToEmail } from '../../../config/firebase-config.js';
 import { hasSuperAdminClaim } from '../core/SuperAdminAuthority.js';
+import { DashboardPerformanceController } from './DashboardPerformanceController.js';
 import { browserLocalPersistence, browserSessionPersistence, setPersistence, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
 import { doc, getDocFromServer } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 
@@ -9,12 +10,13 @@ export class LoginSessionService {
     studentEmail = studentIdToEmail, loadStudent = uid => getDocFromServer(doc(db, 'students', uid)),
     persist = setPersistence, localPersistence = browserLocalPersistence,
     sessionPersistence = browserSessionPersistence, signIn = signInWithEmailAndPassword,
-    logOut = signOut, subscribe = onAuthStateChanged } = {}) {
+    logOut = signOut, subscribe = onAuthStateChanged, metrics = new DashboardPerformanceController({ role: 'login' }) } = {}) {
     Object.assign(this, { auth: authentication, studentEmail, loadStudent,
-      persist, localPersistence, sessionPersistence, signIn, logOut, subscribe });
+      persist, localPersistence, sessionPersistence, signIn, logOut, subscribe, metrics });
   }
 
-  isSuperAdmin(user) { return hasSuperAdminClaim(user); }
+  // Routing can use the just-issued token; the backend checks current authority.
+  isSuperAdmin(user) { return hasSuperAdminClaim(user, { forceRefresh: false }); }
 
   async resolveExistingRole(user) {
     if (await this.isSuperAdmin(user)) return 'admin';
@@ -26,14 +28,14 @@ export class LoginSessionService {
   }
 
   async authenticate({ accountId, password, remember, completeRegistration }) {
-    await this.persist(this.auth, remember ? this.localPersistence : this.sessionPersistence);
+    await this.metrics.run('persistence', () => this.persist(this.auth, remember ? this.localPersistence : this.sessionPersistence));
     const email = accountId.includes('@') ? accountId : this.studentEmail(accountId);
-    const credential = await this.signIn(this.auth, email, password);
+    const credential = await this.metrics.run('password-authentication', () => this.signIn(this.auth, email, password));
     const user = credential.user;
     const isSuperAdmin = await this.isSuperAdmin(user);
     let profile = {}, role = 'admin';
     if (!isSuperAdmin) {
-      let snapshot = await this.loadStudent(user.uid);
+      let snapshot = await this.metrics.run('profile', () => this.loadStudent(user.uid));
       if (!snapshot.exists()) {
         const completed = await completeRegistration({ user, accountId });
         if (completed) snapshot = await this.loadStudent(user.uid);

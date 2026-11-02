@@ -629,11 +629,12 @@ service cloud.firestore {
       allow list, update, delete: if false;
     }
 
-    // Bootstrap and the live watcher can read only their own session lock.
-    // Only the trusted backend can start, transfer or release it.
+    // Users can bootstrap/watch their own lock; directory managers can reconcile
+    // online status against active locks. Only the backend can mutate them.
     match /accountSessions/{uid} {
-      allow get: if request.auth != null && request.auth.uid == uid;
-      allow list, create, update, delete: if false;
+      allow get: if (request.auth != null && request.auth.uid == uid) || canManageStudents();
+      allow list: if canManageStudents();
+      allow create, update, delete: if false;
     }
     match /accountSessionLimits/{uid} { allow read, write: if false; }
 
@@ -1160,7 +1161,8 @@ service cloud.firestore {
       allow create: if isStudent()
         && request.resource.data.studentUid == request.auth.uid
         && request.resource.data.sessionId == sessionId
-        && request.resource.data.keys().hasOnly(["studentUid", "sessionId", "online", "status", "lastSeen", "offlineAt"])
+        && request.resource.data.keys().hasOnly(["studentUid", "sessionId", "accountSessionId", "online", "status", "lastSeen", "offlineAt"])
+        && (!("accountSessionId" in request.resource.data) || request.resource.data.accountSessionId == request.auth.token.get("presenceSession", ""))
         && request.resource.data.online is bool
         && request.resource.data.status in ["online", "offline", "logged-out"]
         && request.resource.data.lastSeen is timestamp
@@ -1170,7 +1172,8 @@ service cloud.firestore {
         && resource.data.studentUid == request.auth.uid
         && request.resource.data.studentUid == request.auth.uid
         && request.resource.data.sessionId == sessionId
-        && request.resource.data.keys().hasOnly(["studentUid", "sessionId", "online", "status", "lastSeen", "offlineAt"])
+        && request.resource.data.keys().hasOnly(["studentUid", "sessionId", "accountSessionId", "online", "status", "lastSeen", "offlineAt"])
+        && (!("accountSessionId" in request.resource.data) || request.resource.data.accountSessionId == request.auth.token.get("presenceSession", ""))
         && request.resource.data.online is bool
         && request.resource.data.status in ["online", "offline", "logged-out"]
         && request.resource.data.lastSeen is timestamp

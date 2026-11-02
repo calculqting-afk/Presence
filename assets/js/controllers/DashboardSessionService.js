@@ -39,7 +39,7 @@ export class DashboardSessionService {
   async verifyRole(user) {
     if (!user) return false;
     const generation = ++this.generation;
-    const isSuperAdmin = typeof user.getIdTokenResult === 'function' ? await hasSuperAdminClaim(user) : false;
+    const isSuperAdmin = typeof user.getIdTokenResult === 'function' ? await hasSuperAdminClaim(user, { forceRefresh: false }) : false;
     const snapshot = isSuperAdmin ? null : await this.loadStudent(user.uid);
     if (generation !== this.generation) return false;
     if(!isSuperAdmin&&(!snapshot.exists()||snapshot.data()?.active!==true))return false;

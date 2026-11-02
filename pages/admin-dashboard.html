@@ -25,6 +25,8 @@
   <link rel="stylesheet" href="../assets/css/event-audience.css?v=20261020">
   <link rel="stylesheet" href="../assets/css/hometown-picker.css?v=20261101">
   <link rel="stylesheet" href="../assets/css/legal.css?v=20261101">
+  <link rel="stylesheet" href="../assets/css/mascot.css?v=20261102">
+  <link rel="preconnect" href="https://presence-admin-api.mikhailovna2007.workers.dev" crossorigin>
 </head>
 <body data-dashboard="admin" data-dashboard-loading data-policy-enabled data-device-session-enabled>
   <div class="app-shell">
@@ -81,14 +83,7 @@
           <div class="welcome-card">
             <div class="welcome-copy"><p class="eyebrow" data-dashboard-greeting>Good morning</p><h2 data-dashboard-greeting-title>Good morning, Admin.</h2><p data-dashboard-greeting-message>Start the day prepared and stay on top of attendance.</p></div>
             <div class="welcome-actions">
-              <div class="welcome-mascot">
-                <picture class="welcome-mascot-motion" aria-hidden="true">
-                  <source media="(prefers-reduced-motion: reduce)" srcset="../assets/emoji/presence-check-in.png">
-                  <source type="image/webp" srcset="../assets/emoji/presence-check-in-smooth.webp">
-                  <img src="../assets/emoji/presence-check-in-128.gif" alt="" width="112" height="112" decoding="async">
-                </picture>
-                <img class="welcome-mascot-still" src="../assets/emoji/presence-check-in.png" alt="" width="112" height="112" decoding="async">
-              </div>
+              <div class="welcome-mascot" data-presence-mascot><button class="mascot-hello" data-mascot-hello type="button" aria-label="Say hello to the Presence mascot"><span class="presence-mascot" data-mascot-state="idle" aria-hidden="true"><span class="mascot-sprite"></span><span class="mascot-dots"><i></i><i></i><i></i></span></span><span class="mascot-charms" aria-hidden="true"><i>✦</i><i>♡</i><i>✧</i></span></button><p class="mascot-bubble" data-mascot-bubble role="status" aria-live="polite" aria-atomic="true" hidden></p></div>
               <button class="primary-button" type="button" data-go-view="create">＋ Create event</button>
             </div>
           </div>

@@ -1,4 +1,4 @@
-import { auth, db, studentIdToEmail, studentProvisioningAuth } from "../../../config/firebase-config.js?v=20261005-operational-reset";
+import { auth, db, studentIdToEmail, studentProvisioningAuth } from "../../../config/firebase-config.js";
 import { ROLE_VIEWS } from './permissions.js?v=20261011-optimized';
 import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
