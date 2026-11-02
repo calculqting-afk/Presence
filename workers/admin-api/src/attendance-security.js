@@ -1,3 +1,4 @@
+import { sessionAuthTime } from './device-session.js';
 import { SafeError, digest } from './firebase.js';
 import { ResetService } from './service.js';
 import { GeofenceBoundary } from '../../../assets/js/controllers/GeofenceBoundary.js';
@@ -9,7 +10,7 @@ export class AttendanceSecurityService {
   async student(claims, get) {
     const profile = await get('students/' + claims.sub);
     if (!profile || profile.active !== true || profile.passwordResetRequired === true
-      || claims.auth_time <= (profile.passwordResetValidAfter ?? -1)) throw new SafeError(403, 'An active, unrestricted student account is required.');
+      || sessionAuthTime(claims) <= (profile.passwordResetValidAfter ?? -1)) throw new SafeError(403, 'An active, unrestricted student account is required.');
     return profile;
   }
   async location(claims, body) {
@@ -37,7 +38,7 @@ export class AttendanceSecurityService {
       const fresh = limit && now - limit.windowStart < 60000, count = fresh ? limit.count : 0;
       if (count >= 20) throw new SafeError(429, 'Too many location checks. Wait one minute.');
       return [this.db.write('attendanceLocationProofs/' + claims.sub + '_' + body.eventId + '_' + body.action, {
-        studentUid: claims.sub, eventId: body.eventId, action: body.action, location: point,
+        studentUid: claims.sub, eventId: body.eventId, action: body.action, location: point, sessionId: claims.presenceSession || '',
         geofence: clean(area), issuedAt: new Date(now), expiresAt: new Date(now + 30000)
       }), this.db.write('attendanceLocationLimits/' + claims.sub, { windowStart: fresh ? limit.windowStart : now, count: count + 1 })];
     });

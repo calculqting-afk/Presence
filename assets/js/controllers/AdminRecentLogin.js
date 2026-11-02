@@ -1,9 +1,10 @@
+import { DeviceSessionController } from './DeviceSessionController.js';
 import { EmailAuthProvider, reauthenticateWithCredential } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
 
 export function hasRecentAdminLogin(claims, now = Date.now()) {
   const seconds = now / 1000;
-  return Number.isFinite(claims?.auth_time) && claims.auth_time <= seconds
-    && seconds - claims.auth_time < 240;
+  const time = claims?.firebase?.sign_in_provider === 'custom' ? claims.presenceAuthTime : claims?.auth_time;
+  return Number.isFinite(time) && time <= seconds && seconds - time < 240;
 }
 
 // The UI uses four minutes, leaving a minute for writes to reach the server.
@@ -66,6 +67,7 @@ export class AdminRecentLogin {
         try {
           if (this.getUser()?.uid !== user.uid) throw Error('Session changed. Sign in again.');
           await this.reauthenticate(user, this.credential(user.email, input.value));
+          if (globalThis.document?.body?.hasAttribute('data-device-session-enabled')) await DeviceSessionController.rebind(user);
           input.value = '';
           const fresh = await user.getIdTokenResult(true);
           if (this.getUser()?.uid !== user.uid || !hasRecentAdminLogin(fresh.claims, this.now())) throw Error('Sign in again before continuing.');

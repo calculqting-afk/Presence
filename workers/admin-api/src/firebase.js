@@ -44,6 +44,14 @@ export class FirebaseGateway {
     this.fetcher = fetcher;
     this.base = `https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/documents`;
   }
+  async customToken(uid, claims) {
+    const now = Math.floor(Date.now() / 1000);
+    const unsigned = segment({ alg: 'RS256', typ: 'JWT' }) + '.' + segment({ iss: this.key.client_email, sub: this.key.client_email,
+      aud: 'https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit', iat: now, exp: now + 300, uid, claims });
+    const pem = this.key.private_key.replace(/-----[^-]+-----|\s/g, '');
+    const key = await crypto.subtle.importKey('pkcs8', un64(pem), { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+    return unsigned + '.' + b64(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, bytes(unsigned)));
+  }
   async access() {
     if (cachedAccess?.id === this.key.private_key_id && cachedAccess.until > Date.now()) return cachedAccess.token;
     const now = Math.floor(Date.now() / 1000);

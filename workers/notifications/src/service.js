@@ -1,12 +1,14 @@
+import { requireActiveDevice, sessionAuthTime } from '../../admin-api/src/device-session.js';
 import { digest, SafeError } from '../../admin-api/src/firebase.js';
 import { milestones, revisionData, eligible, message, SHARDS, NEVER } from './policy.js';
 const safeId = value => typeof value==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 export class PushService {
   constructor(db, now=()=>Date.now()) { this.db=db;this.now=now; }
   async member(claims) {
+    await requireActiveDevice(this.db, claims);
     const [user,profile]=await Promise.all([this.db.user(claims.sub),this.db.get('students/'+claims.sub)]);
     if (!user || user.disabled || profile?.active!==true || profile.passwordResetRequired===true || profile.mustChangePassword===true ||
-      claims.auth_time < Number(user.validSince||0) || (profile.passwordResetValidAfter && claims.auth_time<=profile.passwordResetValidAfter)) throw new SafeError(403,'An active student session is required.');
+      sessionAuthTime(claims) < Number(user.validSince||0) || (profile.passwordResetValidAfter && sessionAuthTime(claims)<=profile.passwordResetValidAfter)) throw new SafeError(403,'An active student session is required.');
     return profile;
   }
   async device(claims,body,remove=false) {
@@ -22,7 +24,7 @@ export class PushService {
       // registration under another user. Native unregister also deletes the token.
       return [this.db.write(path,{uid:claims.sub,token:body.token,installationId:body.installationId,
         shard:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'.indexOf(id[0])%SHARDS,
-        active:!remove,authTime:claims.auth_time,expiresAt:remove?0:now+30*86400000,updatedAt:now}),
+        active:!remove,sessionId:claims.presenceSession || '',authTime:sessionAuthTime(claims),expiresAt:remove?0:now+30*86400000,updatedAt:now}),
         ...(!remove?[this.db.write('pushRegistrationLimits/'+claims.sub,{windowStart:fresh?limit.windowStart:now,count:fresh?limit.count+1:1})]:[])];
     });
     return {registered:!remove};
@@ -81,10 +83,12 @@ export class PushService {
     if (!lease) return false;
     const devices=await db.query('pushDevices',[['shard','EQUAL',shard]],{limit:25,after:cursor});
     const active=devices.filter(device=>device.active && device.expiresAt>now && safeId(device.uid));
-    const records=await db.batchGet(active.flatMap(device=>['students/'+device.uid,`attendance/${device.uid}_${job.eventId}`]));
+    const records=await db.batchGet(active.flatMap(device=>['students/'+device.uid,'accountSessions/'+device.uid,`attendance/${device.uid}_${job.eventId}`]));
     const invalid=[];
     const outcomes=await Promise.allSettled(active.map(async device=>{
       const student=records.get('students/'+device.uid),record=records.get(`attendance/${device.uid}_${job.eventId}`);
+      const session=records.get('accountSessions/'+device.uid);
+      if(session && (!device.sessionId || session.sessionId!==device.sessionId))return;
       if (student?.passwordResetValidAfter && device.authTime<=student.passwordResetValidAfter) return;
       if (!eligible({...student,uid:device.uid},event,record,job.kind,this.now()) || this.now()>=job.expiresAt) return;
       const tag=await digest(device.uid+':'+jobId);

@@ -1,3 +1,4 @@
+import { sessionAuthTime } from './device-session.js';
 import { SafeError, digest, temporaryPassword } from './firebase.js';
 import { StudentPasswordPolicy } from '../../../assets/js/core/StudentPasswordPolicy.js';
 
@@ -11,8 +12,8 @@ export class ResetService {
   constructor(db, now = () => Date.now()) { this.db = db; this.now = now; }
   async authenticate(claims, recent = false) {
     const user = await this.db.user(claims.sub);
-    if (!user || user.disabled || claims.auth_time < Number(user.validSince || 0)) throw new SafeError(401, 'Sign in again to continue.');
-    if (recent && (!Number.isFinite(claims.auth_time) || claims.auth_time > this.now() / 1000 || this.now() / 1000 - claims.auth_time >= 300)) throw new SafeError(401, 'Confirm your admin password again.');
+    if (!user || user.disabled || sessionAuthTime(claims) < Number(user.validSince || 0)) throw new SafeError(401, 'Sign in again to continue.');
+    if (recent && (!Number.isFinite(sessionAuthTime(claims)) || sessionAuthTime(claims) > this.now() / 1000 || this.now() / 1000 - sessionAuthTime(claims) >= 300)) throw new SafeError(401, 'Confirm your admin password again.');
     return user;
   }
   async reset(claims, body) {
@@ -69,7 +70,7 @@ export class ResetService {
       // Legacy resets receive a deadline derived from their original issue time.
       const expiresAt = ledger.expiresAt ? new Date(ledger.expiresAt).getTime() : ledger.startedAt + TEMPORARY_PASSWORD_TTL_MS;
       if (!Number.isFinite(expiresAt) || now >= expiresAt) throw new SafeError(410, 'Your temporary password expired. Contact an administrator for a new reset.');
-      if (claims.auth_time <= profile.passwordResetValidAfter) throw new SafeError(401, 'Sign in again with your temporary password before changing it.');
+      if (sessionAuthTime(claims) <= profile.passwordResetValidAfter) throw new SafeError(401, 'Sign in again with your temporary password before changing it.');
       if (ledger.leaseUntil > now) throw new SafeError(409, 'A password change is in progress. Wait two minutes before retrying.');
       const error = StudentPasswordPolicy.newPasswordError(body.newPassword, profile);
       if (error) throw new SafeError(400, error);

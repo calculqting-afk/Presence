@@ -9,8 +9,8 @@ import { EventAudiencePolicy } from './EventAudiencePolicy.js';
 import { PasswordResetApi } from './PasswordResetApi.js';
 
 export class StudentAttendanceController {
-  constructor({ getState, setFaceRegistration, showError, bridge, checkIn }) {
-    Object.assign(this, { getState, setFaceRegistration, showError, bridge, checkIn });
+  constructor({ getState, setFaceRegistration, showError, bridge, checkIn, readiness }) {
+    Object.assign(this, { getState, setFaceRegistration, showError, bridge, checkIn, readiness });
     this.submission = new AttendanceSubmissionService({ read: getDocFromServer, write: async (reference, payload, options) => {
       const location = payload.checkInLocation || payload.checkOutLocation;
       if (location) {
@@ -231,6 +231,7 @@ export class StudentAttendanceController {
     if (!button) return;
     const selectedEvent = events.find((event) => event.id === button.dataset.attendEvent);
     if (!selectedEvent) return;
+    if (this.readiness && !await this.readiness.require(selectedEvent)) return;
     const loadingKey = `in:${selectedEvent.id}`;
     if (!this.loading.start(loadingKey, button, 'Checking in…')) return;
     this.syncLoadingButtons();

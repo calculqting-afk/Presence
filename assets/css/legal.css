@@ -29,7 +29,7 @@ html:has(#embedded:target) .legal-document { border:0; border-radius:0; }
 .policy-agreement button { min-height:44px; border:1px solid var(--legal-line); border-radius:10px; padding:10px 14px; background:transparent; color:var(--legal-ink); cursor:pointer; font:600 .85rem system-ui,sans-serif; touch-action:manipulation; }
 .policy-agreement button:focus-visible,.policy-agreement input:focus-visible,.legal-page a:focus-visible { outline:3px solid #5da1ff; outline-offset:3px; }
 .policy-agreement button:disabled { cursor:wait; opacity:.65; }
-.policy-agreement [data-policy-continue] { margin-left:auto; background:#1f6feb; border-color:#1f6feb; color:#fff; }
+.policy-agreement :is([data-policy-continue], [data-transfer]) { margin-left:auto; background:#1f6feb; border-color:#1f6feb; color:#fff; }
 .policy-small { color:var(--legal-muted); font-size:.8rem; }
 .policy-error { color:#c22944; font-size:.85rem; }
 :root[data-theme="dark"] .policy-error { color:#ffb0bd; }

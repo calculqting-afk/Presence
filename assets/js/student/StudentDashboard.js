@@ -1,3 +1,6 @@
+import { DeviceSessionController } from '../controllers/DeviceSessionController.js';
+import { SessionToastFeedback } from '../controllers/DashboardToastController.js';
+import { AttendanceReadinessController } from '../controllers/AttendanceReadinessController.js';
 import { attendanceTimeIssue, attendanceReviewLabel } from '../core/AttendanceTimePolicy.js';
 import { ControllerScope } from '../core/ControllerScope.js';
 import { StableListRenderer } from '../core/StableListRenderer.js';
@@ -12,7 +15,7 @@ import { StudentHistoryPresenter } from '../controllers/StudentHistoryPresenter.
 import { SurveyConfirmationController } from '../controllers/SurveyConfirmationController.js';
 import { StudentIdentityController } from '../controllers/StudentIdentityController.js';
 import { StudentAttendanceController } from '../controllers/StudentAttendanceController.js?v=20261011-optimized';
-import { currentUser, currentUserProfile, escapeHtml, formatBirthday, FineModalController, showDashboardToast, createNotification, uploadFacePhotoToDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineTimestamp, getFineHistory, updateDashboardGreeting, createDeviceSessionToken, auth, db, signOut, updatePassword, collection, deleteField, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch, sessionState } from '../dashboard.js?v=20261011-optimized';
+import { currentUser, currentUserProfile, escapeHtml, formatBirthday, FineModalController, showDashboardToast, createNotification, uploadFacePhotoToDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineTimestamp, getFineHistory, updateDashboardGreeting, createDeviceSessionToken, auth, db, signOut, updatePassword, collection, deleteField, doc, getDoc, getDocFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch, sessionState } from '../dashboard.js?v=20261011-optimized';
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
 import { AttendancePolicy, LateCheckInModal, AttendanceCheckInController, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261011-optimized';
 import { AttendanceSummaryService } from '../controllers/AttendanceSummaryService.js';
@@ -239,7 +242,7 @@ export class StudentDashboard {
     dashboard.scope.listen(dashboard.document, "keydown", dashboard.handleWireProfileActionsKeydown);
     dashboard.scope.listen(dashboard.requiredPasswordChangeForm, "submit", dashboard.handleRequiredPasswordChangeFormSubmit);
     dashboard.scope.listen(dashboard.document.querySelector('#requiredPasswordSignOut'), 'click', async () => {
-      try { await stopAttendancePush(auth.currentUser); await signOut(auth); dashboard.window.location.replace('../index.html'); }
+      try { await stopAttendancePush(auth.currentUser); await DeviceSessionController.release(auth.currentUser); await signOut(auth); SessionToastFeedback.save(dashboard.sessionStorage, 'logout'); dashboard.window.location.replace('../index.html'); }
       catch { showDashboardToast('Unable to sign out', 'Please try again.'); }
     });
     dashboard.scope.listen(dashboard.requiredPasswordChangeModal, 'keydown', event => {
@@ -275,7 +278,17 @@ export class StudentDashboard {
     dashboard.geofenceErrorModal = dashboard.document.querySelector("#geofenceErrorModal");
     dashboard.document.querySelectorAll("[data-close-geofence-error]").forEach(element => dashboard.scope.listen(element, "click", dashboard.closeGeofenceError));
     dashboard.scope.listen(dashboard.geofenceErrorModal, "click", dashboard.handleGeofenceErrorModalClick);
+    dashboard.attendanceReadiness = new AttendanceReadinessController({
+      document: dashboard.document, window: dashboard.window,
+      readFace: async () => {
+        const snapshot = await getDocFromServer(doc(db, 'faceRegistrations', currentUser.uid));
+        return snapshot.data()?.registered === true;
+      },
+      openFace: () => openView('face')
+    });
+    dashboard.scope.addCleanup(() => dashboard.attendanceReadiness.dispose());
     dashboard.attendanceController = new StudentAttendanceController({
+      readiness: dashboard.attendanceReadiness,
       getState: () => ({
         events: dashboard.events,
         attendance: dashboard.attendance
@@ -1029,6 +1042,7 @@ export class StudentDashboard {
         passwordUpdated = true;
         await new Promise(resolve => dashboard.window.setTimeout(resolve, Math.max(0, result.signInAfter * 1000 + 200 - Date.now())));
         await signInAfterPasswordReset(auth, email, newPassword);
+        if (dashboard.document.body.hasAttribute?.('data-device-session-enabled')) await DeviceSessionController.rebind(auth.currentUser);
         dashboard.window.location.reload();
         return;
       } else {

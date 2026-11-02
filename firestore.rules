@@ -3,13 +3,21 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
-      return request.auth != null;
+      return request.auth != null && (
+        !exists(/databases/$(database)/documents/accountSessions/$(request.auth.uid))
+        || (request.auth.token.get("presenceSession", "") != ""
+          && get(/databases/$(database)/documents/accountSessions/$(request.auth.uid)).data.sessionId == request.auth.token.presenceSession));
+    }
+
+    function sessionAuthTime() {
+      return request.auth.token.get("firebase", {}).get("sign_in_provider", "") == "custom"
+        ? request.auth.token.get("presenceAuthTime", 0) : request.auth.token.auth_time;
     }
 
     function recentAdminLogin() {
-      return signedIn() && request.auth.token.auth_time is number
-        && request.auth.token.auth_time <= request.time.toMillis() / 1000
-        && request.time.toMillis() / 1000 - request.auth.token.auth_time < 300;
+      return signedIn() && sessionAuthTime() is number
+        && sessionAuthTime() <= request.time.toMillis() / 1000
+        && request.time.toMillis() / 1000 - sessionAuthTime() < 300;
     }
 
     function isAdmin() {
@@ -78,7 +86,7 @@ service cloud.firestore {
     }
     function unrestrictedStudent(profile) {
       return profile.active == true && profile.get("passwordResetRequired", false) == false
-        && (!("passwordResetValidAfter" in profile) || request.auth.token.auth_time > profile.passwordResetValidAfter);
+        && (!("passwordResetValidAfter" in profile) || sessionAuthTime() > profile.passwordResetValidAfter);
     }
 
     function shortText(value, maximum) {
@@ -411,6 +419,7 @@ service cloud.firestore {
     function trustedLocationProof(location, eventId, action) {
       let proof = get(/databases/$(database)/documents/attendanceLocationProofs/$(request.auth.uid + "_" + eventId + "_" + action)).data;
       return proof.studentUid == request.auth.uid && proof.eventId == eventId && proof.action == action
+        && proof.get("sessionId", "") == request.auth.token.get("presenceSession", "")
         && proof.location == location && proof.issuedAt <= request.time && proof.expiresAt > request.time
         && proof.expiresAt <= proof.issuedAt + duration.value(30, 's')
         && proof.geofence == get(/databases/$(database)/documents/eventGeofences/$(eventId)).data;
@@ -545,7 +554,7 @@ service cloud.firestore {
     }
 
     match /students/{studentUid} {
-      allow get: if isAdmin() || (signedIn() && request.auth.uid == studentUid);
+      allow get: if isAdmin() || (request.auth != null && request.auth.uid == studentUid);
       allow list: if isAdmin();
       allow create: if !protectedSuperAdminUid(studentUid)
         && ((canManageStudents()
@@ -619,6 +628,14 @@ service cloud.firestore {
         && request.resource.data.acceptedAt == request.time;
       allow list, update, delete: if false;
     }
+
+    // Bootstrap and the live watcher can read only their own session lock.
+    // Only the trusted backend can start, transfer or release it.
+    match /accountSessions/{uid} {
+      allow get: if request.auth != null && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
+    }
+    match /accountSessionLimits/{uid} { allow read, write: if false; }
 
     match /superAdminAccounts/{adminUid} {
       allow read, write: if false;

@@ -1,3 +1,5 @@
+import { DeviceSessionController } from './DeviceSessionController.js';
+import { SessionToastFeedback } from './DashboardToastController.js';
 import { db, studentIdToEmail, studentProvisioningAuth, studentProvisioningDb } from '../../../config/firebase-config.js';
 import { ControllerScope } from '../core/ControllerScope.js';
 import { AuthActionController } from './AuthActionController.js';
@@ -13,9 +15,10 @@ export class LoginController {
   constructor({ document = globalThis.document, window = globalThis.window,
     storage = globalThis.sessionStorage, sessionService = new LoginSessionService(),
     loginAction = new AuthActionController(), identity = new StudentIdentityController({ document, storage }),
-    registration, surveyEntry } = {}) {
+    registration, surveyEntry, deviceSession } = {}) {
     Object.assign(this, { document, window, storage, sessionService, loginAction, identity });
     this.scope = new ControllerScope();
+    this.deviceSession = deviceSession || new DeviceSessionController({ document, window, authentication: sessionService.auth });
     this.registration = registration || new RegistrationController({ document, db,
       provisioningAuth: studentProvisioningAuth, provisioningDb: studentProvisioningDb,
       studentIdToEmail, onSuccess: (title, message) => this.showToast(title, message) });
@@ -54,6 +57,9 @@ export class LoginController {
     this.scope.listen(this.window, 'pagehide', () => this.dispose(), { once: true });
     this.registration.initialize();
     this.surveyEntry.initialize();
+    const rawKind = (() => { try { return JSON.parse(this.storage.getItem(SessionToastFeedback.key) || 'null')?.kind; } catch { return null; } })();
+    const feedback = SessionToastFeedback.take(this.storage, rawKind === 'sessionEnded' ? 'sessionEnded' : 'logout');
+    if (feedback) this.showToast(...feedback);
   }
 
   setFieldError(input, errorElement, message = '') {
@@ -101,15 +107,18 @@ export class LoginController {
       const result = await this.sessionService.authenticate({ ...credentials,
         completeRegistration: input => this.registration.completeApprovedRegistration(input) });
       if (this.disposed) return false;
+      result.user = await this.deviceSession.bind(result.user, { allowTransfer: true });
+      if (this.disposed) return false;
       this.storage.setItem('presenceSession', JSON.stringify(result.session));
       const role = result.session.role;
-      this.showToast(role === 'admin' ? 'Admin access verified' : 'Welcome to Presence', 'Your account was verified successfully.');
       if (role === 'student') this.identity.save(result.user.uid, result.profile);
       else this.identity.clear();
       const surveyId = new SurveyLinkService({ href: this.window.location.href }).eventId();
       const destination = role === 'admin' ? 'pages/admin-dashboard.html' : 'pages/student-dashboard.html';
+      SessionToastFeedback.save(this.storage, 'login', result.user.uid);
       this.window.location.href = destination + (surveyId ? `?survey=${encodeURIComponent(surveyId)}` : '');
     } catch (error) {
+      await this.sessionService.logOut?.(this.sessionService.auth).catch(() => {});
       if (!this.disposed) {
         this.setFieldError(this.passwordInput, this.passwordError, this.sessionService.errorMessage(error));
         this.passwordInput.focus();
@@ -122,6 +131,7 @@ export class LoginController {
     if (this.disposed) return;
     this.disposed = true;
     this.scope.dispose();
+    this.deviceSession.dispose();
     this.hideToast();
     this.registration.dispose();
     this.surveyEntry.dispose();

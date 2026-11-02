@@ -1,3 +1,4 @@
+import { DeviceSessionController } from '../controllers/DeviceSessionController.js';
 import { AttendanceRevocationController } from '../controllers/AttendanceRevocationController.js';
 import { AdminRecentLogin } from '../controllers/AdminRecentLogin.js';
 import { attendanceTimeIssue, attendanceReviewLabel } from '../core/AttendanceTimePolicy.js';
@@ -2660,6 +2661,7 @@ export class AdminDashboard {
     const submit = dashboard.document.querySelector('#passwordResetSubmit'); submit.disabled = true; submit.textContent = 'Resetting…';
     try {
       await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(auth.currentUser.email, currentPassword));
+      if (dashboard.document.body.hasAttribute?.('data-device-session-enabled')) await DeviceSessionController.rebind(auth.currentUser);
       dashboard.document.querySelector('#currentStudentPassword').value = '';
       dashboard.passwordResetApi ||= new PasswordResetApi();
       const result = await dashboard.passwordResetApi.reset(auth.currentUser, student.uid, reason);

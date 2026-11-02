@@ -1,3 +1,5 @@
+import { DeviceSessionController } from './DeviceSessionController.js';
+import { SessionToastFeedback } from './DashboardToastController.js';
 import { endPresenceSession, bestEffortCleanup } from '../core/PresenceSession.js';
 import { ControllerScope } from '../core/ControllerScope.js';
 import { StudentIdentityController } from './StudentIdentityController.js';
@@ -89,12 +91,14 @@ export class DashboardNavigationController {
               Promise.resolve().then(() => clearPhoneReminders())
             ]));
             if (sessionState.mediaStream) sessionState.mediaStream.getTracks().forEach(track => track.stop());
+            await DeviceSessionController.release(auth.currentUser);
             await signOut(auth);
             try {
               dashboard.sessionStorage.removeItem("presenceSession");
               new StudentIdentityController({ storage: dashboard.sessionStorage }).clear();
               dashboard.sessionStorage.removeItem("presenceDeviceSession");
             } catch {}
+            SessionToastFeedback.save(dashboard.sessionStorage, 'logout');
             sessionState.dashboard?.dispose();
             dashboard.window.location.replace("../index.html");
           } catch (error) {

@@ -131,7 +131,7 @@ function browser() {
   const registration = { starts: 0, stops: 0, initialize() { this.starts++; }, dispose() { this.stops++; }, completeApprovedRegistration() {} };
   const surveyEntry = { starts: 0, stops: 0, initialize() { this.starts++; }, dispose() { this.stops++; } };
   const identity = { save(uid, profile) { this.saved = { uid, profile }; }, clear() { this.cleared = true; } };
-  return { document, window, storage, registration, surveyEntry, identity, element, records, timers, listeners };
+  return { document, window, storage, registration, surveyEntry, identity, element, records, timers, listeners, deviceSession: { bind: async user => user, dispose() {} } };
 }
 
 test('login UI initializes once, validates fields, toggles password/help and cleans up', async () => {

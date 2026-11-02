@@ -2561,3 +2561,41 @@ test('revocation modal shows selected student and event and cancel leaves attend
   controller.close(); assert.equal(controller.modal.hidden, true); assert.equal(focused, true); assert.equal(controller.record, null);
   controller.dispose();
 });
+
+test('cancelled readiness never starts check-in or writes attendance', async () => {
+  let writes = 0, reads = 0, starts = 0;
+  const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks({
+    setDoc: async () => writes++, getDocFromServer: async () => { reads++; throw Error('should not read'); }
+  }), { document: gridDocument });
+  const controller = new StudentAttendanceController({
+    getState: () => ({ events: [{ id: 'event' }], attendance: [] }),
+    readiness: { require: async () => false }, checkIn: { begin: async () => { starts++; } }
+  });
+  const button = { dataset: { attendEvent: 'event' }, disabled: false };
+  await controller.handleEventClick({ target: { closest: selector => selector === '[data-attend-event]' ? button : null } });
+  assert.equal(writes, 0); assert.equal(reads, 0); assert.equal(starts, 0);
+  controller.dispose();
+});
+
+test('authentication success feedback survives one redirect and is consumed once', async () => {
+  const { SessionToastFeedback: Feedback } = await import('../assets/js/controllers/DashboardToastController.js');
+  const data = new Map();
+  const storage = { getItem: key => data.get(key), setItem: (key, value) => data.set(key, value), removeItem: key => data.delete(key) };
+  Feedback.save(storage, 'login', 'student', 1000);
+  assert.equal(Feedback.take(storage, 'login', 'student', 1001)[0], 'Logged in successfully');
+  assert.equal(Feedback.take(storage, 'login', 'student', 1002), null);
+  Feedback.save(storage, 'logout', '', 1000);
+  assert.equal(Feedback.take(storage, 'logout', '', 1001)[0], 'Logged out successfully');
+  for (const [uid, time] of [['other', 1001], ['student', 62000], ['student', 999]]) {
+    Feedback.save(storage, 'login', 'student', 1000);
+    assert.equal(Feedback.take(storage, 'login', uid, time), null);
+  }
+  Feedback.save(storage, 'unknown', '', 1000); assert.equal(data.size, 0);
+});
+
+test('unavailable session storage never breaks authentication feedback', async () => {
+  const { SessionToastFeedback: Feedback } = await import('../assets/js/controllers/DashboardToastController.js');
+  const storage = { getItem() { throw Error('blocked'); }, setItem() { throw Error('blocked'); } };
+  assert.doesNotThrow(() => Feedback.save(storage, 'login', 'student'));
+  assert.equal(Feedback.take(storage, 'login', 'student'), null);
+});

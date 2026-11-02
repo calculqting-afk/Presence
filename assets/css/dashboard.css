@@ -1264,3 +1264,18 @@ button, a, summary { touch-action: manipulation; }
 #confirmAttendanceRevocation { background: var(--red-soft); color: var(--red); border: 1px solid var(--red); box-shadow: none; }
 #attendanceRevocationModal #revocationTimes,
 #attendanceRevocationModal #revocationWarning { font-size: .88rem; line-height: 1.6; overflow-wrap: anywhere; }
+
+/* Check-in preparation: compact desktop dialog, scrollable phone layout. */
+.attendance-readiness { width:min(520px,calc(100vw - 32px)); max-height:calc(100dvh - 32px); overflow:auto; box-sizing:border-box; border:1px solid var(--line,#39516b); border-radius:20px; padding:24px; background:var(--surface,#fff); color:var(--ink,#12213d); }
+.attendance-readiness::backdrop { background:rgb(3 12 27 / .7); backdrop-filter:blur(3px); }
+.attendance-readiness h2 { margin:0 0 10px; font-size:1.35rem; }
+.attendance-readiness p { line-height:1.5; }
+.readiness-list { list-style:none; padding:0; display:grid; gap:10px; }
+.readiness-list li { display:grid; gap:6px; padding:12px; border:1px solid var(--line,#39516b); border-radius:12px; }
+.readiness-list span,.readiness-note { font-size:.88rem; line-height:1.45; }
+.attendance-readiness button { min-height:44px; padding:10px 14px; border:1px solid var(--line,#39516b); border-radius:10px; background:transparent; color:inherit; font:inherit; cursor:pointer; }
+.readiness-list button { justify-self:start; }
+.readiness-actions { display:flex; flex-wrap:wrap; gap:10px; justify-content:flex-end; }
+.attendance-readiness .primary-button { background:#1769e8; color:#fff; }
+.attendance-readiness button:disabled { opacity:.55; cursor:default; }
+.attendance-readiness [hidden] { display:none; }

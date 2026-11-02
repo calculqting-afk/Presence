@@ -1,3 +1,4 @@
+import { DeviceSessionController } from './DeviceSessionController.js';
 import {PasswordResetApi} from './PasswordResetApi.js';
 import {EmailAuthProvider,reauthenticateWithCredential} from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
 import {ControllerScope} from '../core/ControllerScope.js';
@@ -69,6 +70,7 @@ export class StudentIdCorrectionController {
     this.busy=true;this.editing(true);this.field('confirmStudentIdCorrection').disabled=true;this.message('Confirming your identity and saving the correction…');
     try{
       const user=this.getUser();await reauthenticateWithCredential(user,EmailAuthProvider.credential(user.email,password));
+      await DeviceSessionController.rebind(user);
       this.field('studentIdAdminPassword').value='';
       const result=await this.api.call('/v1/admin/student-id/confirm',user,{preview:this.plan.preview,signature:this.plan.signature,confirmId:this.field('studentIdConfirmValue').value});
       this.plan.completed=true;this.message(`Verified: ${result.oldId} → ${result.newId}. The student can sign in with the new ID and the same password.`);

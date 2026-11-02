@@ -1,3 +1,5 @@
+import { DeviceSessionController } from './DeviceSessionController.js';
+import { SessionToastFeedback } from './DashboardToastController.js';
 import { endPresenceSession } from '../core/PresenceSession.js';
 import { ControllerScope } from '../core/ControllerScope.js';
 import { PolicyAgreementController } from './PolicyAgreementController.js';
@@ -43,8 +45,24 @@ export class DashboardApplication {
     // Capture failures now; only surface them after access has been verified.
     const dashboardModule = Promise.resolve().then(() => this.loadDashboard(dashboardRole))
       .then(module => ({ module }), error => ({ error }));
-    const currentUser = await waitForUser();
+    let currentUser = await waitForUser();
     if (!isCurrent()) return;
+    if (currentUser && this.document.body.hasAttribute?.('data-device-session-enabled')) {
+      this.deviceSession = new DeviceSessionController({ document: this.document, window: this.window });
+      this.scope.addCleanup(() => this.deviceSession.dispose());
+      const lost = async () => {
+        if (this.sessionLost) return;
+        this.sessionLost = true;
+        this.identity.clear();
+        SessionToastFeedback.save(this.window.sessionStorage, 'sessionEnded');
+        this.dashboard?.dispose();
+        if (auth.currentUser?.uid === currentUser.uid) await signOut(auth);
+        this.window.location.replace('../index.html');
+      };
+      try { currentUser = await this.deviceSession.bind(currentUser); }
+      catch { await lost(); return; }
+      await this.deviceSession.watch(currentUser, () => { void lost(); });
+    }
     if (currentUser && dashboardRole === 'student') this.identity.restore(currentUser.uid);
     const authorized = currentUser && (await verifyRole(currentUser));
     if (!isCurrent()) return;
@@ -74,13 +92,17 @@ export class DashboardApplication {
           this.identity.clear();
           await endPresenceSession({ user: currentUser, state: sessionState, window: this.window, storage: this.window.sessionStorage,
             write: (collectionName, id, fields) => setDoc(doc(db, collectionName, id), { ...fields, online: false, status: 'logged-out', lastSeen: serverTimestamp(), offlineAt: serverTimestamp() }, { merge: true }) });
+          await DeviceSessionController.release(auth.currentUser);
           await signOut(auth);
+          SessionToastFeedback.save(this.window.sessionStorage, 'logout');
           this.window.location.replace('../index.html');
         }
       });
       this.scope.addCleanup(() => this.agreement.dispose());
       if (!await this.agreement.require() || !isCurrent()) return;
     }
+    const feedback = SessionToastFeedback.take(this.window.sessionStorage, 'login', currentUser.uid);
+    if (feedback) showDashboardToast(...feedback);
     wireCommonNavigation();
     wireNotificationCenter();
     applyRoleNavigation();
