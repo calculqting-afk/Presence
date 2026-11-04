@@ -1,4 +1,6 @@
 import { DeviceSessionController } from '../controllers/DeviceSessionController.js';
+import { D1_PRESENCE_ENABLED, PRESENCE_HEARTBEAT_MS, PresenceClient } from '../controllers/PresenceClient.js';
+import { D1_DIRECTORY_ENABLED, StudentDirectoryClient } from '../controllers/StudentDirectoryClient.js';
 import { refreshMascotContext } from '../controllers/PresenceMascotController.js';
 import { SessionToastFeedback } from '../controllers/DashboardToastController.js';
 import { AttendanceReadinessController } from '../controllers/AttendanceReadinessController.js';
@@ -226,7 +228,7 @@ export class StudentDashboard {
       dashboard.sessionStorage.setItem("presenceDeviceSession", sessionState.presenceSessionId);
     } catch {}
     dashboard.updatePresence("online");
-    sessionState.presenceHeartbeatTimer = dashboard.window.setInterval(() => dashboard.updatePresence("online"), 60000);
+    sessionState.presenceHeartbeatTimer = dashboard.window.setInterval(() => dashboard.updatePresence("online"), PRESENCE_HEARTBEAT_MS);
     dashboard.scope.listen(dashboard.window, "focus", dashboard.handleInitializePresenceFocus);
     dashboard.scope.listen(dashboard.window, "pagehide", dashboard.handleInitializePresencePagehide);
   }
@@ -445,6 +447,18 @@ export class StudentDashboard {
   async writePresence(status = "online", silent = false) {
     const dashboard = this;
     if ((dashboard.studentProfile || currentUserProfile)?.passwordResetRequired === true) return;
+    if (D1_PRESENCE_ENABLED) {
+      try {
+        this.presenceClient ||= new PresenceClient();
+        await this.presenceClient.write(auth.currentUser, status === 'online');
+      } catch {
+        if (!silent && !this.presenceWriteErrorShown) {
+          this.presenceWriteErrorShown = true;
+          showDashboardToast('Live status unavailable', 'Online status could not sync. Attendance remains separate; retry when connected.');
+        }
+      }
+      return; // Never duplicate D1 heartbeats into Firestore, including on failure.
+    }
     const online = status === "online";
     const statusPayload = {
       online,
@@ -976,6 +990,9 @@ export class StudentDashboard {
         updatedAt: serverTimestamp()
       };
       await setDoc(doc(db, "students", currentUser.uid), updateData, { merge: true });
+      if (D1_DIRECTORY_ENABLED) {
+        void new StudentDirectoryClient().sync(auth.currentUser, currentUser.uid).catch(() => {});
+      }
       dashboard.closeStudentProfileModal();
       showDashboardToast("Profile updated", "Your changes are now live.");
     } catch (error) {

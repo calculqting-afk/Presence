@@ -1,4 +1,7 @@
 import { DeviceSessionController } from '../controllers/DeviceSessionController.js';
+import { D1_PRESENCE_ENABLED, PresenceClient } from '../controllers/PresenceClient.js';
+import { D1_DIRECTORY_ENABLED, StudentDirectoryClient } from '../controllers/StudentDirectoryClient.js';
+import { startAfter, limit } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { authorizedPresenceSessions } from '../core/PresenceSession.js';
 import { refreshMascotContext } from '../controllers/PresenceMascotController.js';
 import { AttendanceRevocationController } from '../controllers/AttendanceRevocationController.js';
@@ -186,16 +189,20 @@ export class AdminDashboard {
     this.studentIdCorrection=new StudentIdCorrectionController({document:this.document,getUser:()=>auth.currentUser,can:this.can,notify:showDashboardToast});
     this.studentIdCorrection.initialize();this.scope.addCleanup(()=>this.studentIdCorrection.dispose());
     this.scope.listen(this.document,'click',event=>{const button=event.target.closest?.('[data-correct-student-id]');if(button)void this.studentIdCorrection.open(this.students.find(student=>student.uid===button.dataset.correctStudentId),button);});
-    this.activityHistory=new ActivityHistoryController({document:this.document,window:this.window,db,can:this.can,
+    this.activityHistory=new ActivityHistoryController({document:this.document,window:this.window,db,can:this.can,getUser:()=>auth.currentUser,
       getActorName:uid=>uid===currentUser.uid?this.document.querySelector('[data-admin-name]')?.textContent:[...this.students].filter(student=>student.uid===uid).map(student=>[student.firstName,student.middleName,student.lastName].filter(Boolean).join(' '))[0]});
     this.activityHistory.initialize();this.scope.addCleanup(()=>this.activityHistory.dispose());
     this.wireDirectoryFilters();
+    this.scope.listen(this.document, 'presence:directory-changed', () => {
+      if (D1_DIRECTORY_ENABLED && activeView === 'modify-students') void this.refreshDirectory().catch(() => {});
+    });
     this.startSubscriptions();
     // The approvals listener also owns the navigation badge on every admin view.
     void this.loadAccountApprovals().catch(() => {});
     void this.loadCorrectionRequests().catch(() => {});
     this.dailyClock = new DailyAttendanceClock({ window: this.window, document: this.document, onDayChange: () => {
       this.refreshDashboardAttendance();
+      this.refreshDirectoryAttendance();
       this.renderAdminAttendance();
       this.renderAttendanceLine();
       this.scheduleStudentsRender();
@@ -222,7 +229,7 @@ export class AdminDashboard {
     };
     dashboard.applyActionPermissions();
     dashboard.subscriptions = new ScopedSubscriptions({
-      linger: key => ['students', 'geofences', 'faces', 'presence-authority'].includes(key) ? 15000 : 0,
+      linger: key => key === 'students' && D1_DIRECTORY_ENABLED ? 0 : ['students', 'geofences', 'faces', 'presence-authority'].includes(key) ? 15000 : 0,
       onError: (error, key) => {
         dashboard.loading?.settle(key);
         console.error(key, error);
@@ -659,7 +666,7 @@ export class AdminDashboard {
       dashboard.scheduleAdminEventStatusRefresh();
       dashboard.correctionRequests?.render();
     });
-    dashboard.listen('students', ["dashboard", "create", "modify-events", "past-events", "modify-students", "assign-fine", "attendance-line", "correction-requests", "profile"], collection(db, "students"), snapshot => {
+    dashboard.listen('students', ["dashboard", "create", "modify-events", "past-events", ...(!D1_DIRECTORY_ENABLED ? ['modify-students'] : []), "assign-fine", "attendance-line", "correction-requests", "profile"], collection(db, "students"), snapshot => {
       dashboard.studentsLoaded = !snapshot.metadata?.fromCache && !snapshot.metadata?.hasPendingWrites;
       dashboard.students = snapshot.docs.map(item => CoursePolicy.profile({
         uid: item.id,
@@ -671,6 +678,20 @@ export class AdminDashboard {
       if (activeView === "dashboard") dashboard.renderAdminAttendance();
       if (["dashboard", "attendance-line"].includes(activeView)) dashboard.renderAttendanceLine();
     });
+    if (D1_DIRECTORY_ENABLED && dashboard.can('viewStudents')) {
+      dashboard.directoryClient = new StudentDirectoryClient();
+      dashboard.subscriptions.register('d1-directory', ['modify-students'], (guard, onError) => {
+        let stopped = false, timer;
+        const poll = async () => {
+          if (stopped) return;
+          try { if (!dashboard.document.hidden) await dashboard.refreshDirectory(false, guard); }
+          catch (error) { if (!stopped) onError(error); }
+          if (!stopped) timer = dashboard.window.setTimeout(poll, 60000);
+        };
+        void poll();
+        return () => { stopped = true; dashboard.window.clearTimeout(timer); };
+      });
+    }
     dashboard.listen('presence-sessions', ["modify-students"], () => query(collection(db, "presenceSessions"), where('lastSeen', '>=', Timestamp.fromMillis(Date.now() - 135000))), snapshot => {
       dashboard.setPresenceSessions(snapshot);
       dashboard.scheduleStudentsRender();
@@ -684,6 +705,22 @@ export class AdminDashboard {
       dashboard.legacyPresenceByUid = new Map(snapshot.docs.map(item => [item.id, item.data()]));
       dashboard.scheduleStudentsRender();
     });
+    if (D1_PRESENCE_ENABLED && dashboard.can('viewStudents')) {
+      dashboard.presenceClient = new PresenceClient();
+      dashboard.subscriptions.register('d1-presence', ['modify-students'], (guard, onError) => {
+        let stopped = false, timer;
+        const poll = async () => {
+          if (stopped) return;
+          try {
+            if (!dashboard.document.hidden) await dashboard.refreshD1Presence(guard);
+          } catch (error) { if (!stopped) onError(error); }
+          // Serial polling prevents overlapping requests; leaving the view cancels it.
+          if (!stopped) timer = dashboard.window.setTimeout(poll, 60000);
+        };
+        void poll();
+        return () => { stopped = true; dashboard.window.clearTimeout(timer); };
+      });
+    }
     const attendanceOptions = {
       onRecords(records) {
         dashboard.attendance = records;
@@ -704,9 +741,18 @@ export class AdminDashboard {
       dashboard.refreshDashboardAttendance(true);
       return () => { dashboard.liveAttendanceSyncService.stop(); dashboard.dashboardAttendanceKey = ''; };
     });
-    dashboard.subscriptions.register('attendance', ['modify-students', 'modify-events', 'past-events', 'profile', 'assign-fine'], () => {
+    dashboard.subscriptions.register('attendance', ['modify-events', 'past-events', 'profile', 'assign-fine'], () => {
       dashboard.attendanceSyncService.start();
       return () => dashboard.attendanceSyncService.stop();
+    });
+    dashboard.directoryAttendanceSyncService = new AttendanceSyncService({
+      reference: collection(db, 'attendance'),
+      onRecords: records => { dashboard.directoryAttendance = records; dashboard.scheduleStudentsRender(); },
+      onStatus: status => { dashboard.directoryAttendanceReady = status.state === 'live'; dashboard.scheduleStudentsRender(); }
+    });
+    dashboard.subscriptions.register('directory-attendance', ['modify-students'], () => {
+      dashboard.refreshDirectoryAttendance(true);
+      return () => { dashboard.directoryAttendanceSyncService.stop(); dashboard.directoryAttendanceKey = ''; };
     });
     dashboard.scope.addCleanup(() => {
       dashboard.eventGeofenceEditor.dispose();
@@ -786,6 +832,60 @@ export class AdminDashboard {
     this.scope.listen(this.document, 'visibilitychange', refresh);
     this.scope.addCleanup(() => this.window.clearInterval(timer));
   }
+  refreshDirectoryAttendance(force = false) {
+    if (activeView !== 'modify-students' || !this.directoryAttendanceSyncService) return;
+    const date = DailyAttendanceClock.dateKey();
+    if (!force && date === this.directoryAttendanceKey) return;
+    this.directoryAttendanceKey = date;
+    this.directoryAttendance = []; this.directoryAttendanceReady = false;
+    this.directoryAttendanceSyncService.reference = query(collection(db, 'attendance'), where('eventDate', '==', date));
+    this.directoryAttendanceSyncService.stop(); this.directoryAttendanceSyncService.start();
+  }
+  async refreshDirectory(refresh = false, guard = callback => callback) {
+    const result = await this.directoryClient.list(currentUser, refresh);
+    guard(() => {
+      this.students = result.students.map(student => CoursePolicy.profile(student));
+      this.studentsLoaded = false; // A D1 display cache is never a publishable event roster.
+      this.directoryCheckedAt = result.checkedAt;
+      this.directoryStale = result.stale;
+      this.scheduleStudentsRender(); this.loading?.settle('students');
+    })();
+  }
+  async syncDirectoryStudent(uid) {
+    if (!D1_DIRECTORY_ENABLED || !uid) return;
+    try {
+      this.directoryClient ||= new StudentDirectoryClient();
+      await this.directoryClient.sync(auth.currentUser, uid);
+      if (activeView === 'modify-students') await this.refreshDirectory();
+    } catch {
+      showDashboardToast('Directory update pending', 'The student change is saved in Firebase. Refresh the directory to reconcile its cached listing.');
+    }
+  }
+  async loadStudentDetail(uid, more = false) {
+    if (!uid || !this.can('viewStudents')) return;
+    this.selectedManagedStudentUid = uid;
+    const generation = this.studentDetailGeneration = (this.studentDetailGeneration || 0) + 1;
+    if (!more) { this.studentDetailAttendance = []; this.studentDetailCursor = null; this.studentDetailProfile = null; }
+    this.studentDetailLoading = true; this.studentDetailError = false; this.renderSelectedStudent();
+    try {
+      const constraints = [where('studentUid', '==', uid), orderBy('eventDate', 'desc'),
+        ...(more && this.studentDetailCursor ? [startAfter(this.studentDetailCursor)] : []), limit(50)];
+      const [profile, history] = await Promise.all([
+        getDocFromServer(doc(db, 'students', uid)), getDocsFromServer(query(collection(db, 'attendance'), ...constraints))
+      ]);
+      if (generation !== this.studentDetailGeneration || this.selectedManagedStudentUid !== uid || activeView !== 'modify-students') return;
+      if (!profile.exists()) throw Error('This student profile no longer exists. Refresh the directory.');
+      this.studentDetailProfile = CoursePolicy.profile({ ...profile.data(), uid });
+      this.studentDetailAttendance = [...(more ? this.studentDetailAttendance : []), ...history.docs.map(item => ({ id: item.id, ...item.data() }))];
+      this.studentDetailCursor = history.docs.at(-1); this.studentDetailMore = history.docs.length === 50;
+    } catch (error) {
+      if (generation !== this.studentDetailGeneration || this.selectedManagedStudentUid !== uid) return;
+      this.studentDetailError = true;
+      showDashboardToast('Student details unavailable', error.message || 'Check your connection and retry.');
+    } finally {
+      if (generation === this.studentDetailGeneration && activeView === 'modify-students' && this.scope?.initialized !== false) { this.studentDetailLoading = false; this.renderSelectedStudent(); }
+    }
+  }
   changeSubscriptions(event) {
     const dashboard = this;
     dashboard.subscriptions.setView(event.detail.viewName);
@@ -797,7 +897,7 @@ export class AdminDashboard {
     const { CorrectionRequestsController } = await import('../controllers/CorrectionRequestsController.js');
     if (!this.scope.initialized || this.correctionRequests) return;
     this.correctionRequests = new CorrectionRequestsController({ root: this.document.querySelector('#adminCorrectionRequests'),
-      badge: this.document.querySelector('#correctionRequestNavCount'), db, user: currentUser, role: currentUserRole,
+      window: this.window, getView: () => activeView, badge: this.document.querySelector('#correctionRequestNavCount'), db, user: currentUser, role: currentUserRole,
       getEvents: () => this.events, getStudents: () => this.students, onApprove: record => this.correctionController.open(record), escapeHtml, notify: showDashboardToast });
     this.correctionRequests.initialize();
     this.scope.addCleanup(() => this.correctionRequests.dispose());
@@ -808,7 +908,7 @@ export class AdminDashboard {
     const { AccountApprovalController } = await import('../controllers/AccountApprovalController.js');
     if (!dashboard.scope.initialized || dashboard.accountApprovalController) return;
     dashboard.accountApprovalController = new AccountApprovalController({
-      document: dashboard.document, db, user: currentUser,
+      document: dashboard.document, window: dashboard.window, getView: () => activeView, db, user: currentUser,
       canApprove: () => dashboard.can('approveAccounts'), studentIdToEmail,
       onApprovedStudent(student) {
         if (!dashboard.students.some(existing => existing.uid === student.uid)) dashboard.students.push(student);
@@ -1270,10 +1370,11 @@ export class AdminDashboard {
   getStudentPresence(uid) {
     const dashboard = this;
     const sessions = [...(dashboard.presenceByUid.get(uid) || [])];
+    sessions.push(...(dashboard.d1PresenceByUid?.get(uid) || []));
     const legacyPresence = dashboard.legacyPresenceByUid.get(uid);
     if (legacyPresence) sessions.push(legacyPresence);
     const authority = dashboard.presenceAuthorityByUid?.get(uid);
-    const activeSessions = (dashboard.presenceAuthorityByUid ? authorizedPresenceSessions(sessions, authority) : []).filter(session => session.online === true && Date.now() - (session.lastSeen?.toMillis?.() || 0) < 135000);
+    const activeSessions = (dashboard.presenceAuthorityByUid ? authorizedPresenceSessions(sessions, authority) : []).filter(session => session.online === true && Date.now() - (session.lastSeen?.toMillis?.() || 0) < (session.ttlMs || 135000));
     const latestSession = sessions.reduce((latest, session) => {
       const sessionTime = session.offlineAt?.toMillis?.() || session.lastSeen?.toMillis?.() || 0;
       const latestTime = latest?.offlineAt?.toMillis?.() || latest?.lastSeen?.toMillis?.() || 0;
@@ -1308,6 +1409,15 @@ export class AdminDashboard {
     });
     dashboard.presenceByUid = nextPresence;
   }
+  async refreshD1Presence(guard = callback => callback) {
+    const sessions = await this.presenceClient.list(currentUser);
+    guard(() => {
+      const grouped = new Map();
+      for (const session of sessions) grouped.set(session.studentUid, [session]);
+      this.d1PresenceByUid = grouped;
+      this.scheduleStudentsRender();
+    })();
+  }
   renderStudents() {
     const dashboard = this;
     if (activeView !== "modify-students") return;
@@ -1326,10 +1436,11 @@ export class AdminDashboard {
       dashboard.studentSectionPicker.setOptions(sections);
     }
     const localDate = DailyAttendanceClock.dateKey();
-    const presentToday = new Set(dashboard.attendance.filter(record => record.eventDate === localDate).map(record => record.studentUid));
+    const presentToday = new Set((dashboard.directoryAttendance || []).filter(record => record.eventDate === localDate).map(record => record.studentUid));
     const pendingService = new Set(dashboard.fines.filter(fine => fine.status !== "Completed").map(fine => fine.studentUid));
     const activityTime = uid => {
       const sessions = [...(dashboard.presenceByUid.get(uid) || [])];
+      sessions.push(...(dashboard.d1PresenceByUid?.get(uid) || []));
       const legacy = dashboard.legacyPresenceByUid.get(uid);
       if (legacy) sessions.push(legacy);
       return Math.max(0, ...sessions.map(session => session.offlineAt?.toMillis?.() || session.lastSeen?.toMillis?.() || 0));
@@ -1341,7 +1452,7 @@ export class AdminDashboard {
       const matchesSection = dashboard.studentSectionPicker.matches(student.section);
       const matchesFace = dashboard.studentFaceFilter.value === "all" || (dashboard.studentFaceFilter.value === "registered" ? hasFaceRegistration : !hasFaceRegistration);
       const matchesAccount = dashboard.studentAccountFilter.value === "all" || (dashboard.studentAccountFilter.value === "active" ? student.active !== false : student.active === false);
-      const matchesAttendance = dashboard.studentAttendanceFilter.value === "all" || (dashboard.studentAttendanceFilter.value === "present" ? presentToday.has(student.uid) : !presentToday.has(student.uid));
+      const matchesAttendance = dashboard.studentAttendanceFilter.value === "all" || dashboard.directoryAttendanceReady === true && (dashboard.studentAttendanceFilter.value === "present" ? presentToday.has(student.uid) : !presentToday.has(student.uid));
       const matchesFine = dashboard.studentFineFilter.value === "all" || (dashboard.studentFineFilter.value === "pending" ? pendingService.has(student.uid) : !pendingService.has(student.uid));
       return matchesSearch && matchesCourse && matchesSection && matchesFace && matchesAccount && matchesAttendance && matchesFine;
     }).sort((first, second) => {
@@ -1357,7 +1468,7 @@ export class AdminDashboard {
     dashboard.studentPage = Math.min(dashboard.studentPage, totalPages);
     const firstResult = filtered.length ? (dashboard.studentPage - 1) * dashboard.studentPageSize + 1 : 0;
     const visibleStudents = filtered.slice(firstResult - 1, firstResult - 1 + dashboard.studentPageSize);
-    dashboard.document.querySelector("#studentResultCount").textContent = `${filtered.length} matching student${filtered.length === 1 ? "" : "s"}`;
+    dashboard.document.querySelector("#studentResultCount").textContent = `${filtered.length} matching student${filtered.length === 1 ? "" : "s"}${D1_DIRECTORY_ENABLED ? dashboard.directoryStale ? ' · cached; sync pending' : ' · D1 directory' : ''}`;
     dashboard.studentPagination.hidden = filtered.length <= dashboard.studentPageSize;
     dashboard.studentPageInfo.textContent = filtered.length ? `Showing ${firstResult}–${firstResult + visibleStudents.length - 1} of ${filtered.length}` : "No matching students";
     dashboard.previousStudentPage.disabled = dashboard.studentPage <= 1;
@@ -1400,7 +1511,8 @@ export class AdminDashboard {
   }
   renderSelectedStudent() {
     const dashboard = this;
-    const student = dashboard.students.find(item => item.uid === dashboard.selectedManagedStudentUid);
+    const student = dashboard.studentDetailProfile?.uid === dashboard.selectedManagedStudentUid ? dashboard.studentDetailProfile
+      : dashboard.students.find(item => item.uid === dashboard.selectedManagedStudentUid);
     if (!student) {
       dashboard.adminStudentDetail.hidden = true;
       dashboard.adminStudentDetail.innerHTML = "";
@@ -1409,21 +1521,25 @@ export class AdminDashboard {
     const fullName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ");
     const presence = dashboard.getStudentPresence(student.uid);
     const avatar = student.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="${escapeHtml(fullName)} profile photo">` : escapeHtml(getInitials(student.firstName, student.lastName));
-    const studentAttendance = dashboard.attendance.filter(record => record.studentUid === student.uid).sort((a, b) => (b.attendedAt?.seconds || 0) - (a.attendedAt?.seconds || 0));
-    const absenceCount = dashboard.can('viewAbsences') ? dashboard.getStudentAbsences(student).length : 0;
+    const studentAttendance = (dashboard.studentDetailAttendance || []).filter(record => record.studentUid === student.uid);
+    const absenceCount = 0; // Absences are verified on demand from this student's complete history.
     const attendedCards = studentAttendance.length ? studentAttendance.map(record => `<article class="attended-event-box"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><span>${escapeHtml(record.eventDate || "Date unavailable")} · ${escapeHtml(record.location || "Location not provided")}</span><span>${escapeHtml(record.timeIn || "")} ${record.timeOut ? `– ${escapeHtml(record.timeOut)}` : ""}</span></article>`).join("") : '<div class="empty-state">This student has not attended an event yet.</div>';
     const hasFaceRegistration = dashboard.faceRegistrationsByUid.get(student.uid)?.registered === true;
     dashboard.adminStudentDetail.innerHTML = `<article class="panel admin-student-overview"><button class="modal-close" type="button" data-close-student-detail aria-label="Close student details">×</button><div class="profile-avatar">${avatar}</div><h3>${escapeHtml(fullName)}</h3><p>Student ID · ${escapeHtml(student.accountId)}</p><p class="profile-course-line" style="margin-top:-4px;color:var(--muted);font-size:.82rem;">Course Registered · <strong>${escapeHtml(student.course || "Not assigned")}</strong></p><span class="badge ${presence.isOnline ? "green" : "gray"}"><i class="presence-dot"></i>${presence.label}</span><small class="presence-profile-time">${escapeHtml(presence.detail)}</small><div class="admin-student-actions">${dashboard.studentActions.render({
       uid: student.uid,
       hasFaceRegistration,
       profile: true
-    })}</div></article><article class="panel admin-student-information"><div class="panel-head"><div><h3>Student information</h3><p>Profile details and recorded attendance.</p></div><span class="badge blue">${studentAttendance.length} attended</span></div><div class="student-info-boxes"><div class="student-info-box"><span>Student ID</span><strong>${escapeHtml(student.accountId)}</strong></div><div class="student-info-box"><span>Course Registered</span><strong>${escapeHtml(student.course || "Not assigned")}</strong></div><div class="student-info-box"><span>Section</span><strong>${escapeHtml(student.section)}</strong></div><div class="student-info-box"><span>Face registration</span><strong>${hasFaceRegistration ? "Registered" : "Not registered"}</strong></div><div class="student-info-box"><span>Email address</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div><div class="student-info-box"><span>Phone number</span><strong>${escapeHtml(student.phone || "Not provided")}</strong></div><div class="student-info-box"><span>Live status</span><strong>${presence.label}</strong><small>${escapeHtml(presence.detail)}</small></div><div class="student-info-box"><span>Account access</span><strong>${student.active === false ? "Inactive" : "Active"}</strong></div></div><div class="panel-head"><div><h3>Attended events</h3><p>All attendance records saved for this student.</p></div></div><div class="attended-event-grid">${attendedCards}</div></article>`;
+    })}</div></article><article class="panel admin-student-information"><div class="panel-head"><div><h3>Student information</h3><p>Profile details and recorded attendance.</p></div><span class="badge blue">${studentAttendance.length} attended</span></div><div class="student-info-boxes"><div class="student-info-box"><span>Student ID</span><strong>${escapeHtml(student.accountId)}</strong></div><div class="student-info-box"><span>Course Registered</span><strong>${escapeHtml(student.course || "Not assigned")}</strong></div><div class="student-info-box"><span>Section</span><strong>${escapeHtml(student.section)}</strong></div><div class="student-info-box"><span>Face registration</span><strong>${hasFaceRegistration ? "Registered" : "Not registered"}</strong></div><div class="student-info-box"><span>Email address</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div><div class="student-info-box"><span>Phone number</span><strong>${escapeHtml(student.phone || "Not provided")}</strong></div><div class="student-info-box"><span>Live status</span><strong>${presence.label}</strong><small>${escapeHtml(presence.detail)}</small></div><div class="student-info-box"><span>Account access</span><strong>${student.active === false ? "Inactive" : "Active"}</strong></div></div><div class="panel-head"><div><h3>Attended events</h3><p>Attendance loads in pages of 50 records.</p></div></div><div class="attended-event-grid">${attendedCards}</div></article>`;
     const fineCount = dashboard.fines.filter(fine => fine.studentUid === student.uid).length;
     const profileActions = dashboard.adminStudentDetail.querySelector(".admin-student-actions");
     if (dashboard.can("viewFines")) profileActions?.insertAdjacentHTML("afterbegin", `<button class="outline-button" type="button" data-check-student-fines="${escapeHtml(student.uid)}">Check attendance fines${fineCount ? ` (${fineCount})` : ""}</button>`);
     if (dashboard.can('viewAbsences')) profileActions?.insertAdjacentHTML("afterbegin", `<button class="outline-button" type="button" data-view-student-absences="${escapeHtml(student.uid)}">View absences${absenceCount ? ` (${absenceCount})` : ""}</button>`);
     dashboard.adminStudentDetail.querySelector(".student-info-boxes")?.insertAdjacentHTML("afterbegin", `<div class="student-info-box"><span>Birthday</span><strong>${escapeHtml(formatBirthday(student.birthday))}</strong></div>`);
     dashboard.adminStudentDetail.hidden = false;
+    const historyArea = dashboard.adminStudentDetail.querySelector('.attended-event-grid');
+    if (dashboard.studentDetailLoading) historyArea.innerHTML = '<p role="status">Loading student attendance…</p>';
+    else if (dashboard.studentDetailError) historyArea.innerHTML = `<p>Student details could not be verified.</p><button class="outline-button" type="button" data-retry-student-detail="${escapeHtml(student.uid)}">Retry</button>`;
+    else if (dashboard.studentDetailMore) historyArea.insertAdjacentHTML('beforeend', `<button class="outline-button" type="button" data-more-student-attendance="${escapeHtml(student.uid)}">Load more attendance</button>`);
     dashboard.adminStudentDetail.querySelector('.student-info-boxes')?.insertAdjacentHTML('afterbegin', `<div class="student-info-box"><span>Age</span><strong>${escapeHtml(ageLabel(student.birthday))}</strong></div><div class="student-info-box"><span>Hometown</span><strong>${escapeHtml(hometownLabel(student))}</strong></div>`);
     dashboard.adminStudentDetail.querySelector('.student-info-boxes')?.insertAdjacentHTML('afterbegin', `<div class="student-info-box"><span>Gender</span><strong>${GenderPolicy.label(student.gender)}</strong></div>`);
     dashboard.applyActionPermissions();
@@ -1700,10 +1816,18 @@ export class AdminDashboard {
     dashboard.document.querySelector("#studentFormTitle").textContent = "Student information";
     dashboard.document.querySelector("#studentSubmitButton").textContent = "Add student";
   }
-  editStudent(uid) {
+  async editStudent(uid) {
     const dashboard = this;
     if (!dashboard.can('editStudents')) return;
-    const student = dashboard.students.find(item => item.uid === uid);
+    let student = dashboard.students.find(item => item.uid === uid);
+    if (D1_DIRECTORY_ENABLED) {
+      try {
+        const snapshot = await getDocFromServer(doc(db, 'students', uid));
+        if (!snapshot.exists()) throw Error('Student no longer exists. Refresh the directory.');
+        student = CoursePolicy.profile({ ...snapshot.data(), uid });
+        dashboard.students = dashboard.students.map(row => row.uid === uid ? student : row);
+      } catch (error) { showDashboardToast('Unable to edit student', error.message); return; }
+    }
     if (!student) return;
     dashboard.document.querySelector("#originalStudentId").value = student.uid;
     dashboard.document.querySelector("#managedStudentId").value = student.accountId;
@@ -2394,6 +2518,7 @@ export class AdminDashboard {
     submitEvent.preventDefault();
     if (dashboard.studentAccountBusy) return;
     const uid = dashboard.document.querySelector("#originalStudentId").value;
+    let savedUid = uid;
     let hometown;
     try { hometown = hometownForm(dashboard.document, 'managed'); }
     catch (error) { showDashboardToast('Invalid hometown', error.message); return; }
@@ -2463,6 +2588,7 @@ export class AdminDashboard {
         let credential;
         try {
           credential = await createUserWithEmailAndPassword(studentProvisioningAuth, authEmail, student.password);
+          savedUid = credential.user.uid;
           await updateProfile(credential.user, {
             displayName: [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ")
           });
@@ -2496,6 +2622,7 @@ export class AdminDashboard {
         }
       }
       dashboard.resetStudentForm();
+      await dashboard.syncDirectoryStudent(savedUid);
       openView("modify-students");
       showDashboardToast(uid ? "Student updated" : "Student created", uid ? `${student.accountId} was updated. The password is unchanged.` : `${student.accountId} can sign in with their birthday (MMDDYYYY), then create a new password.`);
     } catch (error) {
@@ -2533,8 +2660,7 @@ export class AdminDashboard {
     const remove = clickEvent.target.closest("[data-delete-student]");
     const resetFace = clickEvent.target.closest("[data-reset-face]");
     if (view) {
-      dashboard.selectedManagedStudentUid = view.dataset.viewStudent;
-      dashboard.renderSelectedStudent();
+      void dashboard.loadStudentDetail(view.dataset.viewStudent);
       dashboard.adminStudentDetail.scrollIntoView({
         behavior: "smooth",
         block: "start"
@@ -2582,6 +2708,7 @@ export class AdminDashboard {
     const roleBatch = writeBatch(db);
     roleBatch.set(doc(db, "students", student.uid), {
       role,
+      updatedAt: serverTimestamp(),
       roleUpdatedAt: serverTimestamp(),
       roleUpdatedBy: currentUser.uid
     }, {
@@ -2589,7 +2716,7 @@ export class AdminDashboard {
     });
     roleBatch.set(doc(collection(db,'activityLogs')),activityRecord({action:'role-changed',actorUid:currentUser.uid,subjectUid:student.uid,subjectId:student.accountId,
       subjectName:[student.firstName,student.middleName,student.lastName].filter(Boolean).join(' '),reason,before:activitySnapshot('role',{role:previousRole}),after:activitySnapshot('role',{role}),createdAt:serverTimestamp()}));
-    const roleWrite=roleBatch.commit();
+    const roleWrite=roleBatch.commit().then(() => dashboard.syncDirectoryStudent(student.uid));
     let syncTimer;
     try {
       const acknowledged = await Promise.race([roleWrite.then(() => true), new Promise(resolve => {
@@ -2633,8 +2760,7 @@ export class AdminDashboard {
     const dashboard = this;
     const view = clickEvent.target.closest("[data-view-student]");
     if (!view) return;
-    dashboard.selectedManagedStudentUid = view.dataset.viewStudent;
-    dashboard.renderSelectedStudent();
+    void dashboard.loadStudentDetail(view.dataset.viewStudent);
     dashboard.adminStudentDetail.scrollIntoView({
       behavior: "smooth",
       block: "start"
@@ -2649,6 +2775,10 @@ export class AdminDashboard {
     const resetFace = clickEvent.target.closest("[data-reset-face]");
     const checkFines = clickEvent.target.closest("[data-check-student-fines]");
     const viewAbsences = clickEvent.target.closest("[data-view-student-absences]");
+    const more = clickEvent.target.closest('[data-more-student-attendance]');
+    const retry = clickEvent.target.closest('[data-retry-student-detail]');
+    if (more && !dashboard.studentDetailLoading) void dashboard.loadStudentDetail(more.dataset.moreStudentAttendance, true);
+    if (retry) void dashboard.loadStudentDetail(retry.dataset.retryStudentDetail);
     if (close) {
       dashboard.selectedManagedStudentUid = undefined;
       dashboard.renderSelectedStudent();
@@ -2728,20 +2858,27 @@ export class AdminDashboard {
     confirmButton.textContent = "Removing account…";
     try {
       await dashboard.recentLogin.require();
+      const latestProfile = await getDocFromServer(doc(db, 'students', studentToRemove.uid));
+      if (!latestProfile.exists()) throw Error('The student was already removed. Refresh the directory.');
+      Object.assign(studentToRemove, latestProfile.data(), { uid: studentToRemove.uid });
       await signOut(studentProvisioningAuth).catch(() => {});
       const credential = await signInWithEmailAndPassword(studentProvisioningAuth, studentToRemove.authEmail || studentIdToEmail(studentToRemove.accountId), currentPassword);
       if (credential.user.uid !== studentToRemove.uid) throw new Error("The password does not match this student account.");
-      const [dismissedSnapshot, presenceSnapshot] = await Promise.all([getDocs(query(collection(db, "dismissedHistory"), where("studentUid", "==", studentToRemove.uid))), getDocs(query(collection(db, "presenceSessions"), where("studentUid", "==", studentToRemove.uid)))]);
+      const [dismissedSnapshot, presenceSnapshot, studentAttendanceSnapshot] = await Promise.all([
+        ...['dismissedHistory', 'presenceSessions', 'attendance'].map(name =>
+          getDocsFromServer(query(collection(db, name), where('studentUid', '==', studentToRemove.uid))))
+      ]);
       await deleteUser(credential.user);
       const cleanup = writeBatch(db);
       cleanup.delete(doc(db, "students", studentToRemove.uid));
       cleanup.delete(doc(db, "studentIds", studentToRemove.accountIdKey || studentToRemove.accountId.toLowerCase()));
       cleanup.delete(doc(db, "faceRegistrations", studentToRemove.uid));
       cleanup.delete(doc(db, "presence", studentToRemove.uid));
-      dashboard.attendance.filter(record => record.studentUid === studentToRemove.uid).forEach(record => cleanup.delete(doc(db, "attendance", record.id)));
+      studentAttendanceSnapshot.docs.forEach(record => cleanup.delete(record.ref));
       dismissedSnapshot.docs.forEach(record => cleanup.delete(record.ref));
       presenceSnapshot.docs.forEach(record => cleanup.delete(record.ref));
       await cleanup.commit();
+      await dashboard.syncDirectoryStudent(studentToRemove.uid);
       await signOut(studentProvisioningAuth).catch(() => {});
       if (dashboard.selectedManagedStudentUid === studentToRemove.uid) dashboard.selectedManagedStudentUid = undefined;
       dashboard.resetStudentForm();
@@ -2832,15 +2969,17 @@ export class AdminDashboard {
     button.textContent = "↻ Refreshing…";
     try {
       const recent = name => query(collection(db, name), where('lastSeen', '>=', Timestamp.fromMillis(Date.now() - 135000)));
-      const [studentSnapshot, presenceSnapshot, legacyPresenceSnapshot, attendanceSnapshot, authoritySnapshot] = await Promise.all([getDocsFromServer(collection(db, "students")), getDocsFromServer(recent('presenceSessions')), getDocsFromServer(recent('presence')), getDocsFromServer(collection(db, "attendance")), getDocsFromServer(collection(db, "accountSessions"))]);
+      if (D1_PRESENCE_ENABLED) await dashboard.refreshD1Presence();
+      if (D1_DIRECTORY_ENABLED) await dashboard.refreshDirectory(true);
+      const [studentSnapshot, presenceSnapshot, legacyPresenceSnapshot, attendanceSnapshot, authoritySnapshot] = await Promise.all([D1_DIRECTORY_ENABLED ? null : getDocsFromServer(collection(db, "students")), getDocsFromServer(recent('presenceSessions')), getDocsFromServer(recent('presence')), getDocsFromServer(query(collection(db, "attendance"), where('eventDate', '==', DailyAttendanceClock.dateKey()))), getDocsFromServer(collection(db, "accountSessions"))]);
       dashboard.presenceAuthorityByUid = new Map(authoritySnapshot.docs.map(item => [item.id, item.data()]));
-      dashboard.students = studentSnapshot.docs.map(item => CoursePolicy.profile({
+      if (studentSnapshot) dashboard.students = studentSnapshot.docs.map(item => CoursePolicy.profile({
         uid: item.id,
         ...item.data()
       }));
       dashboard.setPresenceSessions(presenceSnapshot);
       dashboard.legacyPresenceByUid = new Map(legacyPresenceSnapshot.docs.map(item => [item.id, item.data()]));
-      dashboard.attendance = attendanceSnapshot.docs.map(item => ({
+      dashboard.directoryAttendance = attendanceSnapshot.docs.map(item => ({
         id: item.id,
         ...item.data()
       }));

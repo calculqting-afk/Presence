@@ -45,7 +45,7 @@ test('stalled heartbeat cannot prevent sign-out or start writes after a later lo
 
 test('stalled logout writes time out and late failures are handled', async () => {
   const { endPresenceSession } = await load(); const clock = deadline(); const reject = [];
-  const pending = endPresenceSession({ user: { uid: 's' }, state: { presenceSessionId: 's_device' },
+  const pending = endPresenceSession({ presence: null, user: { uid: 's' }, state: { presenceSessionId: 's_device' },
     window: { clearInterval() {} }, write: () => new Promise((resolve, fail) => reject.push(fail)), deadline: clock.options });
   await flush(); assert.equal(reject.length, 2); clock.expire(); assert.equal(await pending, false);
   reject.forEach(fail => fail(Error('offline'))); await flush();

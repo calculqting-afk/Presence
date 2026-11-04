@@ -1,4 +1,5 @@
-import {collection,query,orderBy,limit,startAfter,where,Timestamp,getDocsFromServer,doc,getDocFromServer} from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
+import { FeatureReadClient } from './FeatureReadClient.js';
+import {doc,getDocFromServer} from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import {ControllerScope} from '../core/ControllerScope.js';
 import {ACTIVITY_ACTIONS} from './ActivityRecordPolicy.js';
 const millis=value=>value?.toMillis?.()??value?.toDate?.()?.getTime?.()??(value instanceof Date?+value:0);
@@ -14,7 +15,7 @@ export function filterActivity(rows,{admin='',subject='',action=''}={},names=new
     (!s||`${row.subjectName} ${row.subjectUid} ${row.subjectId} ${row.eventName} ${row.eventId} ${row.before?.accountId||''} ${row.after?.accountId||''}`.toLowerCase().includes(s)));
 }
 export class ActivityHistoryController {
-  constructor({document=globalThis.document,window=globalThis.window,db,can,getActorName}){Object.assign(this,{document,window,db,can,getActorName});this.scope=new ControllerScope();this.names=new Map();this.rows=[];this.generation=0;}
+  constructor({document=globalThis.document,window=globalThis.window,db,can,getActorName,getUser,reader=new FeatureReadClient(getUser)}){Object.assign(this,{document,window,db,can,getActorName,reader});this.scope=new ControllerScope();this.names=new Map();this.rows=[];this.generation=0;}
   initialize(){
     if(!this.can('viewActivityHistory')||!this.scope.initialize())return;
     this.root=this.document.querySelector('#adminActivityHistory');
@@ -37,14 +38,10 @@ export class ActivityHistoryController {
     this.busy=true;const generation=this.generation;this.field('more').disabled=true;this.field('status').textContent='Loading recorded activity…';
     try{
       for(const source of this.sources.filter(item=>item.more)){
-        const constraints=[orderBy('createdAt','desc'),limit(50)];
-        if(source.cursor)constraints.push(startAfter(source.cursor));
-        if(this.dates.from)constraints.push(where('createdAt','>=',Timestamp.fromDate(new Date(this.dates.from+'T00:00:00+08:00'))));
-        if(this.dates.to)constraints.push(where('createdAt','<=',Timestamp.fromDate(new Date(this.dates.to+'T23:59:59.999+08:00'))));
-        const snapshot=await getDocsFromServer(query(collection(this.db,source.name),...constraints));
+        const page=await this.reader.activity({source:source.name,from:this.dates.from,to:this.dates.to,cursor:source.cursor});
         if(generation!==this.generation||!this.scope.initialized)return;
-        source.cursor=snapshot.docs.at(-1)||source.cursor;source.more=snapshot.docs.length===50;
-        for(const item of snapshot.docs)this.rows.push(normalizeActivity(item.data(),item.id,source.name));
+        source.cursor=page.cursor;source.more=page.more;
+        for(const item of page.rows)this.rows.push(normalizeActivity(item,item.id,source.name));
       }
       for(const uid of [...new Set(this.rows.map(row=>row.actorUid).filter(Boolean))]){
         if(this.names.has(uid))continue;
@@ -80,7 +77,7 @@ export class ActivityHistoryController {
       this.field('list').append(card);
     }
     if(!rows.length)this.field('list').append(text('p','No matching activity in the loaded records.'));
-    this.field('status').textContent=`${rows.length} matching actions in ${this.rows.length} loaded entries. Search applies to loaded entries; load older activity to search further.`;
+    this.field('status').textContent=`${rows.length} matching actions in ${this.rows.length} loaded entries (D1; up to 5 minutes behind new activity). Search applies to loaded entries; load older activity to search further.`;
   }
   dispose(){this.generation++;this.scope.dispose();this.rows=[];this.names.clear();}
 }

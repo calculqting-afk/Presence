@@ -1,3 +1,4 @@
+import { PendingRequestsWatch } from './PendingRequestsWatch.js';
 import { collection, doc, query, where, onSnapshot, getDocFromServer } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { CorrectionRequestService, CORRECTION_KINDS } from './CorrectionRequestService.js';
 import { AttendanceViews } from './AttendanceViews.js';
@@ -6,8 +7,8 @@ import { ButtonLoadingController } from './ButtonLoadingController.js';
 import { CorrectionRequestFilters } from './CorrectionRequestFilters.js';
 
 export class CorrectionRequestsController {
-  constructor({ root, badge, db, user, role = 'student', getEvents, getStudent, getStudents = () => [], onApprove, escapeHtml, notify }) {
-    Object.assign(this, { root, badge, db, user, role, getEvents, getStudent, getStudents, onApprove, escapeHtml, notify });
+  constructor({ root, badge, db, user, role = 'student', getEvents, getStudent, getStudents = () => [], onApprove, escapeHtml, notify, window = root?.ownerDocument?.defaultView, getView = () => 'correction-requests' }) {
+    Object.assign(this, { window, getView, root, badge, db, user, role, getEvents, getStudent, getStudents, onApprove, escapeHtml, notify });
     this.admin = role !== 'student'; this.requests = []; this.declineDrafts = new Map();
     this.service = new CorrectionRequestService({ db, user, role });
     this.loading = new ButtonLoadingController({ document: root?.ownerDocument });
@@ -21,7 +22,7 @@ export class CorrectionRequestsController {
       : `<form data-request-form class="correction-request-form"><label class="field">Event and session<select name="eventId" required data-request-event></select></label><label class="field">Problem<select name="kind">${Object.entries(CORRECTION_KINDS).map(([value, label]) => `<option value="${value}">${e(label)}</option>`).join('')}</select></label><label class="field full">Reason<textarea name="reason" minlength="5" maxlength="1000" required></textarea></label><p class="full">Choose a closed session assigned to you. One request is kept per session, including its final decision. Contact an admin if further review is needed.</p><button class="primary-button" type="submit">Submit request</button></form>`}<p data-request-sync role="status">Loading requests…</p><div data-request-list></div>`;
     this.onSubmit = event => { event.preventDefault(); void this.submit(event); };
     this.onClick = event => { void this.click(event); };
-    this.onFilter = () => this.render();
+    this.onFilter = () => { if (this.admin && this.watch?.active) this.subscribe(); else this.render(); };
     this.onInput = event => { if (event.target.matches?.('[data-request-search]')) this.render(); };
     this.onChange = event => { if (event.target.matches?.('[data-request-section]')) this.render(); };
     this.root.addEventListener('submit', this.onSubmit);
@@ -29,15 +30,29 @@ export class CorrectionRequestsController {
     this.root.addEventListener('input', this.onInput);
     this.root.addEventListener('change', this.onChange);
     this.root.querySelector('[data-request-filter]')?.addEventListener('change', this.onFilter);
-    const reference = this.admin ? collection(this.db, 'attendanceCorrectionRequests') : query(collection(this.db, 'attendanceCorrectionRequests'), where('studentUid', '==', this.user.uid));
+    if (this.admin) {
+      this.watch = new PendingRequestsWatch({ document: this.root.ownerDocument, window: this.window, view: 'correction-requests', currentView: this.getView,
+        reference: query(collection(this.db, 'attendanceCorrectionRequests'), where('status', '==', 'pending')),
+        count: count => this.updateBadge(count), open: () => this.subscribe(), close: () => { this.subscriptionGeneration = (this.subscriptionGeneration || 0) + 1; this.unsubscribe?.(); this.unsubscribe = null; this.requests = []; this.available = false; } });
+      this.watch.initialize();
+    } else this.subscribe();
+    this.refreshEvents();
+  }
+  subscribe() {
+    const generation = this.subscriptionGeneration = (this.subscriptionGeneration || 0) + 1;
+    this.unsubscribe?.();
+    const status = this.root.querySelector('[data-request-filter]')?.value || 'pending';
+    const reference = this.admin
+      ? status === 'all' ? collection(this.db, 'attendanceCorrectionRequests') : query(collection(this.db, 'attendanceCorrectionRequests'), where('status', '==', status))
+      : query(collection(this.db, 'attendanceCorrectionRequests'), where('studentUid', '==', this.user.uid));
     this.unsubscribe = onSnapshot(reference, { includeMetadataChanges: true }, snapshot => {
-      if (!this.initialized || snapshot.metadata?.hasPendingWrites) return;
+      if (!this.initialized || generation !== this.subscriptionGeneration || this.admin && !this.watch.active || snapshot.metadata?.hasPendingWrites) return;
       this.available = true;
       this.requests = snapshot.docs.map(item => ({ ...item.data(), id: item.id })).sort((a, b) => (b.submittedAt?.seconds || 0) - (a.submittedAt?.seconds || 0));
       this.root.querySelector('[data-request-sync]').textContent = snapshot.metadata?.fromCache ? 'Cached requests — reconnect to verify the latest decisions.' : 'Requests synced.';
       this.render();
     }, () => {
-      if (!this.initialized) return;
+      if (!this.initialized || generation !== this.subscriptionGeneration || this.admin && !this.watch.active) return;
       this.available = false;
       this.root.querySelector('[data-request-sync]').textContent = 'Requests unavailable. Publish the latest Firestore rules and reload, or check your connection.';
       this.root.querySelector('[data-request-list]').textContent = 'Could not verify requests.';
@@ -86,7 +101,8 @@ export class CorrectionRequestsController {
       search: this.root.querySelector('[data-request-search]')?.value || '',
       section: this.root.querySelector('[data-request-section]')?.value || ''
     };
-    this.updateBadge(this.requests.filter(item => item.status === 'pending').length);
+    if (!this.admin || filters.status === 'pending' || filters.status === 'all') this.updateBadge(this.requests.filter(item => item.status === 'pending').length);
+    else void this.watch.refresh();
     this.root.querySelector('[data-request-list]').innerHTML = this.requests.filter(item => CorrectionRequestFilters.matches(item, this.getStudents().find(student => student.uid === item.studentUid), filters)).map(item => {
       const event = this.getEvents().find(event => event.id === item.eventId);
       const student = this.getStudents().find(student => student.uid === item.studentUid);
@@ -138,7 +154,7 @@ export class CorrectionRequestsController {
     if (event.target.closest('[data-clear-request-filters]')) {
       for (const selector of ['[data-request-search]', '[data-request-section]']) { const field = this.root.querySelector(selector); if (field) field.value = ''; }
       const status = this.root.querySelector('[data-request-filter]'); if (status) status.value = 'pending';
-      this.render(); return;
+      if (this.admin && this.watch?.active) this.subscribe(); else this.render(); return;
     }
     const button = event.target.closest('[data-review-request]');
     if (!button || !this.admin || this.busy) return;
@@ -153,7 +169,7 @@ export class CorrectionRequestsController {
     finally { this.busy = false; this.loading.reset('request-review'); if (this.renderPending && this.initialized) { this.renderPending = false; this.render(); } }
   }
   dispose() {
-    this.initialized = false; this.unsubscribe?.(); this.updateBadge(0);
+    this.initialized = false; this.watch?.dispose(); this.unsubscribe?.(); this.updateBadge(0);
     this.loading.dispose();
     this.root?.removeEventListener('submit', this.onSubmit); this.root?.removeEventListener('click', this.onClick);
     this.root?.removeEventListener('input', this.onInput); this.root?.removeEventListener('change', this.onChange);

@@ -94,6 +94,51 @@ export class FirebaseGateway {
     const result = await this.call(`https://identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:lookup`, { localId: [uid] });
     return result.users?.find(user => user.localId === uid) || null;
   }
+  async directoryStudent(uid, fields) {
+    const params = new URLSearchParams();
+    for (const field of fields) params.append('mask.fieldPaths', field);
+    const result = await this.call(this.base + '/students/' + uid + '?' + params, undefined, true);
+    return result ? { ...Object.fromEntries(Object.entries(result.fields || {}).map(([key, value]) => [key, decode(value)])), uid,
+      _updateTime: result.updateTime } : null;
+  }
+  async directoryChanges(since, fields) {
+    const fieldFilter = fieldPath => ({ fieldFilter: { field: { fieldPath }, op: 'GREATER_THAN_OR_EQUAL',
+      value: { timestampValue: since } } });
+    const rows = await this.call(this.base + ':runQuery', { structuredQuery: {
+      from: [{ collectionId: 'students' }], select: { fields: fields.map(fieldPath => ({ fieldPath })) },
+      ...(since ? { where: { compositeFilter: { op: 'OR', filters: [fieldFilter('updatedAt'), fieldFilter('roleUpdatedAt')] } } } : {}),
+      limit: 5001
+    } });
+    const documents = rows.filter(row => row.document).map(({ document }) => ({
+      ...Object.fromEntries(Object.entries(document.fields || {}).map(([key, value]) => [key, decode(value)])),
+      uid: document.name.split('/').at(-1), _updateTime: document.updateTime
+    }));
+    if (documents.length > 5000) throw new SafeError(503, 'Directory requires server pagination.');
+    const readTime = rows.at(-1)?.readTime;
+    if (!readTime) throw new SafeError(503, 'Directory synchronization could not be confirmed.');
+    return { documents, readTime };
+  }
+  async featurePage(path, field, { cursor, from, to, fields, size }) {
+    // Called only with server-selected collections and projected fields.
+    const parts = path.split('/'), collectionId = parts.pop();
+    const parent = this.base + (parts.length ? '/' + parts.join('/') : '');
+    const filters = [];
+    if (from) filters.push({ fieldFilter: { field: { fieldPath: field }, op: 'GREATER_THAN_OR_EQUAL', value: { timestampValue: new Date(from + 'T00:00:00+08:00').toISOString() } } });
+    if (to) filters.push({ fieldFilter: { field: { fieldPath: field }, op: 'LESS_THAN_OR_EQUAL', value: { timestampValue: new Date(to + 'T23:59:59.999+08:00').toISOString() } } });
+    const rows = await this.call(parent + ':runQuery', { structuredQuery: {
+      from: [{ collectionId }], select: { fields: fields.map(fieldPath => ({ fieldPath })) },
+      orderBy: [{ field: { fieldPath: field }, direction: 'DESCENDING' }, { field: { fieldPath: '__name__' }, direction: 'DESCENDING' }],
+      ...(filters.length ? { where: filters.length === 1 ? filters[0] : { compositeFilter: { op: 'AND', filters } } } : {}),
+      ...(cursor ? { startAt: { before: false, values: [{ timestampValue: cursor.time }, { referenceValue: `projects/${PROJECT}/databases/(default)/documents/${path}/${cursor.id}` }] } } : {}),
+      limit: size
+    } });
+    const documents = rows.filter(row => row.document).map(({ document }) => ({
+      ...Object.fromEntries(Object.entries(document.fields || {}).map(([key, value]) => [key, decode(value)])), id: document.name.split('/').at(-1)
+    }));
+    const last = documents.at(-1);
+    return { rows: documents, more: documents.length === size,
+      cursor: last ? { id: last.id, time: rows.filter(row => row.document).at(-1).document.fields[field].timestampValue } : null };
+  }
   async userByEmail(email) {
     const result=await this.call(`https://identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:lookup`,{email:[email]});
     return result.users?.find(user=>user.email?.toLowerCase()===email.toLowerCase())||null;

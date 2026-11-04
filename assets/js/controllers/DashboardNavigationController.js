@@ -1,6 +1,7 @@
 import { DeviceSessionController } from './DeviceSessionController.js';
 import { SessionToastFeedback } from './DashboardToastController.js';
 import { endPresenceSession, bestEffortCleanup } from '../core/PresenceSession.js';
+import { PRESENCE_HEARTBEAT_MS } from './PresenceClient.js';
 import { ControllerScope } from '../core/ControllerScope.js';
 import { StudentIdentityController } from './StudentIdentityController.js';
 import { AuthActionController } from './AuthActionController.js';
@@ -110,7 +111,7 @@ export class DashboardNavigationController {
               dashboard.window.clearInterval(sessionState.presenceHeartbeatTimer);
               sessionState.presenceHeartbeatTimer = dashboard.window.setInterval(() => {
                 void sessionState.dashboard?.dashboard?.updatePresence?.('online');
-              }, 60000);
+              }, PRESENCE_HEARTBEAT_MS);
             }
             console.error("LOGOUT FAILED:", error);
             showDashboardToast("Unable to log out", "Firebase could not end this session. Please try again.");

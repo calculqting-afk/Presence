@@ -3,6 +3,9 @@ import { FirebaseGateway, SafeError, verifyToken } from './firebase.js';
 import { ResetService } from './service.js';
 import { StudentIdService } from './student-id.js';
 import { AttendanceSecurityService } from './attendance-security.js';
+import { PresenceService } from './presence.js';
+import { DirectoryService } from './directory.js';
+import { FeatureReadsService } from './feature-reads.js';
 
 export function handler({ verify = verifyToken, gateway = secret => new FirebaseGateway(secret) } = {}) {
   return async (request, env) => {
@@ -17,11 +20,14 @@ export function handler({ verify = verifyToken, gateway = secret => new Firebase
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
       if (url.pathname === '/health' && request.method === 'GET') return response({ service: 'presence-admin-api', superAdminAuthority: 'custom-claim', enabled: env.RESET_ENABLED === 'true', configured: Boolean(env.FIREBASE_SERVICE_ACCOUNT),idCorrectionEnabled:env.ID_CORRECTION_ENABLED==='true',deviceSessions:true,locationProofs:true,faceConfirmationConfigured:Boolean(env.FACE_REGISTRATION_SECRET),temporaryPasswordMinutes:30 });
       const sessionRoute = ['/v1/session/status', '/v1/session/acquire', '/v1/session/release'].includes(url.pathname);
+      const presenceRoute = ['/v1/presence/heartbeat', '/v1/admin/presence'].includes(url.pathname);
+      const directoryRoute = ['/v1/admin/directory', '/v1/directory/sync'].includes(url.pathname);
+      const featureRoute = ['/v1/admin/activity', '/v1/surveys/read'].includes(url.pathname);
       const idRoute=['/v1/admin/student-id/status','/v1/admin/student-id/preview','/v1/admin/student-id/confirm'].includes(url.pathname);
       const locationRoute = url.pathname === '/v1/student/attendance-location', faceRoute = url.pathname === '/v1/internal/face-registration';
-      if ((!sessionRoute && !idRoute && !locationRoute && !faceRoute && !['/v1/admin/password-reset', '/v1/student/password-change'].includes(url.pathname)) || url.search) throw new SafeError(404, 'Not found.');
+      if ((!featureRoute && !directoryRoute && !presenceRoute && !sessionRoute && !idRoute && !locationRoute && !faceRoute && !['/v1/admin/password-reset', '/v1/student/password-change'].includes(url.pathname)) || url.search) throw new SafeError(404, 'Not found.');
       if (request.method !== 'POST') throw new SafeError(405, 'POST required.');
-      if (!sessionRoute && !locationRoute && !faceRoute && (idRoute?env.ID_CORRECTION_ENABLED!=='true':env.RESET_ENABLED !== 'true')) throw new SafeError(503, idRoute?'Student ID correction is awaiting backend permission setup.':'Password reset service is not enabled yet.');
+      if (!featureRoute && !directoryRoute && !presenceRoute && !sessionRoute && !locationRoute && !faceRoute && (idRoute?env.ID_CORRECTION_ENABLED!=='true':env.RESET_ENABLED !== 'true')) throw new SafeError(503, idRoute?'Student ID correction is awaiting backend permission setup.':'Password reset service is not enabled yet.');
       const token = /^Bearer ([^\s]+)$/.exec(request.headers.get('Authorization') || '')?.[1];
       if (!token) throw new SafeError(401, 'Sign in again to continue.');
       if (!(request.headers.get('Content-Type') || '').startsWith('application/json')) throw new SafeError(415, 'JSON required.');
@@ -32,13 +38,34 @@ export function handler({ verify = verifyToken, gateway = secret => new Firebase
       const data = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { data.set(chunk, offset); offset += chunk.length; }
       let body; try { body = JSON.parse(new TextDecoder().decode(data)); } catch { throw new SafeError(400, 'Invalid JSON.'); }
       if (!body || typeof body !== 'object' || Array.isArray(body)) throw new SafeError(400, 'Invalid request.');
-      const claims = await verify(token), db=gateway(env.FIREBASE_SERVICE_ACCOUNT);
+      const claims = await verify(token);
+      const presence = env.PRESENCE_ENABLED === 'true' && env.PRESENCE_DB ? new PresenceService(env.PRESENCE_DB) : null;
+      if (presenceRoute && !presence) throw new SafeError(503, 'Online status is awaiting D1 activation.');
+      // Heartbeats need a verified JWT and SQL device authority, not Firestore.
+      if (url.pathname === '/v1/presence/heartbeat') return response(await presence.heartbeat(claims, body));
+      const db=gateway(env.FIREBASE_SERVICE_ACCOUNT);
       if (sessionRoute) {
         const service = new DeviceSessionService(db);
-        return response(url.pathname.endsWith('/status') ? await service.status(claims)
-          : url.pathname.endsWith('/release') ? await service.release(claims) : await service.acquire(claims, body));
+        const result = url.pathname.endsWith('/status') ? await service.status(claims)
+          : url.pathname.endsWith('/release') ? await service.release(claims) : await service.acquire(claims, body);
+        if (presence && !result.transferRequired) {
+          const active = await db.get('accountSessions/' + claims.sub);
+          if (active) await presence.syncAuthority(claims.sub, active);
+        }
+        return response(result);
       }
       await requireActiveDevice(db, claims);
+      if (featureRoute) {
+        if (env.FEATURE_READS_ENABLED !== 'true' || !env.PRESENCE_DB) throw new SafeError(503, 'Feature read models are awaiting activation.');
+        const service = new FeatureReadsService(env.PRESENCE_DB, db);
+        return response(url.pathname.endsWith('/activity') ? await service.activity(claims, body) : await service.survey(claims, body));
+      }
+      if (directoryRoute) {
+        if (env.DIRECTORY_ENABLED !== 'true' || !env.PRESENCE_DB) throw new SafeError(503, 'Directory cache is awaiting activation.');
+        const directory = new DirectoryService(env.PRESENCE_DB, db);
+        return response(url.pathname.endsWith('/sync') ? await directory.syncOne(claims, body) : await directory.list(claims, body));
+      }
+      if (url.pathname === '/v1/admin/presence') return response(await presence.list(claims, body, db));
       if (locationRoute || faceRoute) {
         const security = new AttendanceSecurityService(db);
         return response(locationRoute ? await security.location(claims, body)
@@ -54,6 +81,7 @@ export function handler({ verify = verifyToken, gateway = secret => new Firebase
   };
 }
 export default { fetch: handler(), async scheduled(_event, env) {
+  if (env.PRESENCE_DB) await env.PRESENCE_DB.prepare('DELETE FROM feature_reads WHERE expires_at < ?1 AND lease_until < ?2').bind(Date.now(), Date.now()).run();
   if (env.RESET_ENABLED !== 'true') return;
   const db = new FirebaseGateway(env.FIREBASE_SERVICE_ACCOUNT), service = new ResetService(db);
   const uids = await db.expiredResets(Date.now());

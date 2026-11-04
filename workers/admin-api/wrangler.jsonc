@@ -6,10 +6,19 @@
   "workers_dev": true,
   "preview_urls": false,
   "observability": { "enabled": false },
+  "d1_databases": [{
+    "binding": "PRESENCE_DB",
+    "database_name": "presence-status",
+    "database_id": "b2cf2493-59e6-4739-afe7-6be070571888",
+    "migrations_dir": "migrations"
+  }],
   // Password completion checks the exact expiry on every request. This job only
   // performs cleanup/credential rotation for expired, already restricted resets.
   "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
+    "PRESENCE_ENABLED": "true",
+    "DIRECTORY_ENABLED": "true",
+    "FEATURE_READS_ENABLED": "true",
     "ALLOWED_ORIGINS": "http://127.0.0.1:5500,http://localhost:5500,https://localhost,https://presence-a873f.web.app,https://presence-a873f.firebaseapp.com,https://calculqting-afk.github.io",
     "RESET_ENABLED": "true",
     "ID_CORRECTION_ENABLED": "true"

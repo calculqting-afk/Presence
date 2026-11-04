@@ -10,11 +10,12 @@ async function fixture() {
   const list = { addEventListener() {}, innerHTML: '' }, count = {};
   const nodes = { '#accountApprovalNavCount': badge, '[data-view="account-approvals"]': button, '#accountApprovalList': list, '#accountApprovalCount': count };
   let next, error, reads = 0, stopped = 0, reference;
-  const sdk = { collection: (db, name) => name, doc() {}, query: (...args) => args, where: (...args) => args, serverTimestamp() {}, updateDoc() {}, writeBatch() {},
+  const sdk = { getCountFromServer: async () => ({ data: () => ({ count: 0 }) }), collection: (db, name) => name, doc() {}, query: (...args) => args, where: (...args) => args, serverTimestamp() {}, updateDoc() {}, writeBatch() {},
     onSnapshot(ref, success, failed) { reads++; reference = ref; next = success; error = failed; return () => stopped++; } };
   const context = vm.createContext({});
   const controller = new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/controllers/AccountApprovalController.js'), 'utf8'), { context });
   await controller.link(specifier => {
+    if (specifier.endsWith('/PendingRequestsWatch.js')) return new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/controllers/PendingRequestsWatch.js'), 'utf8'), { context });
     if (/\/(GenderPolicy|StudentPersonalInfo)\.js$/.test(specifier)) return new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/core', path.basename(specifier)), 'utf8'), { context });
     const exports = specifier.startsWith('https:') ? sdk : { CoursePolicy: { profile: value => value } };
     return new vm.SyntheticModule(Object.keys(exports), function() { for (const [key, value] of Object.entries(exports)) this.setExport(key, value); }, { context });
@@ -27,7 +28,7 @@ async function fixture() {
   return { instance, badge, button, list, count, get reads() { return reads; }, get stopped() { return stopped; }, get reference() { return reference; }, snapshot: requests => next({ docs: requests.map((data, id) => ({ id, data: () => data })) }), fail: () => error() };
 }
 
-test('one pending-only live listener updates navigation while approvals are not open', async () => {
+test('one pending-only live listener updates navigation while approvals are open', async () => {
   const f = await fixture(); f.instance.initialize(); f.instance.initialize();
   assert.equal(f.reads, 1);
   assert.equal(JSON.stringify(f.reference), JSON.stringify(['registrationRequests', ['status', '==', 'pending']]));
@@ -58,4 +59,26 @@ test('badge is present in navigation and its controller starts behind the existi
   assert.match(source, /this.startSubscriptions\(\);\s*\/\/[^\n]+\n\s*void this.loadAccountApprovals\(\)/);
   assert.match(source, /if \(!dashboard.can\('viewAccountApprovals'\) \|\| dashboard.accountApprovalController\) return;/);
   assert.match(css, /\.account-approval-nav-count\[hidden\] \{ display: none; \}/);
+});
+
+
+test('closed request pages use aggregate counts, visibility stops detail reads, and returning opens one listener', async () => {
+  let now = 0, counts = 0, opened = 0, closed = 0, timer;
+  const events = new Map(), labels = [], context = vm.createContext({});
+  const sdk = new vm.SyntheticModule(['getCountFromServer'], function () { this.setExport('getCountFromServer', async () => { counts++; return { data: () => ({ count: 3 }) }; }); }, { context });
+  const module = new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/controllers/PendingRequestsWatch.js'), 'utf8'), { context });
+  await module.link(() => sdk); await module.evaluate();
+  const window = { addEventListener: (name, fn) => events.set(name, fn), removeEventListener: name => events.delete(name), setInterval: fn => { timer = fn; return 1; }, clearInterval() {} };
+  const document = { visibilityState: 'visible', addEventListener: (name, fn) => events.set(name, fn), removeEventListener: name => events.delete(name) };
+  const watch = new module.namespace.PendingRequestsWatch({ window, document, view: 'account-approvals', currentView: () => 'dashboard', reference: {},
+    count: value => labels.push(value), open: () => opened++, close: () => closed++, now: () => now });
+  watch.initialize(); await new Promise(done => setImmediate(done));
+  assert.equal(counts, 1); assert.equal(opened, 0); assert.deepEqual(labels, [3]);
+  timer(); await Promise.resolve(); assert.equal(counts, 1);
+  now = 300000; timer(); await new Promise(done => setImmediate(done)); assert.equal(counts, 2);
+  events.get('presence:viewchange')({ detail: { viewName: 'account-approvals' } }); assert.equal(opened, 1);
+  document.visibilityState = 'hidden'; events.get('visibilitychange')(); assert.equal(closed, 2);
+  timer(); await Promise.resolve(); assert.equal(counts, 2);
+  document.visibilityState = 'visible'; events.get('visibilitychange')(); assert.equal(opened, 2);
+  watch.dispose(); assert.equal(events.size, 0); assert.equal(closed, 3);
 });

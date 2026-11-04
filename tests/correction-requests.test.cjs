@@ -41,7 +41,7 @@ async function fixture() {
     writes = pending;
   };
   let listener, errorListener, liveReference, unsubscribed = false;
-  const sdk = { doc: reference, collection: reference, runTransaction: transaction, serverTimestamp: () => 'SERVER', Timestamp: { fromDate: date => date },
+  const sdk = { getCountFromServer: async () => ({ data: () => ({ count: 0 }) }), doc: reference, collection: reference, runTransaction: transaction, serverTimestamp: () => 'SERVER', Timestamp: { fromDate: date => date },
     query: (...args) => args, where: (...args) => args, getDocFromServer: async ref => snapshot(ref),
     onSnapshot: (ref, options, next, error) => { liveReference = ref; listener = next; errorListener = error; return () => { unsubscribed = true; }; } };
   const context = vm.createContext({ console }), cache = new Map();

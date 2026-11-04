@@ -1,6 +1,10 @@
 {
   "indexes": [
     { "collectionGroup": "attendance", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "studentUid", "order": "ASCENDING" },
+      { "fieldPath": "eventDate", "order": "DESCENDING" }
+    ] },
+    { "collectionGroup": "attendance", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "eventId", "order": "ASCENDING" },
       { "fieldPath": "eventDate", "order": "DESCENDING" }
     ] },

@@ -7,8 +7,8 @@ export class SurveyPolicy {
     if (Array.isArray(event.audienceSections)) return EventAudiencePolicy.canAttend(profile, event);
     if (!event.attendanceRoster) return event.audience === 'All students' || event.audience === `Section ${profile.section}`;
     if (Object.hasOwn(event.attendanceRoster, profile.uid)) return true;
-    const joined = profile.createdAt?.toDate?.();
-    const captured = event.rosterCapturedAt?.toDate?.();
+    const joined = EventAudiencePolicy.date(profile.createdAt);
+    const captured = EventAudiencePolicy.date(event.rosterCapturedAt);
     return Boolean(joined && captured && joined >= captured
       && (event.audience === 'All students' || event.audience === `Section ${profile.section}`));
   }

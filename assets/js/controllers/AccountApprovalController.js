@@ -1,11 +1,12 @@
+import { PendingRequestsWatch } from './PendingRequestsWatch.js';
 import { collection, doc, onSnapshot, query, where, serverTimestamp, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 import { CoursePolicy } from '../core/CoursePolicy.js';
 import { ageLabel, hometownLabel, hometownFields } from '../core/StudentPersonalInfo.js';
 import { GenderPolicy } from '../core/GenderPolicy.js';
 
 export class AccountApprovalController {
-  constructor({ document = globalThis.document, db, user, canApprove, studentIdToEmail, onApprovedStudent = () => {}, notify = () => {} } = {}) {
-    this.document = document; this.db = db; this.user = user; this.canApprove = canApprove;
+  constructor({ document = globalThis.document, db, user, canApprove, studentIdToEmail, onApprovedStudent = () => {}, notify = () => {}, window = document?.defaultView, getView = () => 'account-approvals' } = {}) {
+    this.window = window; this.getView = getView; this.document = document; this.db = db; this.user = user; this.canApprove = canApprove;
     this.studentIdToEmail = studentIdToEmail; this.onApprovedStudent = onApprovedStudent; this.notify = notify;
     this.unsubscribe = null; this.initialized = false; this.requests = [];
   }
@@ -21,19 +22,27 @@ export class AccountApprovalController {
     this.list?.addEventListener('click', event => this.handleListClick(event));
     this.modal?.addEventListener('click', event => { if (event.target === this.modal || event.target.closest('[data-close-account-approval]')) this.closeModal(); });
     this.confirm?.addEventListener('click', () => this.confirmDecision());
-    this.unsubscribe = onSnapshot(query(collection(this.db, 'registrationRequests'), where('status', '==', 'pending')), snapshot => {
-      if (!this.initialized) return;
+    this.pendingReference = query(collection(this.db, 'registrationRequests'), where('status', '==', 'pending'));
+    this.watch = new PendingRequestsWatch({ document: this.document, window: this.window, view: 'account-approvals', currentView: this.getView, reference: this.pendingReference,
+      count: count => this.renderNavigationCount(count), open: () => this.subscribe(), close: () => { this.subscriptionGeneration = (this.subscriptionGeneration || 0) + 1; this.unsubscribe?.(); this.unsubscribe = null; this.requests = []; } });
+    this.watch.initialize();
+  }
+  subscribe() {
+    const generation = this.subscriptionGeneration = (this.subscriptionGeneration || 0) + 1;
+    this.unsubscribe?.();
+    this.unsubscribe = onSnapshot(this.pendingReference, snapshot => {
+      if (!this.initialized || !this.watch.active || generation !== this.subscriptionGeneration) return;
       this.requests = snapshot.docs.map(item => CoursePolicy.profile({ id: item.id, ...item.data() })).filter(item => item.status === 'pending')
         .sort((a, b) => (b.requestedAt?.seconds || 0) - (a.requestedAt?.seconds || 0));
       this.render();
     }, () => {
-      if (!this.initialized) return;
+      if (!this.initialized || !this.watch.active || generation !== this.subscriptionGeneration) return;
       this.renderNavigationCount(0);
       this.count.textContent = 'Unavailable';
       this.list.innerHTML = '<div class="empty-state">Unable to load registration requests.</div>';
     });
   }
-  dispose() { this.initialized = false; this.unsubscribe?.(); this.unsubscribe = null; this.renderNavigationCount(0); }
+  dispose() { this.initialized = false; this.watch?.dispose(); this.unsubscribe?.(); this.unsubscribe = null; this.renderNavigationCount(0); }
   renderNavigationCount(count) {
     const badge = this.document.querySelector('#accountApprovalNavCount');
     const button = this.document.querySelector('[data-view="account-approvals"]');

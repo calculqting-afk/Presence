@@ -974,7 +974,7 @@ for (const role of ['Student', 'Admin']) {
       browser.window.emit('modify-students');
       assert.equal(active.has('presenceSessions'), true); assert.equal(active.has('faceRegistrations'), true);
       browser.window.emit('dashboard'); assert.equal(active.has('presenceSessions'), false);
-      browser.window.emit('geofence'); assert.equal(active.has('students'), true); // short navigation grace
+      browser.window.emit('geofence'); assert.equal(active.has('students'), false); // D1 directory does not retain a whole-roster listener.
       browser.window.emit('create'); assert.equal(active.has('students'), true);
       const queued = new Map(); let token = 0, filtered = 0;
       browser.window.setTimeout = (handler, delay) => { assert.equal(delay, 200); queued.set(++token, handler); return token; };
@@ -1861,6 +1861,38 @@ test('history filters use historical sections and pagination discards stale resp
   controller.dispose();
 });
 
+test('student profile history is fetched by UID in pages of 50 and excludes stale selections', async () => {
+  const names = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared = Object.fromEntries(names.map(name => [name, () => '']));
+  const requests = []; let page = 0;
+  const records = count => Array.from({ length: count }, (_, index) => ({ id: `${page}-${index}`, data: () => ({ studentUid: 'student', eventDate: '2026-11-03' }) }));
+  Object.assign(shared, { activeView: 'modify-students', db: {}, collection: (_, name) => name, doc: (_, _name, uid) => uid,
+    where: (...values) => ({ where: values }), orderBy: (...values) => ({ orderBy: values }), query: (...values) => values,
+    getDocFromServer: async uid => ({ exists: () => true, data: () => ({ uid, firstName: 'Verified' }) }),
+    getDocsFromServer: async reference => { requests.push(reference); page++; return { docs: records(page === 1 ? 50 : 3) }; }
+  });
+  const { AdminDashboard } = await isolatedModule('assets/js/admin/AdminDashboard.js', shared, fakeBrowser());
+  const state = { can: () => true, scope: { initialized: true }, renderSelectedStudent() {} };
+  await AdminDashboard.prototype.loadStudentDetail.call(state, 'student');
+  assert.equal(state.studentDetailAttendance.length, 50); assert.equal(state.studentDetailMore, true);
+  assert.deepEqual(Array.from(requests[0][1].where), ['studentUid', '==', 'student']);
+  assert.equal(requests[0].at(-1).limit, 50);
+  const cursor = state.studentDetailCursor;
+  await AdminDashboard.prototype.loadStudentDetail.call(state, 'student', true);
+  assert.equal(requests[1].at(-2).cursor, cursor);
+  assert.equal(state.studentDetailAttendance.length, 53); assert.equal(state.studentDetailMore, false);
+  let finish;
+  shared.getDocsFromServer = async () => new Promise(resolve => { finish = resolve; });
+  // A separate module captures the deferred source so leaving the selected UID
+  // while the request is in flight cannot paint the previous student's details.
+  const delayed = await isolatedModule('assets/js/admin/AdminDashboard.js', shared, fakeBrowser());
+  const pending = delayed.AdminDashboard.prototype.loadStudentDetail.call(state, 'old-student');
+  await new Promise(resolve => setImmediate(resolve)); state.selectedManagedStudentUid = 'new-student';
+  finish({ docs: [] }); await pending;
+  assert.equal(state.studentDetailProfile, null);
+  assert.equal(state.selectedManagedStudentUid, 'new-student');
+});
+
 test('Present Today directory combines multiple sections with course filters and clear actions', async () => {
   const names=fs.readFileSync(path.join(root,'assets/js/dashboard.js'),'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
   const shared=Object.fromEntries(names.map(name=>[name,()=> '']));
@@ -1869,20 +1901,20 @@ test('Present Today directory combines multiple sections with course filters and
   const {StudentSectionFilter}=await isolatedModule('assets/js/controllers/StudentSectionFilter.js');
   const {DailyAttendanceClock}=await isolatedModule('assets/js/controllers/DailyAttendanceClock.js');
   const state={document:browser.document,students:['2A','2B','1A','2B'].map((section,index)=>({uid:String(index),section,course:index===1?'BSMB':'BSA',lastName:String(index),accountId:String(index)})),
-    attendance:['0','1','2'].map(studentUid=>({studentUid,eventDate:DailyAttendanceClock.dateKey()})),fines:[],presenceByUid:new Map(),legacyPresenceByUid:new Map(),faceRegistrationsByUid:new Map(),
+    directoryAttendance:['0','1','2'].map(studentUid=>({studentUid,eventDate:DailyAttendanceClock.dateKey()})),directoryAttendanceReady:true,attendance:[],fines:[],presenceByUid:new Map(),legacyPresenceByUid:new Map(),faceRegistrationsByUid:new Map(),
     studentPage:1,studentPageSize:10,studentDirectoryMediaQuery:{matches:false},can:()=>false,getStudentPresence:()=>({status:'offline',label:'Offline'}),studentActions:{render:()=>''},renderSelectedStudent(){},renderAdminAttendance(){},resetStudentDirectoryPage(){this.studentPage=1;}};
   for(const name of ['studentSearch','studentCourseFilter','studentFaceFilter','studentAccountFilter','studentAttendanceFilter','studentFineFilter','studentSort','studentTableBody','studentMobileCards','studentPagination','studentPageInfo','previousStudentPage','nextStudentPage']) state[name]=browser.document.querySelector('#'+name);
   state.studentSearch.value='';for(const name of ['studentCourseFilter','studentFaceFilter','studentAccountFilter','studentFineFilter'])state[name].value='all';state.studentAttendanceFilter.value='present';state.studentSort.value='name';
   state.studentSectionPicker=new StudentSectionFilter({root:browser.document.querySelector('#studentSectionFilter'),document:browser.document,escapeHtml:String,onChange(){}});
   state.studentSectionPicker.selected.add('2A');state.studentSectionPicker.selected.add('2B');
-  AdminDashboard.prototype.renderStudents.call(state);assert.equal(browser.document.querySelector('#studentResultCount').textContent,'2 matching students');
-  state.studentCourseFilter.value='BSMB';AdminDashboard.prototype.renderStudents.call(state);assert.equal(browser.document.querySelector('#studentResultCount').textContent,'1 matching student');
-  state.studentCourseFilter.value='all';state.studentSectionPicker.reset();AdminDashboard.prototype.renderStudents.call(state);assert.equal(browser.document.querySelector('#studentResultCount').textContent,'3 matching students');
+  AdminDashboard.prototype.renderStudents.call(state);assert.equal(browser.document.querySelector('#studentResultCount').textContent,'2 matching students · D1 directory');
+  state.studentCourseFilter.value='BSMB';AdminDashboard.prototype.renderStudents.call(state);assert.equal(browser.document.querySelector('#studentResultCount').textContent,'1 matching student · D1 directory');
+  state.studentCourseFilter.value='all';state.studentSectionPicker.reset();AdminDashboard.prototype.renderStudents.call(state);assert.equal(browser.document.querySelector('#studentResultCount').textContent,'3 matching students · D1 directory');
   assert.equal(state.studentAttendanceFilter.value,'present');
   state.studentSectionPicker.selected.add('2A');state.studentPage=3;AdminDashboard.prototype.openStudentAttendanceDirectory.call(state,'present');
   assert.equal(state.studentSectionPicker.selected.size,0);assert.equal(state.studentAttendanceFilter.value,'present');assert.equal(state.studentPage,1);
   AdminDashboard.prototype.handleClearStudentFiltersClick.call(state);assert.equal(state.studentAttendanceFilter.value,'all');
-  AdminDashboard.prototype.renderStudents.call(state);assert.equal(browser.document.querySelector('#studentResultCount').textContent,'4 matching students');
+  AdminDashboard.prototype.renderStudents.call(state);assert.equal(browser.document.querySelector('#studentResultCount').textContent,'4 matching students · D1 directory');
 });
 
 test('attendance history filters late arrivals and redraws immediately while searching', async () => {
@@ -2457,7 +2489,7 @@ test('presence logout drains an in-flight heartbeat and closes only the current 
   const { endPresenceSession } = await import(pathToFileURL(path.join(root, 'assets/js/core/PresenceSession.js')));
   let finish; const writes = [], cleared = [];
   const state = { presenceHeartbeatTimer: 7, presenceWrite: new Promise(resolve => { finish = resolve; }) };
-  const pending = endPresenceSession({ user: { uid: 'student-1' }, state,
+  const pending = endPresenceSession({ presence: null, user: { uid: 'student-1' }, state,
     window: { clearInterval: id => cleared.push(id) }, storage: { getItem: () => 'student-1_device' },
     write: async (...args) => writes.push(args) });
   assert.equal(state.studentLoggedOut, true); assert.deepEqual(cleared, [7]);
@@ -2519,7 +2551,8 @@ test('rejecting student access to admin ends local presence before signing out',
   const { DashboardApplication } = await isolatedModule('assets/js/controllers/DashboardApplication.js', shared, browser);
   const app = new DashboardApplication({ ...browser, loadDashboard: async () => { throw Error('must not initialize'); } });
   await app.initialize();
-  assert.deepEqual(events, ['presenceSessions/student-1_device', 'presence/student-1', 'signOut', 'redirect']);
+  // D1 rollout must not reintroduce direct Firestore status writes on denial.
+  assert.deepEqual(events, ['signOut', 'redirect']);
   app.dispose();
 });
 

@@ -1,4 +1,5 @@
 import { DeviceSessionController } from './DeviceSessionController.js';
+import { D1_DIRECTORY_ENABLED, StudentDirectoryClient } from './StudentDirectoryClient.js';
 import {PasswordResetApi} from './PasswordResetApi.js';
 import {EmailAuthProvider,reauthenticateWithCredential} from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
 import {ControllerScope} from '../core/ControllerScope.js';
@@ -73,6 +74,10 @@ export class StudentIdCorrectionController {
       await DeviceSessionController.rebind(user);
       this.field('studentIdAdminPassword').value='';
       const result=await this.api.call('/v1/admin/student-id/confirm',user,{preview:this.plan.preview,signature:this.plan.signature,confirmId:this.field('studentIdConfirmValue').value});
+      if (D1_DIRECTORY_ENABLED) {
+        await new StudentDirectoryClient(this.api).sync(this.getUser(), this.student.uid).catch(() => {});
+        this.document.dispatchEvent(new CustomEvent('presence:directory-changed'));
+      }
       this.plan.completed=true;this.message(`Verified: ${result.oldId} → ${result.newId}. The student can sign in with the new ID and the same password.`);
       this.notify('Student ID corrected','The login ID was verified. Attendance, fines, face registration and the password were preserved.');
     }catch(error){this.message(error.code?.startsWith('auth/')?'Your admin password could not be verified.':error.message);}

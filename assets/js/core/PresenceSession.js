@@ -1,3 +1,5 @@
+import { D1_PRESENCE_ENABLED, PresenceClient } from '../controllers/PresenceClient.js';
+
 /** A heartbeat is online only while it belongs to the server-authorized device. */
 export function authorizedPresenceSessions(sessions, authority) {
   if (authority === undefined) return sessions; // Older, unenrolled accounts.
@@ -28,7 +30,8 @@ export async function bestEffortCleanup(task, {
 }
 
 /** End only this tab's student session, before Firebase authentication is removed. */
-export async function endPresenceSession({ user, state, window, storage, write, deadline }) {
+export async function endPresenceSession({ user, state, window, storage, write, deadline,
+  presence = D1_PRESENCE_ENABLED ? new PresenceClient() : null }) {
   state.studentLoggedOut = true;
   window.clearInterval(state.presenceHeartbeatTimer);
   let sessionId = state.presenceSessionId;
@@ -39,6 +42,10 @@ export async function endPresenceSession({ user, state, window, storage, write, 
     // delayed writes in a later login; the last heartbeat will expire normally.
     await Promise.resolve(state.presenceWrite).catch(() => {});
     if (!isCurrent()) return;
+    if (presence) {
+      await presence.write(user, false);
+      return;
+    }
     await Promise.allSettled([
       Promise.resolve().then(() => write('presenceSessions', sessionId, { studentUid: user.uid, sessionId })),
       Promise.resolve().then(() => write('presence', user.uid, {}))
