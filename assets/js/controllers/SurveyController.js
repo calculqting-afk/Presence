@@ -21,6 +21,7 @@ export class SurveyController {
     this.initialized = true;
     this.document.querySelector('.content').insertAdjacentHTML('beforeend', `<section class="view-section" data-section="surveys" hidden><div class="section-heading"><div><p class="eyebrow">EVENT SURVEYS</p><h2>${this.canManage ? 'Survey management' : 'My surveys'}</h2><p>${this.canManage ? 'Create surveys and review responses.' : 'Answer agendas and resume saved progress.'}</p></div></div><div class="survey-layout"><aside class="panel survey-picker"><div class="survey-picker-heading"><h3>Events</h3><button type="button" class="outline-button" data-survey-refresh>Refresh</button></div>${this.canManage ? '<div class="survey-panel-tabs"><button type="button" class="outline-button" data-survey-panel="active">Surveys</button><button type="button" class="outline-button" data-survey-panel="archive">Archive</button></div>' : ''}<div data-survey-list></div></aside><div class="panel survey-workspace" data-survey-workspace><p>Select an event survey.</p></div></div></section>`);
     this.section = this.document.querySelector('[data-section="surveys"]');
+    if (this.canManage) this.section.classList.add('survey-management');
     this.workspace = this.section.querySelector('[data-survey-workspace]');
     this.onClick = event => this.handleClick(event);
     this.onSubmit = event => this.handleSubmit(event);
@@ -28,6 +29,10 @@ export class SurveyController {
       if (event.target.matches?.('[data-survey-session]')) {
         if (this.busy) { event.target.value = this.selectedEvent?.id || ''; return; }
         if (event.type === 'change' && this.canManage && !this.busy) void this.select(event.target.value).catch(error => this.error(error));
+        return;
+      }
+      if (event.target.matches?.('[data-survey-event-picker]')) {
+        if (!this.busy && event.type === 'change') void this.select(event.target.value).catch(error => this.error(error));
         return;
       }
       this.handleDraft(event); this.handleResponseFilter(event);
@@ -77,9 +82,13 @@ export class SurveyController {
   }
   renderList() {
     const e = this.escapeHtml;
-    const events = this.events.filter(event => !this.canManage || Boolean(event.surveyArchived) === this.archivePanel);
+    const events = this.events.filter(event => !this.canManage || (Boolean(event.surveyArchived) === this.archivePanel && (event.hasSurvey || this.policy.currentEvent(event))));
     this.section.querySelectorAll('[data-survey-panel]').forEach(button => button.setAttribute('aria-pressed', String((button.dataset.surveyPanel === 'archive') === this.archivePanel)));
     const groups = this.canManage ? AttendanceViews.groups(events) : events.map(event => [event]);
+    if (this.canManage) {
+      this.section.querySelector('[data-survey-list]').innerHTML = `<label>Choose event<select data-survey-event-picker><option value="">Select an event…</option>${groups.map(group => {const event=group.find(item=>item.id===this.selectedEvent?.id)||group[0];return `<option value="${e(event.id)}"${group.some(item=>item.id===this.selectedEvent?.id)?' selected':''}>${e(AttendanceViews.title(event))} · ${e(event.date||'')}${event.hasSurvey?' · Existing survey':''}</option>`;}).join('')}</select></label><p class="survey-compact-note">Create surveys for current events. Past surveys remain available for review.</p>`;
+      return;
+    }
     this.section.querySelector('[data-survey-list]').innerHTML = groups.length ? groups.map(group => {
       const selected = group.find(event => event.id === this.selectedEvent?.id), event = selected || group[0];
       const name = this.canManage ? AttendanceViews.title(event) : event.name;
@@ -91,7 +100,7 @@ export class SurveyController {
     if (!this.canManage || !this.selectedEvent) return '';
     const e = this.escapeHtml;
     const sessions = AttendanceViews.related(this.selectedEvent, this.events)
-      .filter(event => Boolean(event.surveyArchived) === this.archivePanel);
+      .filter(event => Boolean(event.surveyArchived) === this.archivePanel && (event.hasSurvey || this.policy.currentEvent(event)));
     if (sessions.length < 2) return `<p class="survey-meta">Session: ${AttendanceViews.label(this.selectedEvent)}</p>`;
     return `<label class="survey-session-picker">Survey session<select data-survey-session>${sessions.map(event => `<option value="${e(event.id)}"${event.id === this.selectedEvent.id ? ' selected' : ''}>${AttendanceViews.label(event)} — ${event.hasSurvey ? 'Manage survey' : 'Create survey'}</option>`).join('')}</select></label><p class="survey-compact-note">Each session keeps its own survey, QR link and responses.</p>`;
   }
@@ -131,11 +140,12 @@ export class SurveyController {
   }
   async renderAdmin() {
     const e = this.escapeHtml;
+    if (!this.config && !this.policy.currentEvent(this.selectedEvent)) { this.workspace.innerHTML = '<p>New surveys can only be created during a current event.</p>'; return; }
     if (!this.config) {
       this.workspace.innerHTML = `<h3>${e(AttendanceViews.title(this.selectedEvent))}</h3>${this.sessionPickerMarkup()}${this.instructionsMarkup()}<form data-survey-editor><div class="form-grid"><label class="field">Opens<input name="opensAt" type="datetime-local" required value="${this.localInput(this.selectedEvent.openAt)}"></label><label class="field">Closes<input name="closesAt" type="datetime-local" required value="${this.localInput(this.selectedEvent.checkOutClosesAt || this.selectedEvent.closeAt)}"></label><label class="field full">Location checks<select name="locationMode"><option value="start-only">First answer only</option><option value="start-finish">First and final answers</option></select></label></div><p class="survey-compact-note">Uses the event attendance area · Questions lock after publishing.</p><div data-survey-questions>${this.questionEditor()}</div><div class="form-actions"><button class="outline-button" type="button" data-add-question>Add agenda</button><button class="primary-button" type="submit">Publish survey</button></div></form>`;
       return;
     }
-    this.workspace.innerHTML = `<h3>${e(AttendanceViews.title(this.selectedEvent))}</h3>${this.sessionPickerMarkup()}${this.windowMarkup(this.config)}<p class="survey-meta">${this.config.locationMode === 'start-only' ? 'Location: first answer' : 'Location: first + final'} · ${this.config.deleting ? 'Deletion incomplete' : this.config.archived ? 'Archived' : this.config.enabled ? 'Enabled' : 'Paused'}</p>${this.instructionsMarkup()}<div class="survey-admin-tools">${!this.config.archived ? `<button class="outline-button" type="button" data-survey-toggle>${this.config.enabled ? 'Pause survey' : 'Reopen survey'}</button><button class="outline-button" type="button" data-survey-archive>Archive survey</button>` : `${!this.config.deleting ? '<button class="outline-button" type="button" data-survey-restore>Restore survey</button>' : ''}<button class="small-button danger" type="button" data-survey-delete>${this.config.deleting ? 'Resume deletion' : 'Delete permanently'}</button>`}<button class="outline-button" type="button" data-survey-qr>Show QR / link</button><button class="outline-button" type="button" data-survey-responses>Refresh responses</button></div><div data-survey-qr-panel hidden></div><details><summary>Published questions</summary><ol>${this.config.questions.map(question => `<li>${e(question.text)}</li>`).join('')}</ol></details><h4 class="survey-results-heading">Responses</h4>${this.responseToolbarMarkup()}<div data-survey-responses-list aria-live="polite"></div><button class="outline-button" type="button" data-survey-more hidden>Load more responses</button>`;
+    this.workspace.innerHTML = `<h3>${e(AttendanceViews.title(this.selectedEvent))}</h3>${this.sessionPickerMarkup()}${this.windowMarkup(this.config)}<p class="survey-meta">${this.config.locationMode === 'start-only' ? 'Location: first answer' : 'Location: first + final'} · ${this.config.deleting ? 'Deletion incomplete' : this.config.archived ? 'Archived' : this.policy.status(this.config)}</p>${this.instructionsMarkup()}<div class="survey-admin-tools">${!this.config.archived ? `<button class="outline-button" type="button" data-survey-toggle>${this.config.enabled ? 'Pause survey' : 'Reopen survey'}</button><button class="outline-button" type="button" data-survey-archive>Archive survey</button>` : `${!this.config.deleting ? '<button class="outline-button" type="button" data-survey-restore>Restore survey</button>' : ''}<button class="small-button danger" type="button" data-survey-delete>${this.config.deleting ? 'Resume deletion' : 'Delete permanently'}</button>`}<button class="outline-button" type="button" data-survey-qr>Show QR / link</button><button class="outline-button" type="button" data-survey-responses>Refresh responses</button></div><div data-survey-qr-panel hidden></div><details><summary>Published questions</summary><ol>${this.config.questions.map(question => `<li>${e(question.text)}</li>`).join('')}</ol></details><h4 class="survey-results-heading">Responses</h4>${this.responseToolbarMarkup()}<div data-survey-responses-list aria-live="polite"></div><button class="outline-button" type="button" data-survey-more hidden>Load more responses</button>`;
     await this.loadResponses(false);
   }
   async loadResponses(more) {
@@ -171,6 +181,26 @@ export class SurveyController {
     if (this.busy) return;
     this.busy = true; this.loading.start('survey-action', button, label);
     try { await action(); } finally { this.loading.reset('survey-action'); this.busy = false; }
+  }
+  async refreshEvents(button) {
+    if (this.refreshing || this.busy) return;
+    this.refreshing = true;
+    this.loading.start('survey-refresh', button, 'Refreshing…');
+    let timer;
+    try {
+      await Promise.race([this.refresh(), new Promise((_, reject) => {
+        timer = this.window.setTimeout(() => {
+          this.generation++;
+          this.renderList();
+          reject(new Error('Survey refresh timed out. Check your connection and try Refresh again.'));
+        }, 15000);
+      })]);
+      this.showToast('Surveys refreshed', 'The event list has been checked for updates.');
+    } finally {
+      this.window.clearTimeout(timer);
+      this.refreshing = false;
+      this.loading.reset('survey-refresh');
+    }
   }
   async toggleSurvey(button) {
     if (!this.canManage) throw new Error('Your role cannot manage surveys.');
@@ -215,7 +245,7 @@ export class SurveyController {
     let draft = ''; if (question) { try { draft = this.window.localStorage.getItem(this.draftKey(question)) || ''; } catch {} }
     const stage = this.policy.locationStage(config, attempt);
     const pendingReview = attempt?.status === 'needs-review';
-    this.workspace.innerHTML = `<h3>${e(this.selectedEvent.name)}</h3><p class="survey-meta">${attempt?.status === 'completed' ? 'Survey completed' : `Agenda ${(attempt?.answerCount || 0) + 1} of ${config.questions.length}`} · ${attempt?.answerCount || 0} answers saved</p>${this.windowMarkup(config)}<p class="survey-disclosure">Location: ${config.locationMode === 'start-only' ? 'first answer' : 'first + final answers'} · Submission times recorded.</p>${this.instructionsMarkup()}${attempt?.reviewReason ? `<p role="status">Review: ${e(attempt.reviewDecision || 'Pending')} · ${e(attempt.reviewNote || attempt.reviewReason)}</p>` : ''}${question && open ? `<form data-survey-answer><h4>${e(question.text)}</h4>${question.type === 'choice' ? `<fieldset class="survey-choices"><legend>Choose an answer</legend>${question.choices.map((choice, index) => `<label><input type="radio" name="answer" required value="${e(choice)}"${draft === choice ? ' checked' : ''}>${e(choice)}</label>`).join('')}</fieldset>` : `<label>Your answer<textarea name="answer" maxlength="1000" required>${e(draft)}</textarea></label>`}${stage ? `<p class="survey-compact-note">${this.policy.reviewApproved(attempt, stage) ? 'Location exception approved.' : 'Location will be checked when you save.'}</p>` : ''}<button class="primary-button" type="submit"${pendingReview ? ' disabled' : ''}>${(attempt?.answerCount || 0) === config.questions.length - 1 ? 'Submit final answer' : 'Save and continue'}</button></form>` : `<p class="empty-state">${question ? 'Survey is paused, not open yet, or closed. Saved answers are retained.' : 'All submitted answers are saved. Thank you.'}</p>`}<div class="survey-student-tools"><button class="outline-button" type="button" data-survey-reload>Refresh progress</button></div>${question && !pendingReview ? `<details><summary>Need help?</summary><form data-survey-request-review><label>Reason<textarea name="reason" maxlength="1000" required placeholder="No phone, poor GPS, connection problem, or another issue"></textarea></label><button type="submit" class="outline-button">Request review</button></form></details>` : ''}<details><summary>View submitted answers</summary><ol>${config.questions.filter(item => attempt?.answers?.[item.id]).map(item => `<li><strong>${e(item.text)}</strong><p>${e(attempt.answers[item.id].value)}</p><small>${e(this.formatTime(attempt.answers[item.id].answeredAt))}</small></li>`).join('')}</ol></details><p data-survey-message role="status" hidden></p>`;
+    this.workspace.innerHTML = `<h3>${e(this.selectedEvent.name)}</h3><p class="survey-meta">${attempt?.status === 'completed' ? 'Survey completed' : `Agenda ${(attempt?.answerCount || 0) + 1} of ${config.questions.length}`} · ${attempt?.answerCount || 0} answers saved</p>${this.windowMarkup(config)}<p class="survey-disclosure">Location: ${config.locationMode === 'start-only' ? 'first answer' : 'first + final answers'} · Submission times recorded.</p>${this.instructionsMarkup()}${attempt?.reviewReason ? `<p role="status">Review: ${e(attempt.reviewDecision || 'Pending')} · ${e(attempt.reviewNote || attempt.reviewReason)}</p>` : ''}${question && open ? `<form data-survey-answer><h4>${e(question.text)}</h4>${question.type === 'choice' ? `<fieldset class="survey-choices"><legend>Choose an answer</legend>${question.choices.map((choice, index) => `<label><input type="radio" name="answer" required value="${e(choice)}"${draft === choice ? ' checked' : ''}>${e(choice)}</label>`).join('')}</fieldset>` : `<label>Your answer<textarea name="answer" maxlength="1000" required>${e(draft)}</textarea></label>`}${stage ? `<p class="survey-compact-note">${this.policy.reviewApproved(attempt, stage) ? 'Location exception approved.' : 'Location will be checked when you save.'}</p>` : ''}<button class="primary-button" type="submit"${pendingReview ? ' disabled' : ''}>${(attempt?.answerCount || 0) === config.questions.length - 1 ? 'Submit final answer' : 'Save and continue'}</button></form>` : `<p class="empty-state">${question ? `${this.policy.status(config)}. Saved answers are retained.` : 'All submitted answers are saved. Thank you.'}</p>`}<div class="survey-student-tools"><button class="outline-button" type="button" data-survey-reload>Refresh progress</button></div>${question && !pendingReview ? `<details><summary>Need help?</summary><form data-survey-request-review><label>Reason<textarea name="reason" maxlength="1000" required placeholder="No phone, poor GPS, connection problem, or another issue"></textarea></label><button type="submit" class="outline-button">Request review</button></form></details>` : ''}<details><summary>View submitted answers</summary><ol>${config.questions.filter(item => attempt?.answers?.[item.id]).map(item => `<li><strong>${e(item.text)}</strong><p>${e(attempt.answers[item.id].value)}</p><small>${e(this.formatTime(attempt.answers[item.id].answeredAt))}</small></li>`).join('')}</ol></details><p data-survey-message role="status" hidden></p>`;
   }
   handleDraft(event) {
     if (!event.target.closest('[data-survey-answer]') || !this.config) return;
@@ -242,7 +272,7 @@ export class SurveyController {
     try {
       if (target.hasAttribute('data-survey-event')) { this.pendingEventId = target.dataset.surveyEvent; if (this.visible) await this.refresh(); else this.openView('surveys'); }
       else if (target.hasAttribute('data-survey-select')) await this.select(target.dataset.surveySelect);
-      else if (target.hasAttribute('data-survey-refresh')) await this.runAction(target, 'Refreshing…', () => this.refresh());
+      else if (target.hasAttribute('data-survey-refresh')) await this.refreshEvents(target);
       else if (target.hasAttribute('data-survey-reload')) await this.runAction(target, 'Refreshing…', () => this.select(this.selectedEvent.id));
       else if (target.hasAttribute('data-add-question')) { if (this.workspace.querySelectorAll('.survey-question-editor').length >= 20) throw new Error('Maximum 20 agendas per survey.'); this.workspace.querySelector('[data-survey-questions]').insertAdjacentHTML('beforeend', this.questionEditor()); }
       else if (target.hasAttribute('data-remove-question')) target.closest('fieldset').remove();
@@ -270,6 +300,8 @@ export class SurveyController {
     try {
       if (form.matches('[data-survey-editor]')) {
         if (!this.canManage) throw new Error('Your role cannot publish surveys.');
+        if (!this.policy.currentEvent(this.selectedEvent)) throw new Error('New surveys require a current event.');
+        if (new Date(form.elements.closesAt.value).getTime() <= this.policy.now()) throw new Error('Survey closing time must be in the future.');
         const boundary = await this.repository.boundary(eventId);
         if (!boundary?.enabled) throw new Error('Configure and enable this event’s attendance area before publishing a survey.');
         const questions = [...form.querySelectorAll('.survey-question-editor')].map((editor, index) => ({ id: `q${index}`, text: editor.querySelector('[data-question-text]').value.trim(), type: editor.querySelector('[data-question-type]').value,

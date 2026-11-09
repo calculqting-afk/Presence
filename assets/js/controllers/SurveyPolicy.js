@@ -2,6 +2,16 @@ import { EventAudiencePolicy } from './EventAudiencePolicy.js';
 export class SurveyPolicy {
   constructor({ now = () => Date.now() } = {}) { this.now = now; }
   time(value) { return value?.toMillis?.() ?? value?.toDate?.().getTime() ?? new Date(value).getTime(); }
+  currentEvent(event) {
+    return this.time(event.openAt) <= this.now() && this.now() <= this.time(event.checkOutClosesAt || event.closeAt);
+  }
+  status(config) {
+    if (config.archived || config.deleting) return 'Archived';
+    if (!config.enabled) return 'Paused';
+    if (this.now() < this.time(config.opensAt)) return 'Not open yet';
+    if (this.now() > this.time(config.closesAt)) return 'Closed';
+    return 'Open';
+  }
   eligible(profile, event) {
     if (!profile || profile.active !== true) return false;
     if (Array.isArray(event.audienceSections)) return EventAudiencePolicy.canAttend(profile, event);

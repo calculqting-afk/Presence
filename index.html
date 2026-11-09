@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>
+  <script>
+    // Remove accidental native-form credentials before loading external resources.
+    if (new URLSearchParams(location.search).has('password')) {
+      history.replaceState(null, '', location.pathname + location.hash);
+    }
+  </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light dark">
@@ -75,7 +81,7 @@
             </div>
           </div>
 
-          <form id="loginForm" novalidate>
+          <form id="loginForm" novalidate onsubmit="event.preventDefault()">
             <div class="field-group">
               <label for="accountId">Account ID</label>
               <div class="input-wrap">

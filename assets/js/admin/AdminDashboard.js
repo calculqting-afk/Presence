@@ -290,7 +290,7 @@ export class AdminDashboard {
     dashboard.relativeAttendanceClock.initialize();
     dashboard.scheduleConfirmation = new SurveyConfirmationController({document:dashboard.document,titleId:'eventScheduleChangeTitle'});
     dashboard.arrivalRecalculation = new ArrivalRecalculationController({db,getUser:()=>auth.currentUser,getRole:()=>currentUserRole,getStudents:()=>dashboard.students,confirmation:dashboard.scheduleConfirmation});
-    dashboard.scope.addCleanup(() => { dashboard.relativeAttendanceClock.dispose(); dashboard.scheduleConfirmation.dispose(); });
+    dashboard.scope.addCleanup(() => { dashboard.relativeAttendanceClock.dispose(); dashboard.scheduleConfirmation.dispose(); dashboard.fineRemovalConfirmation?.dispose(); });
     dashboard.analyticsController = new AttendanceAnalyticsController({
       document: dashboard.document, repository: new AttendanceRepository(db),
       getEvents: () => dashboard.events, getStudents: () => dashboard.students,
@@ -1238,8 +1238,12 @@ export class AdminDashboard {
   }
   renderFineOptions() {
     const dashboard = this;
-    const selectedStudent = dashboard.fineStudent.value;
-    const selectedEvent = dashboard.fineEvent.value;
+    const lockedFine = dashboard.fines.find(fine => fine.id === dashboard.document.querySelector('#editingFineId').value);
+    const selectedStudent = lockedFine?.studentUid || dashboard.fineStudent.value;
+    const selectedEvent = lockedFine?.eventId || dashboard.fineEvent.value;
+    dashboard.fineStudent.disabled = Boolean(lockedFine);
+    dashboard.fineEvent.disabled = Boolean(lockedFine);
+    dashboard.fineStudentSearch.disabled = Boolean(lockedFine);
     const search = dashboard.fineStudentSearch.value.trim().toLowerCase();
     const matchingStudents = dashboard.students.filter(student => {
       const searchable = [student.firstName, student.middleName, student.lastName, student.accountId].filter(Boolean).join(" ").toLowerCase();
@@ -1265,7 +1269,7 @@ export class AdminDashboard {
     // Retain a historical assignment while editing its reason/status, not for new fines.
     const retained = editingFine?.studentUid === selectedStudent && editingFine.eventId === selectedEvent
       && !candidates.some(item => item.id === selectedEvent) ? [{ id: selectedEvent, name: editingFine.eventName || 'Previously assigned event', date: editingFine.eventDate }] : [];
-    const options = student ? [...candidates, ...retained] : [];
+    const options = lockedFine ? [{id:lockedFine.eventId,name:lockedFine.eventName || 'Previously assigned event',date:lockedFine.eventDate}] : student ? [...candidates, ...retained] : [];
     const eventPrompt = !student ? 'Select a student first' : options.length ? 'Select a missed event'
       : !dashboard.attendanceConfirmed ? 'Waiting for attendance verification' : 'No confirmed missed events';
     dashboard.fineEvent.innerHTML = `<option value="" disabled selected>${eventPrompt}</option>${options.map(event => `<option value="${escapeHtml(event.id)}">${escapeHtml(event.name)}${event.date ? ` · ${escapeHtml(event.date)}` : ""}</option>`).join("")}`;
@@ -1303,8 +1307,8 @@ export class AdminDashboard {
     dashboard.document.querySelector("#fineServiceHours").value = "0";
     dashboard.document.querySelector("#fineServiceMinutes").value = "30";
     dashboard.fineStudentSearch.value = "";
-    dashboard.renderFineOptions();
     dashboard.document.querySelector("#editingFineId").value = "";
+    dashboard.renderFineOptions();
     dashboard.document.querySelector("#fineFormTitle").textContent = "Assign a fine";
     dashboard.document.querySelector("#fineSubmitButton").textContent = "Assign fine";
     dashboard.addCommunityService.hidden = true;
@@ -1326,6 +1330,7 @@ export class AdminDashboard {
     dashboard.fineStudent.value = fine.studentUid || "";
     if (fine.eventId && !dashboard.events.some(event => event.id === fine.eventId)) dashboard.fineEvent.add(new Option(fine.eventName || "Previously selected event", fine.eventId));
     dashboard.fineEvent.value = fine.eventId || "";
+    dashboard.renderFineOptions();
     const serviceMinutes = Math.min(600, Math.max(1, Number(fine.serviceMinutes) || 30));
     dashboard.document.querySelector("#fineServiceHours").value = String(Math.floor(serviceMinutes / 60));
     dashboard.document.querySelector("#fineServiceMinutes").value = String(serviceMinutes % 60);
@@ -2127,6 +2132,11 @@ export class AdminDashboard {
       return;
     }
     const preservesAssignment = editingFine && editingFine.studentUid === student.uid && editingFine.eventId === dashboard.fineEvent.value;
+    if (editingFineId && !preservesAssignment) {
+      showDashboardToast('Assignment locked', 'The original student and missed event cannot be changed. Remove the incorrect fine and assign a new one.');
+      return;
+    }
+    if (preservesAssignment) attendanceEvent = null;
     if (!preservesAssignment) {
       try {
         attendanceEvent = await dashboard.fineEligibility.verify(student, dashboard.fineEvent.value);
@@ -2233,8 +2243,14 @@ export class AdminDashboard {
     }
     if (!button || !dashboard.can("deleteFines")) return;
     try {
+      const fine = dashboard.fines.find(item => item.id === button.dataset.deleteFine);
+      if (!fine) return;
+      dashboard.fineRemovalConfirmation ||= new SurveyConfirmationController({document:dashboard.document,titleId:'fineRemovalTitle'});
+      if (!await dashboard.fineRemovalConfirmation.open(false, {title:'Remove assigned fine?',
+        message:[fine.studentName || fine.studentId, fine.eventName || 'Assigned event', formatServiceMinutes(fine.serviceMinutes), 'This removes the community-service requirement. Attendance records are kept.'].join(' · '),
+        label:'Remove fine',countdown:5})) return;
       await dashboard.recentLogin.require();
-      await deleteDoc(doc(db, "fines", button.dataset.deleteFine));
+      await deleteDoc(doc(db, "fines", fine.id));
       showDashboardToast("Fine removed", "The community-service requirement was removed.");
     } catch (error) {
       showDashboardToast("Unable to remove fine", error.message);

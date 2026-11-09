@@ -23,7 +23,7 @@ export const auth = runtime.auth ||= getAuth(app);
 export const db = runtime.db ||= getFirestore(app);
 // Remove data left by earlier versions before starting this Firestore instance.
 // An older tab may hold IndexedDB open; new sessions still use memory only.
-export const legacyCacheCleared = await (runtime.legacyCacheCleared ||= clearIndexedDbPersistence(db).then(() => true).catch(() => {
+export const legacyCacheCleared = (runtime.legacyCacheCleared ||= clearIndexedDbPersistence(db).then(() => true).catch(() => {
   console.warn('Close older Presence tabs and reload to finish clearing the previous offline cache.');
   return false;
 }));

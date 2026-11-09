@@ -44,5 +44,12 @@ async function read(path,token,allowed){const result=await fetch(base+'/'+path,{
  const completed={...setup,mustChangePassword:false,updatedAt:new Date()};
  await write('students/'+setupUid,completed,jwt(setupUid),false);
  await write('students/'+setupUid,completed,jwt(setupUid,{presenceSession:old,presenceAuthTime:now,firebase:{sign_in_provider:'custom'}}),true);
+ const full={...completed,accountId:setupUid,accountIdKey:setupUid,authEmail:'dummy@example.test',middleName:'Middle',birthday:'2005-01-01',gender:'Male',course:'BS Info Tech',section:'2A',email:'dummy@example.test',phone:'09999999999',hometownBarangay:'San Pedro',hometownCity:'Matalom',hometownProvince:'Leyte',photoDataUrl:'data:image/jpeg;base64,YWJj',createdAt:new Date()};
+ await write('students/'+setupUid,full);
+ await write('students/'+setupUid,{...full,firstName:'Updated',updatedAt:new Date()},jwt(setupUid,{presenceSession:old,presenceAuthTime:now,firebase:{sign_in_provider:'custom'}}),true);
+ await write('students/'+setupUid,{...full,firstName:'Admin edited',updatedAt:new Date()},jwt('device-admin',{superAdmin:true,presenceSession:next}),true);
+ const promoted={...full,firstName:'Admin edited',role:'attendance_admin',updatedAt:new Date(),roleUpdatedAt:new Date(),roleUpdatedBy:'device-admin'};
+ await write('students/'+setupUid,promoted,jwt('device-admin',{superAdmin:true,presenceSession:next}),true);
+ await write('students/'+setupUid,{...promoted,role:'head_admin',roleUpdatedBy:setupUid},jwt(setupUid,{presenceSession:old}),false);
  console.log('Device session Rules passed: immutable server lock, active-token access, old-token/attendance denial, release, Super Admin enforcement, safe legacy rollout.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

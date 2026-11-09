@@ -68,3 +68,14 @@ test('sign out during verification cannot unlock the dashboard and Android Back 
     const html = fs.readFileSync(file, 'utf8'); assert.match(html, /data-policy-enabled/); assert.match(html, /privacy-policy.html/); assert.match(html, /terms-and-conditions.html/);
   }
 });
+
+test('dashboard agreement gate is student-only while admin role verification remains required', () => {
+  const source=fs.readFileSync('assets/js/controllers/DashboardApplication.js','utf8');
+  const gate=source.match(/if \((dashboardRole === 'student' && this.document.body.hasAttribute\?\.\('data-policy-enabled'\))\) \{/)[1];
+  const enabled={document:{body:{hasAttribute:()=>true}}};
+  const check=new Function('dashboardRole','return '+gate);
+  assert.equal(check.call(enabled,'admin'),false);
+  assert.equal(check.call(enabled,'student'),true);
+  assert.ok(source.indexOf('if (!authorized)') < source.indexOf('this.agreement = new PolicyAgreementController'));
+  assert.match(source,/const policyReference = currentUser && dashboardRole === 'student'/);
+});

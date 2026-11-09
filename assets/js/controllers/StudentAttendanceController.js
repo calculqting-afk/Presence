@@ -77,7 +77,18 @@ export class StudentAttendanceController {
       throw locationError;
     }
 
-    const position = await this.getCurrentCheckInLocation();
+    let position = await this.getCurrentCheckInLocation();
+    // A phone's first fix can drift while GPS warms up. Retry an outside fix
+    // before rejecting it, retaining the most precise sample rather than
+    // accepting whichever coordinate happens to fall inside the boundary.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const coords = position.coords || {};
+      if (![coords.latitude, coords.longitude, coords.accuracy].every(Number.isFinite)) break;
+      if (boundary.evaluate(coords, Math.min(coords.accuracy, GEOFENCE_GPS_ALLOWANCE_CAP_METERS)).inside) break;
+      const candidate = await this.getCurrentCheckInLocation();
+      if (Number.isFinite(candidate?.coords?.accuracy) && candidate.coords.accuracy >= 0
+        && candidate.coords.accuracy < coords.accuracy) position = candidate;
+    }
     const { latitude, longitude } = position.coords || {};
     if (!Number.isFinite(latitude) || Math.abs(latitude) > 90 || !Number.isFinite(longitude) || Math.abs(longitude) > 180) {
       const error = new Error('Your browser returned an invalid GPS location. Enable precise location and try again.');

@@ -1,4 +1,9 @@
 .survey-layout { display:grid; grid-template-columns:minmax(180px,260px) minmax(0,1fr); gap:20px; align-items:start; }
+.survey-management .survey-layout { grid-template-columns:minmax(0,1fr); }
+.survey-management .survey-picker label { display:grid; gap:8px; }
+.survey-management [data-survey-event-picker] { width:100%; min-width:0; }
+.survey-panel-tabs { display:flex; gap:8px; margin:12px 0; }
+.survey-panel-tabs button[aria-pressed="true"] { color:white; background:#2169df; border-color:#2169df; }
 .nav-button[hidden] { display:none!important; }
 .survey-workspace, .survey-picker { padding:24px; min-width:0; }
 .survey-picker-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }

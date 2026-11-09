@@ -4,7 +4,7 @@ const project='demo-presence-audience',host=process.env.FIRESTORE_EMULATOR_HOST;
 if(!host || !/^127\.0\.0\.1:\d+$/.test(host))throw Error('Local emulator required');
 const base=`http://${host}/v1/projects/${project}/databases/(default)/documents`,now=Date.now();
 const server=Symbol('server'),uid='secure-student';
-const token=who=>[Buffer.from(JSON.stringify({alg:'none'})).toString('base64url'),Buffer.from(JSON.stringify({sub:who,user_id:who,aud:project,iss:`https://securetoken.google.com/${project}`,iat:Math.floor(now/1000),exp:Math.floor(now/1000)+3600,auth_time:Math.floor(now/1000),firebase:{sign_in_provider:'password'}})).toString('base64url'),''].join('.');
+const token=who=>[Buffer.from(JSON.stringify({alg:'none'})).toString('base64url'),Buffer.from(JSON.stringify({sub:who,user_id:who,aud:project,iss:`https://securetoken.google.com/${project}`,iat:Math.floor(now/1000),exp:Math.floor(now/1000)+3600,auth_time:Math.floor(now/1000),presenceSession:'secure-session',presenceAuthTime:Math.floor(now/1000),firebase:{sign_in_provider:'custom'}})).toString('base64url'),''].join('.');
 function encode(data,transforms,field=''){
   if(data===server){transforms.push({fieldPath:field,setToServerValue:'REQUEST_TIME'});return;}
   if(data instanceof Date)return {timestampValue:data.toISOString()};
@@ -21,7 +21,7 @@ async function write(path,data,who='owner',allowed=true,mask){
 async function read(path,who,allowed){const response=await fetch(base+'/'+path,{headers:{Authorization:'Bearer '+token(who)}});assert.equal(response.ok,allowed,path);await response.body?.cancel();}
 (async()=>{
   const profile={uid,accountId:'SECURE-STUDENT',accountIdKey:'secure-student',firstName:'Dummy',lastName:'Student',birthday:'2005-01-01',course:'BS Info Tech',section:'2A',active:true,role:'student',createdAt:new Date(now-86400000)};
-  await write('students/'+uid,profile);await write('students/secure-manager',{active:true,role:'student_manager'});
+  await write('accountSessions/'+uid,{sessionId:'secure-session'});await write('students/'+uid,profile);await write('students/secure-manager',{active:true,role:'student_manager'});
   await write('faceRegistrations/'+uid,{registered:true},uid,false);
   await write('faceRegistrations/'+uid,{registered:true,driveFileId:'forged'},uid,false);
   await write('faceRegistrations/'+uid,{registered:true,confirmationSource:'server-upload'});
@@ -36,7 +36,7 @@ async function read(path,who,allowed){const response=await fetch(base+'/'+path,{
   const location={latitude:10,longitude:124,accuracy:5,distanceMeters:0};
   const record={studentUid:uid,studentId:profile.accountId,eventId:'security-event',eventName:event.name,eventType:event.type,eventDescription:event.description,eventDate:event.date,timeIn:event.timeIn,timeOut:event.timeOut,location:event.location,audience:event.audience,status:'checked-in',arrivalStatus:'present',checkedInAt:server,attendedAt:server,checkInLocation:location};
   const path='attendance/'+uid+'_security-event',proofPath='attendanceLocationProofs/'+uid+'_security-event_in';
-  const proof={studentUid:uid,eventId:'security-event',action:'in',location,geofence:area,issuedAt:new Date(now-1000),expiresAt:new Date(now+29000)};
+  const proof={sessionId:'secure-session',studentUid:uid,eventId:'security-event',action:'in',location,geofence:area,issuedAt:new Date(now-1000),expiresAt:new Date(now+29000)};
   await write(path,record,uid,false);await write(proofPath,proof,uid,false);
   await write(proofPath,{...proof,expiresAt:new Date(now-1)});await write(path,record,uid,false);
   await write(proofPath,{...proof,location:{...location,latitude:11}});await write(path,record,uid,false);
@@ -49,5 +49,18 @@ async function read(path,who,allowed){const response=await fetch(base+'/'+path,{
   await write('attendanceLocationProofs/'+uid+'_security-event_out',{...proof,action:'out'});
   await write(path,checkout,uid,true,['checkedOutAt','status','checkOutLocation']);
   await write(path,checkout,uid,false,['checkedOutAt','status','checkOutLocation']);
+  await write('students/fine-head',{active:true,role:'head_admin'});
+  const fine={studentUid:uid,studentId:'SECURE-STUDENT',studentName:'Dummy Student',eventId:'missed',eventName:'Original session',serviceMinutes:30,reason:'Verified absence',status:'Pending',assignmentHistory:[]};
+  await write('fines/locked-test',fine);
+  await write('fines/locked-test',{...fine,serviceMinutes:60},'fine-head',true);
+  await write('fines/locked-test',{...fine,eventId:'other'},'fine-head',false);
+  await write('fines/locked-test',{...fine,studentUid:'other'},'fine-head',false);
+  await write('fines/locked-test',{...fine,eventName:'Changed session'},'fine-head',false);
+  const survey={eventId:'security-event',enabled:true,revision:1,locationMode:'start-only',opensAt:new Date(now-60000),closesAt:new Date(now+3600000),createdAt:new Date(now-60000),createdBy:'fine-head',updatedAt:new Date(now-60000),questions:Array.from({length:20},(_,i)=>({id:'q'+i,text:'Agenda '+i,type:'choice',choices:['Yes','No']}))};
+  await write('eventSurveys/security-event',survey);
+  await write('eventSurveys/security-event',{enabled:false,archived:true,updatedAt:server},'fine-head',true,['enabled','archived','updatedAt']);
+  await write('events/security-event',{surveyArchived:true,updatedAt:server},'fine-head',true,['surveyArchived','updatedAt']);
+  await write('eventSurveys/security-event',{questions:[]},'fine-head',false,['questions']);
+  await write('eventSurveys/security-event',{enabled:true,updatedAt:server},'fine-head',false,['enabled','updatedAt']);
   console.log('Security hardening Rules passed: server-owned face status, private ID index, academic self-edits retained, location proof forgery/expiry/mismatch rejected, authorized check-in/checkout accepted once.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

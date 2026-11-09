@@ -21,6 +21,7 @@
 .toast-mark.is-mascot, .toast-icon.is-mascot { width: 64px; height: 64px; background: transparent; border-radius: 0; flex: 0 0 64px; }
 :root[data-theme="dark"] .toast-mark.is-mascot { background: transparent; }
 .is-mascot .presence-mascot { width: 64px; height: 64px; }
+.toast:not(.show) .presence-mascot, .toast:not(.show) .presence-mascot * { animation-play-state: paused; }
 .view-section[hidden] .presence-mascot, .view-section[hidden] .presence-mascot * { animation-play-state: paused; }
 .welcome-mascot[data-presence-mascot] { position: relative; width: min(300px, 100%); justify-content: initial; justify-items: center; gap: 8px; }
 .mascot-hello { position: relative; display: grid; place-items: center; width: 112px; height: 112px; padding: 0; border: 0; border-radius: 24px; background: transparent; color: inherit; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }

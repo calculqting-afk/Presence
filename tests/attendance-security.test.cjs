@@ -69,13 +69,14 @@ test('cache configuration uses memory and attempts legacy IndexedDB cleanup with
 
 test('concurrent Firebase config aliases share initialization and memory-cache cleanup', async () => {
   const vm = require('node:vm'), fs = require('node:fs');
-  let initialized = 0, cleared = 0, listeners = 0;
+  let initialized = 0, cleared = 0, listeners = 0, finishCleanup;
+  const cleanup = new Promise(resolve => { finishCleanup = resolve; });
   const database = {}, apps = new Map(), databases = new Map();
   const context = vm.createContext({ console, window: { addEventListener() { listeners++; } } });
   const api = {
     initializeApp: (_config, name = 'default') => { if (!apps.has(name)) apps.set(name, {name}); return apps.get(name); },
     getAuth: app => ({app}), getFirestore: app => { if (!databases.has(app.name)) { initialized++; databases.set(app.name,app.name === 'default' ? database : {app}); } return databases.get(app.name); },
-    clearIndexedDbPersistence: async () => { cleared++; await Promise.resolve(); }
+    clearIndexedDbPersistence: async () => { cleared++; await cleanup; }
   };
   const sdk = new vm.SyntheticModule(Object.keys(api), function () { for (const [key, value] of Object.entries(api)) this.setExport(key,value); }, {context});
   const source = fs.readFileSync('config/firebase-config.js','utf8');
@@ -86,7 +87,8 @@ test('concurrent Firebase config aliases share initialization and memory-cache c
   assert.equal(modules[0].namespace.db, modules[1].namespace.db);
   assert.equal(modules[0].namespace.auth, modules[1].namespace.auth);
   assert.equal(modules[0].namespace.studentProvisioningDb, modules[1].namespace.studentProvisioningDb);
-  assert.equal(modules[0].namespace.legacyCacheCleared,true);
+  finishCleanup();
+  assert.equal(await modules[0].namespace.legacyCacheCleared,true);
 });
 
 test('Firebase config reuses an existing SDK instance even without its runtime guard', async () => {

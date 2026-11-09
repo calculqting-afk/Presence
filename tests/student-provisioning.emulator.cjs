@@ -53,6 +53,9 @@ const profile = id => ({ uid:id,accountId:id,accountIdKey:id,authEmail:`${id}@ex
   await commit([write('registrationRequests/gender-reapply',{uid:'gender-reapply',accountId:'gender-reapply',accountIdKey:'gender-reapply',birthday:'2005-01-01',firstName:'Test',lastName:'Student',course:'BS Info Tech',section:'2A',status:'declined',requestedAt:SERVER,updatedAt:SERVER})], 'owner');
   await commit([write('registrationRequests/gender-reapply',{gender:'invalid',status:'pending',updatedAt:SERVER},['gender','status','updatedAt'])], 'gender-reapply',false);
   await commit([write('registrationRequests/gender-reapply',{gender:'Female',status:'pending',updatedAt:SERVER},['gender','status','updatedAt'])], 'gender-reapply');
+  await commit([write('students/gender-self',{photoDataUrl:'',updatedAt:SERVER},['photoDataUrl','updatedAt'])], 'gender-self');
+  await commit([write('students/gender-self',{photoDataUrl:'',firstName:'Edited',updatedAt:SERVER},['photoDataUrl','firstName','updatedAt'])], 'manager');
+  await commit([write('students/gender-self',{photoDataUrl:'javascript:invalid'},['photoDataUrl'])], 'gender-self',false);
   const home={hometownBarangay:'San Juan',hometownCity:'Bontoc',hometownProvince:'Southern Leyte'};
   await commit([write('students/home-self',profile('home-self'))],'owner');
   await commit([write('students/home-self',{...home,updatedAt:SERVER},[...Object.keys(home),'updatedAt'])],'home-self');

@@ -23,27 +23,20 @@ export class DashboardToastController {
       mark.classList.add('is-mascot');
       mark.setAttribute('aria-hidden', 'true');
       mark.innerHTML = mascotMarkup(state);
-      this.mark = mark;
     }
     this.document.querySelector('#dashboardToastTitle').textContent = title;
     this.document.querySelector('#dashboardToastMessage').textContent = message;
     toast.classList.add('show');
     this.timer = this.schedule(() => {
       toast.classList.remove('show');
-      this.clearMark();
+      // Keep the current artwork throughout the CSS exit transition.
       this.timer = null;
     });
   }
   dispose() {
     if (this.timer != null) this.cancel(this.timer);
     this.timer = null;
-    this.clearMark();
-  }
-  clearMark() {
-    if (!this.mark) return;
-    this.mark.classList.remove('is-mascot');
-    this.mark.textContent = '✓';
-    this.mark = null;
+    this.document.querySelector('#dashboardToast')?.classList.remove('show');
   }
 }
 

@@ -739,7 +739,14 @@ test('student polygon verification uses capped accuracy and checks malformed bou
   await assert.rejects(controller.verifiedGeofenceLocation({ id: 'event' }), error => error.geofenceIssue === 'outside' && error.boundaryType === 'polygon');
   area = { ...polygonArea, vertices: polygonArea.vertices.slice(0, 2) };
   await assert.rejects(controller.verifiedGeofenceLocation({ id: 'event' }), error => error.geofenceIssue === 'configuration');
-  assert.equal(gps, 2);
+  assert.equal(gps, 4);
+  area = polygonArea;
+  let samples = 0;
+  controller.getCurrentCheckInLocation = async () => ({ coords: samples++ === 0
+    ? { latitude: 14.0005, longitude: 121.002, accuracy: 100 }
+    : { latitude: 14.0005, longitude: 121.0005, accuracy: 5 } });
+  assert.equal((await controller.verifiedGeofenceLocation({ id: 'event' })).accuracy, 5);
+  assert.equal(samples, 2);
   controller.dispose();
 });
 
@@ -938,7 +945,11 @@ test('fine dropdown is student-specific, clears stale future selection, and pres
   browser.document.querySelector('#editingFineId').value = 'fine'; dashboard.fineEvent.value = 'historical';
   dashboard.renderFineOptions(); assert.equal(dashboard.fineEvent.value, 'historical');
   dashboard.fineStudent.value = 'one'; dashboard.renderFineOptions();
-  assert.ok(!dashboard.fineEvent.innerHTML.includes('Historical'));
+  assert.ok(dashboard.fineEvent.innerHTML.includes('Historical'));
+  assert.equal(dashboard.fineStudent.value, 'two');
+  assert.equal(dashboard.fineStudent.disabled, true);
+  assert.equal(dashboard.fineEvent.disabled, true);
+  assert.equal(dashboard.fineStudentSearch.disabled, true);
 });
 
 test('fine submission blocks duplicate clicks during server verification and unlocks after failure', async () => {

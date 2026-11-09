@@ -12,6 +12,12 @@ test('survey policy validates questions/windows and only requests selected locat
   const { SurveyPolicy } = await moduleAt('SurveyPolicy');
   const policy = new SurveyPolicy({ now: () => 5000 });
   policy.validate(config()); policy.assertOpen(config());
+  assert.equal(policy.status(config()), 'Open');
+  assert.equal(policy.status({...config(), enabled:false}), 'Paused');
+  assert.equal(policy.status({...config(), closesAt:new Date(4000)}), 'Closed');
+  assert.equal(policy.status({...config(), opensAt:new Date(6000)}), 'Not open yet');
+  assert.equal(policy.currentEvent({openAt:new Date(1000),checkOutClosesAt:new Date(6000)}),true);
+  assert.equal(policy.currentEvent({openAt:new Date(1000),checkOutClosesAt:new Date(4000)}),false);
   assert.equal(policy.locationStage(config(), null), 'start');
   assert.equal(policy.locationStage(config(), { answerCount: 1 }), null);
   assert.equal(policy.locationStage(config('start-finish'), { answerCount: 1 }), null);
@@ -33,9 +39,9 @@ test('admin survey picker groups sessions once and loads only the chosen session
   controller.section={querySelector:()=>list,querySelectorAll:()=>[]};
   const morning={id:'day',sessionGroupId:'day',sessionBaseName:'Intramurals',sessionPeriod:'morning',name:'Intramurals — Morning',date:'2026-10-23',timeIn:'07:00',openAt:new Date('2026-10-23T07:00:00+08:00'),checkOutClosesAt:new Date('2026-10-23T12:00:00+08:00'),hasSurvey:true};
   const afternoon={...morning,id:'day_afternoon',sessionPeriod:'afternoon',timeIn:'13:00',name:'Intramurals — Afternoon',hasSurvey:false};
-  controller.events=[afternoon,morning];controller.renderList();
-  assert.equal((list.innerHTML.match(/data-survey-select=/g)||[]).length,1);
-  assert.match(list.innerHTML,/<strong>Intramurals<\/strong>/);
+  controller.policy.now=()=>new Date('2026-10-23T09:00:00+08:00').getTime();controller.events=[afternoon,morning];controller.renderList();
+  assert.equal((list.innerHTML.match(/<option value="day/g)||[]).length,1);
+  assert.match(list.innerHTML,/Intramurals/);
   await controller.select('day');
   assert.match(controller.workspace.innerHTML,/data-survey-session/);
   assert.match(controller.workspace.innerHTML,/value="day" selected>Morning — Manage survey/);
@@ -43,10 +49,10 @@ test('admin survey picker groups sessions once and loads only the chosen session
   await controller.select('day_afternoon');
   assert.equal(loaded.join(','),'day,day_afternoon');
   assert.match(controller.workspace.innerHTML,/value="day_afternoon" selected/);
-  assert.match(list.innerHTML,/aria-pressed="true" data-survey-select="day_afternoon"/);
+  assert.match(list.innerHTML,/value="day_afternoon" selected/);
   assert.equal(morning.hasSurvey,true);assert.equal(afternoon.hasSurvey,false);
   afternoon.surveyArchived=true;controller.archivePanel=true;controller.renderList();
-  assert.equal((list.innerHTML.match(/data-survey-select=/g)||[]).length,1);
+  assert.equal((list.innerHTML.match(/<option value="day/g)||[]).length,1);
   assert.doesNotMatch(controller.sessionPickerMarkup(),/data-survey-session/);
   controller.archivePanel=false;controller.selectedEvent=morning;controller.renderList();
   assert.doesNotMatch(list.innerHTML,/data-survey-select="day_afternoon"/);
@@ -441,4 +447,21 @@ test('archive/restore retains answers and deletion locks reopening before removi
   await repository.finishDeletion('event');
   assert.equal(documents.has('eventSurveys/event'), false); assert.equal(documents.get('events/event').hasSurvey, false);
   assert.equal(documents.get('attendance/student_event').present, true);
+});
+
+test('survey tabs remain responsive while an event refresh is pending and timeout unlocks retry', async () => {
+  const {SurveyController}=await moduleAt('SurveyController');
+  let timeout, resolveRefresh, renders=0, reset=0;
+  const controller=new SurveyController({repository:{},canManage:true,document:{},window:{location:{href:'https://school.test/'},setTimeout:fn=>{timeout=fn;return 1;},clearTimeout(){}},showToast(){}});
+  controller.loading={start(){},reset(){reset++;}};
+  controller.renderList=()=>{renders++;};controller.workspace={innerHTML:''};
+  controller.refresh=()=>new Promise(resolve=>{resolveRefresh=resolve;});
+  const pending=controller.refreshEvents({});
+  assert.equal(controller.busy,false);
+  const tab={dataset:{surveyPanel:'archive'},hasAttribute:name=>name==='data-survey-panel'};
+  await controller.handleClick({target:{closest:()=>tab}});
+  assert.equal(controller.archivePanel,true);assert.equal(renders,1);
+  timeout();await assert.rejects(pending,/timed out/);
+  assert.equal(controller.refreshing,false);assert.equal(reset,1);
+  resolveRefresh();
 });

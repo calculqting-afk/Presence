@@ -201,9 +201,11 @@ test('entry scripts only bootstrap controllers and preserve dashboard compatibil
   const login = fs.readFileSync(path.join(root, 'assets/js/script.js'), 'utf8');
   const dashboard = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8');
   for (const source of [login, dashboard]) {
-    assert.doesNotMatch(source, /addEventListener|querySelector|setTimeout|\bfunction\b/);
+    assert.doesNotMatch(source, /addEventListener|setTimeout|\bfunction\b/);
     assert.ok(source.trim().split('\n').length < 10);
   }
   assert.match(login, /new LoginController/);
+  assert.match(login, /\.catch\(/);
+  assert.match(login, /querySelector\('#passwordError'\)/);
   assert.match(dashboard, /sessionState, setDashboardViewState/);
 });

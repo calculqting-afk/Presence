@@ -23,8 +23,8 @@ test('attendance success toast opts into smooth animation, supports reduced moti
   assert.match(html,/data-mascot-state="success"/);
   controller.show('Unable to save','Try again');assert.match(html,/data-mascot-state="attention"/);assert.equal(markClasses.size,1);assert.equal(timers.size,1);
   controller.show('Checkout recorded','Saved',{attendanceSuccess:true});timers.get(sequence)();
-  assert.equal(classes.has('show'),false);assert.equal(mark.textContent,'✓');assert.equal(html,'');
-  controller.show('Saved','Done',{attendanceSuccess:true});controller.dispose();assert.equal(html,'');
+  assert.equal(classes.has('show'),false);assert.notEqual(mark.textContent,'✓');assert.match(html,/data-mascot-state="success"/);
+  controller.show('Saved','Done',{attendanceSuccess:true});controller.dispose();assert.equal(classes.has('show'),false);assert.match(html,/data-mascot-state="success"/);
 });
 test('success animation is requested only by confirmed attendance branches and required public assets exist',()=>{
   const root=path.resolve(__dirname,'..'),source=fs.readFileSync(path.join(root,'assets/js/controllers/StudentAttendanceController.js'),'utf8');

@@ -70,17 +70,24 @@ export class StudentIdCorrectionController {
     const password=this.field('studentIdAdminPassword').value;if(!password){this.message('Enter your own admin password.');return;}
     this.busy=true;this.editing(true);this.field('confirmStudentIdCorrection').disabled=true;this.message('Confirming your identity and saving the correction…');
     try{
-      const user=this.getUser();await reauthenticateWithCredential(user,EmailAuthProvider.credential(user.email,password));
-      await DeviceSessionController.rebind(user);
+      let user=this.getUser();await reauthenticateWithCredential(user,EmailAuthProvider.credential(user.email,password));
+      user = await DeviceSessionController.rebind(user);
       this.field('studentIdAdminPassword').value='';
       const result=await this.api.call('/v1/admin/student-id/confirm',user,{preview:this.plan.preview,signature:this.plan.signature,confirmId:this.field('studentIdConfirmValue').value});
       if (D1_DIRECTORY_ENABLED) {
         await new StudentDirectoryClient(this.api).sync(this.getUser(), this.student.uid).catch(() => {});
         this.document.dispatchEvent(new CustomEvent('presence:directory-changed'));
       }
-      this.plan.completed=true;this.message(`Verified: ${result.oldId} → ${result.newId}. The student can sign in with the new ID and the same password.`);
+      this.plan.completed=true;this.field('studentIdPreview').hidden=true;
+      this.message(`Correction successful: ${result.oldId} → ${result.newId}. The student can now sign in with the corrected ID and the same password. Attendance and other records are preserved.`);
+      this.field('studentIdCorrectionStatus').scrollIntoView?.({block:'center',behavior:'smooth'});
       this.notify('Student ID corrected','The login ID was verified. Attendance, fines, face registration and the password were preserved.');
-    }catch(error){this.message(error.code?.startsWith('auth/')?'Your admin password could not be verified.':error.message);}
+    }catch(error){
+      const message=error.code?.startsWith('auth/')?'Your admin password could not be verified.':error.message;
+      this.message(`Correction not confirmed: ${message} Reopen this dialog to check the saved correction status before retrying.`);
+      this.notify('Student ID correction not confirmed',message);
+      this.field('studentIdCorrectionStatus').scrollIntoView?.({block:'center',behavior:'smooth'});
+    }
     finally{this.busy=false;this.editing(false);this.field('studentIdAdminPassword').value='';this.field('confirmStudentIdCorrection').disabled=Boolean(this.plan?.completed);}
   }
   close(){if(this.busy)return;this.generation++;this.modal.hidden=true;this.form.reset();this.clearPreview();this.student=null;this.trigger?.focus();}

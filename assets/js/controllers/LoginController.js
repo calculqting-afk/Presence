@@ -97,8 +97,8 @@ export class LoginController {
     this.toastTimer = null;
     this.toast?.classList.remove('show');
     if (this.toastMark) {
-      this.toastMark.classList.remove('is-mascot');
-      this.toastMark.textContent = '✓';
+      // Preserve the current mascot during the CSS fade-out; the next show
+      // replaces its content in this same toast container.
       this.toastMark = null;
     }
   }

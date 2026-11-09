@@ -69,7 +69,7 @@ export class DashboardApplication {
     if (currentUser && dashboardRole === 'student') this.identity.restore(currentUser.uid);
     // These are independent, server-verified reads. Do not render the agreement
     // or start dashboard subscriptions until role verification succeeds.
-    const policyReference = currentUser && this.document.body.hasAttribute?.('data-policy-enabled')
+    const policyReference = currentUser && dashboardRole === 'student' && this.document.body.hasAttribute?.('data-policy-enabled')
       ? doc(db, ...Policy.path(currentUser.uid)) : null;
     let initialReceipt = policyReference ? this.metrics.run('agreement-read', () => getDocFromServer(policyReference))
       .then(snapshot => ({ snapshot }), error => ({ error })) : null;
@@ -92,7 +92,7 @@ export class DashboardApplication {
       this.identity.save(currentUser.uid, currentUserProfile);
       this.identity.render(currentUserProfile);
     }
-    if (this.document.body.hasAttribute?.('data-policy-enabled')) {
+    if (dashboardRole === 'student' && this.document.body.hasAttribute?.('data-policy-enabled')) {
       const reference = policyReference;
       this.agreement = new PolicyAgreementController({ document: this.document, window: this.window, uid: currentUser.uid,
         read: async () => {

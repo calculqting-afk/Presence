@@ -56,7 +56,12 @@ service cloud.firestore {
     }
 
     function canManageStudents() {
-      return isSuperAdmin() || isHeadAdmin() || isStudentManager();
+      return signedIn() && (request.auth.token.get("superAdmin", false) == true
+        || studentManagementRole());
+    }
+    function studentManagementRole() {
+      let profile = get(/databases/$(database)/documents/students/$(request.auth.uid)).data;
+      return profile.active == true && profile.get("role", "student") in ["head_admin", "student_manager"];
     }
 
     function canManageAttendance() {
@@ -280,7 +285,7 @@ service cloud.firestore {
         && optionalShortText(data, "phone", 24)
         // The bootstrap Super Admin account must never be represented as a student.
         && !protectedSuperAdminUid(data.get("uid",""))
-        && (!("photoDataUrl" in data) || (shortText(data.photoDataUrl, 350000) && data.photoDataUrl.matches('^data:image/(jpeg|png|webp);base64,.+$')))
+        && (!("photoDataUrl" in data) || (shortText(data.photoDataUrl, 350000) && (data.photoDataUrl == "" || data.photoDataUrl.matches('^data:image/(jpeg|png|webp);base64,.+$'))))
         // Kept for existing records created before the Google Drive photo feature
         // was rolled back. Students cannot modify these fields from this version.
         && (!("profilePhotoStorage" in data) || data.profilePhotoStorage == "Google Drive")
@@ -459,7 +464,7 @@ service cloud.firestore {
     function studentCanCheckIn(attendanceId, data) {
       let event = get(/databases/$(database)/documents/events/$(data.eventId)).data;
       let student = get(/databases/$(database)/documents/students/$(request.auth.uid)).data;
-      return isStudent()
+      return signedIn() && unrestrictedStudent(student)
         && !('checkoutOnlyReopened' in event)
         && attendanceId == request.auth.uid + "_" + data.eventId
         && exists(/databases/$(database)/documents/events/$(data.eventId))
@@ -580,20 +585,8 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["mustChangePassword", "updatedAt"])
           && request.resource.data.updatedAt is timestamp
           && isStudent())
-        || (isSuperAdmin() && recentAdminLogin()
-          && resource.data.get("passwordResetRequired", false) == false
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["role", "roleUpdatedAt", "roleUpdatedBy"])
-          && request.resource.data.role in ["head_admin", "attendance_admin", "student_manager", "student"]
-          && request.resource.data.roleUpdatedAt is timestamp
-          && request.resource.data.roleUpdatedBy == request.auth.uid)
-        || (canManageStudents()
-          && validStudent(request.resource.data)
-          && (!isStudentManager() || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            "accountId", "accountIdKey", "firstName", "middleName", "lastName", "birthday", "gender", "hometownBarangay", "hometownCity", "hometownProvince", "course", "section", "email", "phone", "photoDataUrl", "updatedAt", "grade", "adviser"
-          ]))
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy", "passwordResetRequired", "passwordResetValidAfter"]))
-        || (isStudent()
-          && request.auth.uid == studentUid
+        || (request.auth != null && request.auth.uid == studentUid
+          && isStudent()
           && validStudent(request.resource.data)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             "accountId", "accountIdKey", "firstName", "middleName", "lastName", "birthday", "gender", "hometownBarangay", "hometownCity", "hometownProvince", "course", "section", "email", "phone", "photoDataUrl", "updatedAt"
@@ -603,7 +596,22 @@ service cloud.firestore {
           && (!("photoDataUrl" in request.resource.data)
             || (request.resource.data.photoDataUrl is string
               && request.resource.data.photoDataUrl.size() <= 350000))
-          && request.resource.data.section in ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"]));
+          && request.resource.data.section in ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"])
+        || (request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy"])
+          && isSuperAdmin() && recentAdminLogin()
+          && resource.data.get("passwordResetRequired", false) == false
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["role", "roleUpdatedAt", "roleUpdatedBy", "updatedAt"])
+          && request.resource.data.role in ["head_admin", "attendance_admin", "student_manager", "student"]
+          && request.resource.data.roleUpdatedAt is timestamp
+          && (!("updatedAt" in request.resource.data) || request.resource.data.updatedAt is timestamp)
+          && request.resource.data.roleUpdatedBy == request.auth.uid)
+        || (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy", "passwordResetRequired", "passwordResetValidAfter"])
+          && canManageStudents()
+          && validStudent(request.resource.data)
+          && (!isStudentManager() || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "accountId", "accountIdKey", "firstName", "middleName", "lastName", "birthday", "gender", "hometownBarangay", "hometownCity", "hometownProvince", "course", "section", "email", "phone", "photoDataUrl", "updatedAt", "grade", "adviser"
+          ]))
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy", "passwordResetRequired", "passwordResetValidAfter"])));
     }
 
     // An event and its push outbox request are saved in one client batch. Only
@@ -678,6 +686,11 @@ service cloud.firestore {
     }
 
     match /events/{eventId} {
+      // Survey archive metadata does not change the event's schedule or roster.
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(["surveyArchived", "updatedAt"])
+        && canManageSurveys() && request.resource.data.surveyArchived is bool
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.surveyArchived == getAfter(/databases/$(database)/documents/eventSurveys/$(eventId)).data.get("archived", false);
       // Students cannot read legacy events that embed geofence coordinates.
       allow read: if isSuperAdmin() || isHeadAdmin() || isAttendanceAdmin() || isStudentManager()
         || (isStudent() && !resource.data.keys().hasAll(["geofence"]));
@@ -846,11 +859,19 @@ service cloud.firestore {
       allow list: if canManageSurveys();
       allow create: if canManageSurveys()
         && exists(/databases/$(database)/documents/events/$(eventId))
+        && get(/databases/$(database)/documents/events/$(eventId)).data.openAt <= request.time
+        && get(/databases/$(database)/documents/events/$(eventId)).data.checkOutClosesAt >= request.time
+        && request.resource.data.closesAt > request.time
         && exists(/databases/$(database)/documents/eventGeofences/$(eventId))
         && get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.enabled == true
         && validSurveyConfig(request.resource.data, eventId)
         && request.resource.data.createdAt == request.time && request.resource.data.createdBy == request.auth.uid;
-      allow update: if canManageSurveys() && validSurveyConfig(request.resource.data, eventId)
+      allow update: if canManageSurveys()
+        && request.resource.data.enabled is bool && request.resource.data.updatedAt == request.time
+        && request.resource.data.get("archived", false) is bool
+        && request.resource.data.get("deleting", false) is bool
+        && (!request.resource.data.get("archived", false) || !request.resource.data.enabled)
+        && (!request.resource.data.get("deleting", false) || (request.resource.data.get("archived", false) && !request.resource.data.enabled))
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["enabled", "updatedAt", "archived", "deleting"])
         && (!("deleting" in resource.data) || !resource.data.deleting || request.resource.data.deleting == true);
       allow delete: if canManageSurveys() && surveyIsDeleting(eventId);
@@ -1068,9 +1089,10 @@ service cloud.firestore {
       allow create: if canManageFines() && validFine(request.resource.data)
         && confirmedFineAbsence(request.resource.data);
       allow update: if canManageFines() && validFine(request.resource.data)
-        && ((request.resource.data.studentUid == resource.data.studentUid
-            && request.resource.data.eventId == resource.data.eventId)
-          || confirmedFineAbsence(request.resource.data));
+        && request.resource.data.studentUid == resource.data.studentUid
+        && request.resource.data.eventId == resource.data.eventId
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          "eventName", "eventDate", "eventTimeIn", "eventTimeOut", "eventLocation"]);
       allow delete: if isSuperAdmin() && recentAdminLogin();
     }
 
