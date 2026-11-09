@@ -139,7 +139,7 @@ test('student UI scopes its listener, escapes reasons, waits for server acknowle
   const f = await fixture();
   const nodes = { '[data-request-list]': { innerHTML: '' }, '[data-request-sync]': {}, '[data-request-event]': { value: '', innerHTML: '' } };
   const rootNode = { innerHTML: '', addEventListener() {}, removeEventListener() {}, querySelector: selector => nodes[selector] || null };
-  const ui = new f.exports.CorrectionRequestsController({ root: rootNode, db: {}, user: { uid: 'student' }, getEvents: () => [f.stored.get('events/morning')], getStudent: () => f.stored.get('students/student'), escapeHtml: value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;'), notify() {} });
+  const ui = new f.exports.CorrectionRequestsController({ root: rootNode, db: {}, user: { uid: 'student' }, getView: () => 'attendances', getEvents: () => [f.stored.get('events/morning')], getStudent: () => f.stored.get('students/student'), escapeHtml: value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;'), notify() {} });
   ui.initialize();
   assert.equal(JSON.stringify(f.liveReference[1]), JSON.stringify(['studentUid', '==', 'student']));
   const docs = [{ id: 'student_morning', data: () => ({ studentUid: 'student', eventId: 'morning', kind: 'missed-check-in', reason: '<script>attack</script>', status: 'pending' }) }];
@@ -206,4 +206,23 @@ test('request submit shows a spinner until acknowledgement, blocks duplicate tap
   await ui.submit({ target: form });
   assert.equal(button.disabled, false); assert.equal(ui.busy, false); assert.equal(resetCount, 1);
   assert.equal(form.elements.reason.value, submission.reason); assert.equal(messages[1][0], 'Request not saved');
+});
+
+
+test('student correction details load only in the visible summary and reject responses after leaving', async () => {
+  const f=await fixture(), handlers=new Map();let view='dashboard';
+  const document={hidden:false,addEventListener:(name,fn)=>handlers.set(name,fn),removeEventListener:name=>handlers.delete(name)};
+  const window={addEventListener:(name,fn)=>handlers.set(name,fn),removeEventListener:name=>handlers.delete(name)};
+  const nodes={'[data-request-list]':{innerHTML:''},'[data-request-sync]':{},'[data-request-event]':{value:''}};
+  const rootNode={hidden:false,ownerDocument:document,addEventListener(){},removeEventListener(){},querySelector:selector=>nodes[selector]||null};
+  const ui=new f.exports.CorrectionRequestsController({root:rootNode,window,db:{},user:{uid:'student'},getView:()=>view,getEvents:()=>[],getStudent:()=>({}),escapeHtml:String,notify(){}});
+  ui.initialize();assert.equal(f.liveReference,undefined);
+  view='attendances';handlers.get('presence:viewchange')();assert.ok(f.liveReference);
+  f.emit({docs:[{id:'one',data:()=>({reason:'Saved',status:'pending'})}],metadata:{}});assert.equal(ui.requests.length,1);
+  view='profile';handlers.get('presence:viewchange')();assert.equal(f.unsubscribed,true);
+  f.emit({docs:[],metadata:{}});assert.equal(ui.requests.length,1);assert.equal(ui.available,false);
+  view='attendances';rootNode.hidden=true;handlers.get('presence:viewchange')();assert.equal(ui.unsubscribe,null);
+  rootNode.hidden=false;ui.onStudentView();assert.equal(typeof ui.unsubscribe,'function');
+  document.hidden=true;handlers.get('visibilitychange')();assert.equal(ui.unsubscribe,null);
+  ui.dispose();assert.equal(handlers.size,0);
 });

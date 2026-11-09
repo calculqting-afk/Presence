@@ -11,6 +11,7 @@ import { waitForUser, verifyRole, auth, signOut, wireCommonNavigation, wireNotif
 import { hasPermission } from '../core/permissions.js?v=20261011-optimized';
 import { LazySurveyController } from './LazySurveyController.js';
 import { DashboardPerformanceController } from './DashboardPerformanceController.js';
+import { AttendanceQrController } from './AttendanceQrController.js';
 export class DashboardApplication {
   constructor({
     document = globalThis.document,
@@ -144,6 +145,12 @@ export class DashboardApplication {
     sessionState.dashboard = this;
     this.scope.addCleanup(() => dashboard.dispose());
     dashboard.initialize();
+    if (dashboardRole === 'student' || hasPermission(currentUserRole, 'correctAttendance')) {
+      const qr = new AttendanceQrController({ document: this.document, window: this.window, admin: dashboardRole !== 'student',
+        getEvents: () => dashboard.events || [], getUser: () => auth.currentUser, getProfile: () => currentUserProfile,
+        escapeHtml, showToast: showDashboardToast }).initialize();
+      this.scope.addCleanup(() => qr.dispose());
+    }
     this.scope.listen(this.window, 'presence:viewchange', () => mascot.refreshContext());
     this.pullRefresh = new DashboardPullRefreshController({ document: this.document, window: this.window });
     this.pullRefresh.initialize();

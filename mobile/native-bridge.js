@@ -10,6 +10,10 @@ if (Capacitor.isNativePlatform()) {
     if (isActive) window.dispatchEvent(new Event('focus'));
   });
   App.addListener('backButton', ({ canGoBack }) => {
+    if (document.body?.hasAttribute('data-attendance-qr')) {
+      window.dispatchEvent(new Event('presence:attendance-qr-back'));
+      return;
+    }
     if (document.body?.hasAttribute('data-device-transfer')) {
       window.dispatchEvent(new Event('presence:device-transfer-back'));
       return;

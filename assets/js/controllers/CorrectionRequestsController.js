@@ -35,7 +35,19 @@ export class CorrectionRequestsController {
         reference: query(collection(this.db, 'attendanceCorrectionRequests'), where('status', '==', 'pending')),
         count: count => this.updateBadge(count), open: () => this.subscribe(), close: () => { this.subscriptionGeneration = (this.subscriptionGeneration || 0) + 1; this.unsubscribe?.(); this.unsubscribe = null; this.requests = []; this.available = false; } });
       this.watch.initialize();
-    } else this.subscribe();
+    } else {
+      this.onStudentView = () => {
+        const active = this.getView() === 'attendances' && !this.root.hidden && !this.root.ownerDocument?.hidden;
+        if (active && !this.unsubscribe) this.subscribe();
+        else if (!active && this.unsubscribe) {
+          this.subscriptionGeneration = (this.subscriptionGeneration || 0) + 1;
+          this.unsubscribe(); this.unsubscribe = null; this.available = false;
+        }
+      };
+      this.window?.addEventListener('presence:viewchange', this.onStudentView);
+      this.root.ownerDocument?.addEventListener('visibilitychange', this.onStudentView);
+      this.onStudentView();
+    }
     this.refreshEvents();
   }
   subscribe() {
@@ -169,6 +181,8 @@ export class CorrectionRequestsController {
     finally { this.busy = false; this.loading.reset('request-review'); if (this.renderPending && this.initialized) { this.renderPending = false; this.render(); } }
   }
   dispose() {
+    this.window?.removeEventListener('presence:viewchange', this.onStudentView);
+    this.root?.ownerDocument?.removeEventListener('visibilitychange', this.onStudentView);
     this.initialized = false; this.watch?.dispose(); this.unsubscribe?.(); this.updateBadge(0);
     this.loading.dispose();
     this.root?.removeEventListener('submit', this.onSubmit); this.root?.removeEventListener('click', this.onClick);

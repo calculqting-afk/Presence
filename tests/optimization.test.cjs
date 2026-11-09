@@ -88,3 +88,18 @@ test('QR code library loads once on demand, preserves project paths and retries 
   const next = loader.load(); window.qrcode = () => {}; scripts[1].onload();
   assert.equal(await next, window.qrcode); assert.equal(await loader.load(), window.qrcode); assert.equal(scripts.length, 2);
 });
+
+
+test('hidden pages immediately stop area listeners, keep essential checks and ignore late callbacks', async () => {
+  const { ScopedSubscriptions } = await import('../assets/js/core/ScopedSubscriptions.js');
+  let starts=0, stops=0, essential=0, applied=0, late;
+  const scope=new ScopedSubscriptions();
+  scope.register('area',['directory'],guard=>{starts++;late=guard(()=>applied++);return()=>stops++;});
+  scope.register('session',['*'],()=>{essential++;return()=>{};});
+  scope.setView('directory');late();
+  scope.setVisible(false);late();scope.setView('profile');
+  assert.equal(stops,1);assert.equal(applied,1);assert.equal(essential,1);
+  scope.setVisible(true);assert.equal(starts,1);
+  scope.setView('directory');scope.setView('directory');assert.equal(starts,2);
+  scope.stop();assert.equal(stops,2);
+});

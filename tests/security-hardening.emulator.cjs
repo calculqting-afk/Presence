@@ -55,7 +55,12 @@ async function read(path,who,allowed){const response=await fetch(base+'/'+path,{
     const missingField={...record};delete missingField[field];
     await write(path,missingField,uid,false);
   }
-  await write(proofPath,proof);await read(proofPath,uid,false);await write(path,record,uid,true);
+  await write(proofPath,proof);await read(proofPath,uid,false);
+  await write(path,{...record,qrCheckedInBy:'forged-admin'},uid,false);
+  await write(path,{...record,recordSource:'admin-qr',qrCheckedInBy:uid},uid,false);
+  await write('attendanceQrLimits/issue_'+uid,{count:0},uid,false);
+  await write('auditLogs/attendance-qr_forged',{action:'attendance-qr-check-in'},uid,false);
+  await write(path,record,uid,true);
   await write(path,record,uid,false); // duplicate cannot replace the saved check-in
   const checkout={checkedOutAt:server,status:'completed',checkOutLocation:location};
   await write(path,checkout,uid,false,['checkedOutAt','status','checkOutLocation']);
@@ -67,6 +72,13 @@ async function read(path,who,allowed){const response=await fetch(base+'/'+path,{
   await write('attendanceLocationProofs/'+uid+'_security-event_out',{...proof,action:'out'});
   await write(path,checkout,uid,true,['checkedOutAt','status','checkOutLocation']);
   await write(path,checkout,uid,false,['checkedOutAt','status','checkOutLocation']);
+  // Server-owned QR provenance survives ordinary self-service checkout and
+  // cannot be forged or modified by a student.
+  const qrRecord={...record,checkedInAt:new Date(now-10000),attendedAt:new Date(now-10000),recordSource:'admin-qr',qrCheckedInBy:'scanner-admin'};
+  delete qrRecord.checkInLocation;
+  await write(path,qrRecord);
+  await write(path,{...checkout,qrCheckedInBy:uid},uid,false,['checkedOutAt','status','checkOutLocation','qrCheckedInBy']);
+  await write(path,checkout,uid,true,['checkedOutAt','status','checkOutLocation']);
   await write('students/fine-head',{active:true,role:'head_admin'});
   const fine={studentUid:uid,studentId:'SECURE-STUDENT',studentName:'Dummy Student',eventId:'missed',eventName:'Original session',serviceMinutes:30,reason:'Verified absence',status:'Pending',assignmentHistory:[]};
   await write('fines/locked-test',fine);

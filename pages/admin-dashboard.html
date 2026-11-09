@@ -16,12 +16,13 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261101-navigation">
+  <link rel="stylesheet" href="../assets/css/dashboard.css?v=20261109-activity-history">
   <link rel="stylesheet" href="../assets/css/theme-toggle.css?v=20261010-shared-theme">
   <link rel="stylesheet" href="../assets/css/dashboard-theme.css?v=20261024-transparent-toast">
   <link rel="stylesheet" href="../assets/css/button-loading.css?v=20261010-auth-progress">
   <link rel="stylesheet" href="../assets/css/survey.css?v=20261011-survey-archive">
   <link rel="stylesheet" href="../assets/css/attendance-report.css?v=20261026">
+  <link rel="stylesheet" href="../assets/css/attendance-qr.css?v=1">
   <link rel="stylesheet" href="../assets/css/event-audience.css?v=20261020">
   <link rel="stylesheet" href="../assets/css/hometown-picker.css?v=20261101">
   <link rel="stylesheet" href="../assets/css/legal.css?v=20261101">
@@ -107,11 +108,14 @@
               <label>Admin<input type="search" data-activity-admin placeholder="Search admin name or UID"></label>
               <label>Student / event<input type="search" data-activity-subject placeholder="Name, Student ID, or event"></label>
               <label>Action<select data-activity-action><option value="">All actions</option></select></label>
-              <label>From<input type="date" data-activity-from></label><label>To<input type="date" data-activity-to></label>
-              <button class="primary-button" type="submit">Apply dates</button><button class="outline-button" type="button" data-activity-clear>Clear</button>
+              <div class="activity-history-datebar">
+                <label>From<input type="date" data-activity-from></label>
+                <label>To<input type="date" data-activity-to></label>
+                <div class="activity-history-filter-actions"><button class="primary-button" type="submit">Apply dates</button><button class="outline-button" type="button" data-activity-clear>Clear</button></div>
+              </div>
             </form>
-            <p class="activity-history-note">Event, role and attendance changes are recorded from this update forward. Earlier password-reset records are included where available. Password values are never shown.</p>
-            <div class="button-row"><button class="outline-button" type="button" data-activity-refresh>Refresh</button><span data-activity-status role="status"></span></div>
+            <div class="activity-history-toolbar"><span data-activity-status role="status" aria-live="polite"></span><button class="outline-button" type="button" data-activity-refresh>Refresh</button></div>
+            <p class="activity-history-note">New activity may take up to 5 minutes to appear. Search covers loaded entries; load older activity to see more.</p>
             <div class="activity-history-list" data-activity-list></div>
             <button class="outline-button" type="button" data-activity-more hidden>Load older activity</button>
           </article>
@@ -122,6 +126,7 @@
             <button class="outline-button" id="syncAttendanceNow" type="button"><span aria-hidden="true">↻</span> Refresh</button>
             <button class="outline-button" id="openAttendanceReport" type="button">Live report / PDF / Excel</button>
             <button class="primary-button" type="button" id="addAttendanceCorrection"><span aria-hidden="true">＋</span> Set attendance</button>
+            <button class="outline-button" type="button" id="openAttendanceQrScanner" hidden>Scan student QR</button>
             <details class="attendance-help" id="attendanceHelp"><summary aria-label="Attendance help"><span aria-hidden="true">i</span></summary><div class="attendance-help-content"><strong>About these records</strong><p>Dates filter server records. Other filters search loaded records; use Load more to continue.</p><p>Section uses the event roster when available, otherwise the current profile.</p><p>Missed checkout needs review, not an automatic absence or fine.</p></div></details>
           </div></div>
           <article class="panel attendance-workspace">

@@ -4,6 +4,7 @@ export class ScopedSubscriptions {
     schedule = (callback, delay) => setTimeout(callback, delay), cancel = timer => clearTimeout(timer) } = {}) {
     this.entries = new Map();
     this.view = null;
+    this.visible = true;
     this.onError = onError;
     this.isEnabled = isEnabled;
     Object.assign(this, { linger, schedule, cancel });
@@ -18,7 +19,7 @@ export class ScopedSubscriptions {
   setView(view) {
     this.view = view;
     for (const [key, entry] of this.entries) {
-      const needed = this.isEnabled(key) && (entry.views.includes('*') || entry.views.includes(view));
+      const needed = this.isEnabled(key) && (entry.views.includes('*') || (this.visible && entry.views.includes(view)));
       if (needed && entry.stopTimer != null) { this.cancel(entry.stopTimer); entry.stopTimer = null; }
       if (needed && !entry.unsubscribe) {
         const generation = ++entry.generation;
@@ -31,7 +32,7 @@ export class ScopedSubscriptions {
           this.onError(error, key);
         }
       } else if (!needed && entry.unsubscribe) {
-        const delay = this.isEnabled(key) ? this.linger(key) : 0;
+        const delay = this.visible && this.isEnabled(key) ? this.linger(key) : 0;
         if (delay > 0) {
           if (entry.stopTimer == null) entry.stopTimer = this.schedule(() => {
             entry.stopTimer = null; ++entry.generation; entry.unsubscribe?.(); entry.unsubscribe = null;
@@ -43,6 +44,11 @@ export class ScopedSubscriptions {
         entry.unsubscribe = null;
       }
     }
+  }
+
+  setVisible(visible) {
+    this.visible = visible;
+    if (this.view !== null) this.setView(this.view);
   }
 
   stop() {

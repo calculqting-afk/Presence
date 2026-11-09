@@ -149,10 +149,10 @@ export class FirebaseGateway {
   async password(uid, password, validAfter) {
     await this.call(`https://identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:update`, { localId: uid, password, validSince: String(validAfter), returnSecureToken: false });
   }
-  async get(path, transaction) {
+  async get(path, transaction, extraFields = []) {
     const params = new URLSearchParams();
     if (transaction) params.set('transaction', transaction);
-    if (path.startsWith('students/')) for (const field of ['uid', 'active', 'role', 'firstName', 'middleName', 'lastName', 'accountId', 'accountIdKey', 'authEmail', 'birthday', 'section', 'createdAt', 'passwordResetRequired', 'passwordResetValidAfter']) params.append('mask.fieldPaths', field);
+    if (path.startsWith('students/')) for (const field of [...new Set(['uid', 'active', 'role', 'firstName', 'middleName', 'lastName', 'accountId', 'accountIdKey', 'authEmail', 'birthday', 'section', 'createdAt', 'passwordResetRequired', 'passwordResetValidAfter', ...extraFields])]) params.append('mask.fieldPaths', field);
     const result = await this.call(this.base + '/' + path + (params.size ? '?' + params : ''), undefined, true);
     return result ? { ...Object.fromEntries(Object.entries(result.fields || {}).map(([key, value]) => [key, decode(value)])), _updateTime: result.updateTime } : null;
   }
@@ -178,6 +178,7 @@ export class FirebaseGateway {
     const { transaction } = await this.call(this.base + ':beginTransaction', { options: { readWrite: {} } });
     try {
       const get=path=>this.get(path,transaction);
+      get.qrStudent=uid=>this.get('students/'+uid,transaction,['course','photoDataUrl','mustChangePassword']);
       get.matches=(field,value)=>this.matches(field,value,transaction);
       const writes = await fn(get);
       await this.call(this.base + ':commit', { transaction, writes });

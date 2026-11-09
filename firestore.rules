@@ -387,7 +387,7 @@ service cloud.firestore {
           "studentUid", "studentId", "eventId", "eventName", "eventType", "eventDescription", "eventDate",
           "timeIn", "timeOut", "location", "audience", "checkInLocation", "checkOutLocation", "attendedAt", "arrivalStatus",
           "checkedInAt", "checkedOutAt", "status", "recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason",
-          "arrivalRecalculatedAt", "arrivalRecalculatedBy", "arrivalRecalculationId", "arrivalRecalculationReason"
+          "arrivalRecalculatedAt", "arrivalRecalculatedBy", "arrivalRecalculationId", "arrivalRecalculationReason", "qrCheckedInBy", "qrCheckedOutBy"
         ])
         // Direct type checks and status branches below require each of these fields.
         && shortText(data.studentUid, 128) && shortText(data.studentId, 64) && shortText(data.eventId, 128)
@@ -479,7 +479,7 @@ service cloud.firestore {
         // validAttendance and the create branch already require arrivalStatus
         // and status == checked-in before this function is evaluated.
         && data.arrivalStatus == (request.time < event.get("lateAfterAt", event.checkInClosesAt) ? "present" : "late")
-        && !data.keys().hasAny(["recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason", "arrivalRecalculatedAt", "arrivalRecalculatedBy", "arrivalRecalculationId", "arrivalRecalculationReason"])
+        && !data.keys().hasAny(["qrCheckedInBy", "qrCheckedOutBy", "recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason", "arrivalRecalculatedAt", "arrivalRecalculatedBy", "arrivalRecalculationId", "arrivalRecalculationReason"])
         && !data.keys().hasAny(["checkedOutAt", "checkOutLocation"])
         && withinSparkGeofence(data, data.eventId, event);
     }
@@ -525,7 +525,7 @@ service cloud.firestore {
         && attendanceMatchesEvent(data, event) && eligibleForAttendance(event, student, request.auth.uid)
         && data.status == "checkout-only" && data.arrivalStatus == "absent" && data.checkedOutAt == request.time
         && request.time >= event.closeAt && request.time <= event.checkOutClosesAt
-        && !data.keys().hasAny(["attendedAt", "checkedInAt", "checkInLocation", "recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason", "arrivalRecalculatedAt", "arrivalRecalculatedBy", "arrivalRecalculationId", "arrivalRecalculationReason"])
+        && !data.keys().hasAny(["qrCheckedInBy", "qrCheckedOutBy", "attendedAt", "checkedInAt", "checkInLocation", "recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason", "arrivalRecalculatedAt", "arrivalRecalculatedBy", "arrivalRecalculationId", "arrivalRecalculationReason"])
         && (!data.keys().hasAny(["checkOutLocation"]) || validLocation(data.checkOutLocation))
         && (event.requiresGeofence != true || data.keys().hasAll(["checkOutLocation"]))
         && (!event.requiresGeofence || withinSparkGeofence({ "checkInLocation": data.checkOutLocation, "proofAction": "out" }, data.eventId, event));
@@ -537,6 +537,9 @@ service cloud.firestore {
       let student = get(/databases/$(database)/documents/students/$(data.studentUid)).data;
       let audit = getAfter(/databases/$(database)/documents/attendance/$(attendanceId)/corrections/$(data.correctionId)).data;
       return canManageAttendance() && validAttendance(data)
+        && (!data.keys().hasAny(["qrCheckedInBy", "qrCheckedOutBy"]) || (before != null
+          && data.get("qrCheckedInBy", "") == before.get("qrCheckedInBy", "")
+          && data.get("qrCheckedOutBy", "") == before.get("qrCheckedOutBy", "")))
         && attendanceId == data.studentUid + "_" + data.eventId
         && student.active == true && data.studentId == student.accountId
         && eligibleForAttendance(event, student, data.studentUid)

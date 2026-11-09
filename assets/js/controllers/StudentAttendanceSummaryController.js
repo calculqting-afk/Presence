@@ -2,8 +2,8 @@ import { ControllerScope } from '../core/ControllerScope.js';
 import { StudentAttendanceSummaryService } from './StudentAttendanceSummaryService.js';
 
 export class StudentAttendanceSummaryController {
-  constructor({ document = globalThis.document, window = globalThis.window, getState, requestCorrection, service = new StudentAttendanceSummaryService(), now = () => Date.now() }) {
-    Object.assign(this, { document, window, getState, requestCorrection, service, now }); this.scope = new ControllerScope(); this.page = 0;
+  constructor({ document = globalThis.document, window = globalThis.window, getState, requestCorrection, onTabChange = () => {}, service = new StudentAttendanceSummaryService(), now = () => Date.now() }) {
+    Object.assign(this, { document, window, getState, requestCorrection, onTabChange, service, now }); this.scope = new ControllerScope(); this.page = 0;
   }
   initialize() {
     this.root = this.document.querySelector('#studentAttendanceSummary');
@@ -45,6 +45,7 @@ export class StudentAttendanceSummaryController {
     const corrections = this.document.querySelector('#studentCorrectionRequests');
     if (corrections) corrections.hidden = name !== 'summary';
     this.root.hidden = name !== 'summary';
+    this.onTabChange(name);
     if (name === 'summary') this.render();
   }
   render() {

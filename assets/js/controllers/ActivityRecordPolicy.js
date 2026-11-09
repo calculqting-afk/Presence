@@ -1,4 +1,4 @@
-export const ACTIVITY_ACTIONS=Object.freeze({'event-created':'Event created','event-updated':'Event updated','role-changed':'Role changed',
+export const ACTIVITY_ACTIONS=Object.freeze({'attendance-qr-check-in':'QR check-in','attendance-qr-check-out':'QR check-out','event-created':'Event created','event-updated':'Event updated','role-changed':'Role changed',
   'attendance-revoked':'Attendance revoked','attendance-corrected':'Attendance corrected','arrival-recalculated':'Arrival recalculated','student-password-reset':'Password reset','student-id-corrected':'Student ID corrected'});
 export function activitySnapshot(kind,data) {
   if(!data)return null;

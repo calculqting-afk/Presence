@@ -65,6 +65,24 @@ test('activity history normalizes legacy reset entries and searches actor, stude
   assert.equal(filterActivity(rows,{action:'role-changed'}).length,0);
 });
 
+test('activity changes use readable labels, explicit removal and no unchanged empty fields', async()=>{
+  const {activityChanges}=await isolatedModule('assets/js/controllers/ActivityHistoryController.js');
+  const rows=activityChanges({action:'attendance-revoked',before:{checkedInAt:{toMillis:()=>Date.parse('2026-11-09T11:01:45Z')},checkedOutAt:null,arrivalStatus:'present',status:'checked-in'},after:null});
+  assert.deepEqual(Array.from(rows,row=>row.label),['Check-in time','Arrival','Attendance status']);
+  assert.ok(rows.every(row=>row.after==='Removed'));
+  assert.match(rows[0].before,/7:01:45 PM/);
+  assert.equal(rows[1].before,'On time');assert.equal(rows[2].before,'Checked in');
+});
+
+test('activity changes format school roles and schedule times while omitting private and unchanged fields', async()=>{
+  const {activityChanges}=await isolatedModule('assets/js/controllers/ActivityHistoryController.js');
+  const role=activityChanges({action:'role-changed',before:{role:'student',password:'old-secret'},after:{role:'attendance_admin',password:'new-secret'}});
+  assert.equal(role.length,1);assert.equal(role[0].after,'Attendance Admin');
+  const event=activityChanges({action:'event-updated',before:{name:'Same',timeIn:'07:00',timeOut:'13:00'},after:{name:'Same',timeIn:'07:30',timeOut:'13:00',passwordHash:'secret'}});
+  assert.equal(event.length,1);assert.equal(event[0].label,'Check-in opens');assert.equal(event[0].before,'7:00 AM');assert.equal(event[0].after,'7:30 AM');
+  assert.doesNotMatch(JSON.stringify([role,event]),/secret|password/);
+});
+
 test('activity snapshots whitelist changed fields and never retain arbitrary password data',async()=>{
   const {activitySnapshot}=await isolatedModule('assets/js/controllers/ActivityRecordPolicy.js');
   assert.equal(activitySnapshot('event',null),null);

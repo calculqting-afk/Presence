@@ -114,6 +114,7 @@ export class StudentDashboard {
     this.studentSummary = new StudentAttendanceSummaryController({ document: this.document, window: this.window,
       getState: () => ({ student: { ...this.studentProfile, uid: currentUser.uid }, events: this.events, attendance: this.attendance, view: this.view,
         verified: Boolean(this.eventsConfirmed && this.attendanceConfirmed && !this.attendanceHasPendingWrites && this.window.navigator?.onLine !== false) }),
+      onTabChange: () => this.correctionRequests?.onStudentView?.(),
       requestCorrection: async (eventId, kind) => {
         try {
           await this.initializeCorrectionRequests();
@@ -145,7 +146,7 @@ export class StudentDashboard {
     const { CorrectionRequestsController } = await import('../controllers/CorrectionRequestsController.js');
     if (!this.scope.initialized || this.correctionRequests || this.studentProfile?.passwordResetRequired === true) return;
     this.correctionRequests = new CorrectionRequestsController({ root: this.document.querySelector('#studentCorrectionRequests'),
-      db, user: currentUser, getEvents: () => this.events, getStudent: () => ({ ...this.studentProfile, uid: currentUser.uid }), escapeHtml, notify: showDashboardToast });
+      db, user: currentUser, window: this.window, getView: () => this.view, getEvents: () => this.events, getStudent: () => ({ ...this.studentProfile, uid: currentUser.uid }), escapeHtml, notify: showDashboardToast });
     this.correctionRequests.initialize();
     this.scope.addCleanup(() => this.correctionRequests?.dispose());
   }
@@ -163,6 +164,10 @@ export class StudentDashboard {
       }
     });
     dashboard.scope.listen(dashboard.window, 'presence:viewchange', dashboard.changeSubscriptions);
+    dashboard.subscriptions.setVisible(!dashboard.document.hidden);
+    dashboard.scope.listen(dashboard.document, 'visibilitychange', () => {
+      dashboard.subscriptions.setVisible(!dashboard.document.hidden);
+    });
     dashboard.scope.addCleanup(() => {
       dashboard.subscriptions.stop();
       dashboard.window.removeEventListener('presence:viewchange', dashboard.changeSubscriptions);
@@ -377,7 +382,7 @@ export class StudentDashboard {
       dashboard.dismissedIds = new Set(snapshot.docs.map(item => item.data().eventId));
       dashboard.scheduleEventRender();
     });
-    dashboard.listen('fines', ["*"], query(collection(db, "fines"), where("studentUid", "==", currentUser.uid)), snapshot => {
+    dashboard.listen('fines', ['dashboard', 'fines', 'profile'], query(collection(db, "fines"), where("studentUid", "==", currentUser.uid)), snapshot => {
       dashboard.fines = snapshot.docs.map(item => ({
         id: item.id,
         ...item.data()
@@ -712,7 +717,7 @@ export class StudentDashboard {
       const color = timeIssue || partial || readyToCheckOut || status.startsWith('Needs review') ? "orange" : completed ? "green" : status === "Checked in" ? "blue" : "gray";
       const checkInWindow = event.timeIn ? `${formatEventTime(event.timeIn)} – ${formatEventTime(event.checkInCutoff || event.timeOut)}` : "Not recorded";
       const checkOutWindow = event.timeOut ? `${formatEventTime(event.timeOut)} – ${formatEventTime(event.checkOutCutoff || timePlusMinutes(event.timeOut))}` : "Not recorded";
-      return `<article class="history-event-card attendance-record-card" data-render-key="${escapeHtml(record.id || `${record.studentUid}:${record.eventId}`)}"><div class="history-card-top"><span class="event-type-badge">${escapeHtml(record.eventType || "School Event")}</span><div class="attendance-record-badges"><span class="badge ${color}">${escapeHtml(status)}</span>${hasVerifiedCheckIn ? arrivalStatusBadge(record.arrivalStatus) : '<span class="badge orange">Absent in</span>'}${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}</div></div><h3>${escapeHtml(record.eventName || "Attendance event")}</h3><p>${escapeHtml(record.location || "Location not recorded")}</p><div class="event-detail-boxes"><div class="${record.arrivalStatus === 'late' ? 'attendance-time-late' : ''}"><span>${record.arrivalStatus === 'late' ? 'Late IN' : 'Checked in'}</span><strong>${escapeHtml(formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>Checked out</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Arrival</span><strong>${escapeHtml(partial ? 'Absent in' : record.arrivalStatus === "late" ? "Late" : "Present")}</strong></div><div><span>Check-in window</span><strong>${escapeHtml(checkInWindow)}</strong></div><div><span>Checkout window</span><strong>${escapeHtml(checkOutWindow)}</strong></div><div><span>Duration</span><strong>${escapeHtml(hasVerifiedCheckIn ? attendanceDuration(checkedInAt, record.checkedOutAt) : 'Not available')}</strong></div></div>${readyToCheckOut ? `<div class="history-card-actions"><button class="primary-button attendance-action-button" type="button" data-check-out-attendance="${escapeHtml(record.id)}">Check out</button></div>` : ""}</article>`;
+      return `<article class="history-event-card attendance-record-card" data-render-key="${escapeHtml(record.id || `${record.studentUid}:${record.eventId}`)}"><div class="history-card-top"><span class="event-type-badge">${escapeHtml(record.eventType || "School Event")}</span><div class="attendance-record-badges"><span class="badge ${color}">${escapeHtml(status)}</span>${hasVerifiedCheckIn ? arrivalStatusBadge(record.arrivalStatus) : '<span class="badge orange">Absent in</span>'}${record.qrCheckedInBy || record.qrCheckedOutBy ? '<span class="badge blue">Admin QR scan</span>' : ""}${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}</div></div><h3>${escapeHtml(record.eventName || "Attendance event")}</h3><p>${escapeHtml(record.location || "Location not recorded")}</p><div class="event-detail-boxes"><div class="${record.arrivalStatus === 'late' ? 'attendance-time-late' : ''}"><span>${record.arrivalStatus === 'late' ? 'Late IN' : 'Checked in'}</span><strong>${escapeHtml(formatAttendanceTimestamp(checkedInAt))}</strong></div><div><span>Checked out</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong></div><div><span>Arrival</span><strong>${escapeHtml(partial ? 'Absent in' : record.arrivalStatus === "late" ? "Late" : "Present")}</strong></div><div><span>Check-in window</span><strong>${escapeHtml(checkInWindow)}</strong></div><div><span>Checkout window</span><strong>${escapeHtml(checkOutWindow)}</strong></div><div><span>Duration</span><strong>${escapeHtml(hasVerifiedCheckIn ? attendanceDuration(checkedInAt, record.checkedOutAt) : 'Not available')}</strong></div></div>${readyToCheckOut ? `<div class="history-card-actions"><button class="primary-button attendance-action-button" type="button" data-check-out-attendance="${escapeHtml(record.id)}">Check out</button></div>` : ""}</article>`;
     }).join(""));
     dashboard.attendanceController.syncLoadingButtons();
   }
