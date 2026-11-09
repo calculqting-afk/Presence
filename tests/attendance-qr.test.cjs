@@ -238,10 +238,10 @@ test('student QR navigation renders inline only while its page is visible and cl
   f.controller.onView({detail:{viewName:'attendance-qr'}});
   assert.equal(generated,1);assert.match(f.controller.dialog.className,/attendance-qr-page/);
   assert.equal(f.controller.dialog.open,undefined,'student QR is a page, not a modal');
-  assert.equal(f.document.body.children.length,0);assert.equal(f.intervals.size,1);
+  assert.equal(f.document.body.children.length,0);assert.equal(f.intervals.size,0);
   f.controller.onView({detail:{viewName:'events'}});
   assert.equal(f.controller.dialog,null);assert.equal(f.intervals.size,0);
-  f.controller.onEvents();assert.equal(generated,1);
+  assert.equal(generated,1);
   f.controller.onView({detail:{viewName:'attendance-qr'}});assert.equal(generated,2);
   f.document.hidden=true;f.controller.onVisibility();assert.equal(f.intervals.size,0);
   f.document.hidden=false;f.controller.onVisibility();assert.equal(generated,3);
@@ -253,4 +253,64 @@ test('student QR has its own navigation and section instead of an Events shortcu
   const html=fs.readFileSync(require('node:path').join(__dirname, '../pages/student-dashboard.html'),'utf8');
   assert.match(html,/data-view="attendance-qr"/);assert.match(html,/data-section="attendance-qr"/);
   assert.doesNotMatch(html,/id="openStudentAttendanceQr"/);
+});
+
+
+test('identity QR issues without any event and the admin selects each eligible session', async () => {
+  const f=await fixture();
+  const first=await f.service.issue(f.student, {});
+  assert.equal(first.expiresAt-first.serverNow,1800000);
+  assert.equal(first.student.studentId,'2510004-1');
+  const secondEvent=structuredClone(f.store.get('events/morning'));f.store.set('events/another',secondEvent);
+  const preview=await f.service.scan(f.admin,{token:first.token,eventId:'another',action:'in'});
+  await f.service.scan(f.admin,{confirmation:preview.confirmation,eventId:'another',action:'in'},true);
+  assert.ok(f.store.get('attendance/student_another'));
+  assert.equal(f.store.has('attendance/student_morning'),false);
+  const morning=await f.preview(first.token);await f.confirm(morning.confirmation);
+  assert.equal((await f.preview(first.token)).existing,true);
+  f.store.get('events/another').attendanceRoster={other:'2A'};
+  await assert.rejects(f.service.scan(f.admin,{token:first.token,eventId:'another',action:'in'}),/not assigned/);
+});
+
+test('identity QR is available outside events but cannot bypass windows, expiry or account restrictions',async()=>{
+  const f=await fixture();f.advance(7200001);
+  const qr=await f.service.issue(f.student,{});assert.ok(qr.token);
+  await assert.rejects(f.preview(qr.token),/window is closed/);
+  f.advance(1800000);await assert.rejects(f.preview(qr.token),/expired/);
+  f.store.get('students/student').active=false;
+  await assert.rejects(f.service.issue(f.student,{}),/active student/);
+});
+
+test('student identity QR loads without a selector, reuses its lifetime and downloads a labelled PNG',async()=>{
+  const f=await browserFixture(false),makeQr=require('qrcode-generator');
+  f.window.qrcode=makeQr;
+  f.controller.api.call=async(route,user,body)=>{f.calls.push({route,body});return {token:'opaque-test-token',student:{name:'Test Student',studentId:'2510004-1'},serverNow:Date.now(),expiresAt:Date.now()+1800000};};
+  await f.controller.open();
+  assert.deepEqual(f.calls[0].body,{});
+  assert.doesNotMatch(f.controller.dialog.innerHTML,/<select/);
+  assert.match(f.controller.field('[data-qr-countdown]').textContent,/New QR in 30:00/);
+  const labels=[],rects=[];let link;
+  const original=f.document.createElement;
+  f.document.createElement=tag=>tag==='canvas'?{getContext:()=>({fillRect:(...args)=>rects.push(args),fillText:text=>labels.push(text)}),toDataURL:()=> 'data:image/png;base64,PNGDATA'}:tag==='a'?(link={click(){this.clicked=true;},remove(){}}):original(tag);
+  await f.controller.download();assert.equal(link.download,'Presence-QR-2510004-1.png');assert.equal(link.clicked,true);
+  assert.ok(labels.includes('Test Student'));assert.ok(labels.includes('2510004-1'));assert.ok(labels.some(text=>text.startsWith('Expires:')));assert.ok(rects.length>10);
+  f.controller.close();await f.controller.open();assert.equal(f.calls.length,1,'reopening must not renew a still-valid code');
+  f.controller.dispose();assert.equal(f.intervals.size,0);
+});
+
+
+test('visible QR automatically renews on expiry and never downloads an expired code', async()=>{
+  const f=await browserFixture(false), originalNow=Date.now;let clock=originalNow(), requests=0;
+  Date.now=()=>clock;f.window.qrcode=require('qrcode-generator');
+  f.controller.api.call=async()=>{requests++;return {token:'token-'+requests,student:{name:'Test Student',studentId:'123'},serverNow:clock,expiresAt:clock+1800000};};
+  try {
+    await f.controller.open();const data=f.controller.downloadData;
+    clock+=1800000;
+    await f.controller.download();assert.equal(f.controller.downloading,undefined);
+    assert.match(f.controller.field('[data-qr-status]').textContent,/expired/);
+    [...f.intervals.values()][0]();await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(requests,2);assert.notEqual(f.controller.downloadData,data);
+    assert.match(f.controller.field('[data-qr-countdown]').textContent,/30:00/);
+    f.controller.close();assert.equal(f.intervals.size,0);
+  } finally {Date.now=originalNow;f.controller.dispose();}
 });

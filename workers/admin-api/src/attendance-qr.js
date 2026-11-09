@@ -47,29 +47,33 @@ export class AttendanceQrService {
       || (action === 'in' && event.checkoutOnlyReopened === true)) throw new SafeError(409, 'The selected attendance window is closed.');
   }
   async issue(claims, body) {
-    if (Object.keys(body).some(key => key !== 'eventId') || !validEvent(body.eventId)) throw new SafeError(400, 'Choose a current event session.');
+    if (Object.keys(body).some(key => key !== 'eventId') || (body.eventId !== undefined && !validEvent(body.eventId))) throw new SafeError(400, 'Choose a current event session.');
     await new ResetService(this.db, this.now).authenticate(claims);
-    let token, expiresAt;
+    let token, expiresAt, student;
     await this.db.transaction(async get => {
-      const profile = await (get.qrStudent ? get.qrStudent(claims.sub) : get('students/' + claims.sub)), event = await get('events/' + body.eventId);
+      const profile = await (get.qrStudent ? get.qrStudent(claims.sub) : get('students/' + claims.sub)), event = body.eventId ? await get('events/' + body.eventId) : null;
       const active = await get('accountSessions/' + claims.sub), limit = await get('attendanceQrLimits/issue_' + claims.sub);
       const agreement = await get(PolicyAgreementPolicy.path(claims.sub).join('/'));
       this.student(profile, sessionAuthTime(claims));
       if (!PolicyAgreementPolicy.accepted(agreement, claims.sub)) throw new SafeError(403, PolicyAgreementPolicy.message);
       if (!claims.presenceSession || active?.sessionId !== claims.presenceSession) throw new SafeError(401, 'Sign in again to display your attendance QR.');
-      if (event?.checkoutOnlyReopened === true) {
-        const record = await get('attendance/' + claims.sub + '_' + body.eventId);
-        if (!record?.checkedInAt || record.status !== 'checked-in') throw new SafeError(409, 'A saved check-in is required for this reopened checkout.');
-        this.window(event, 'out');
-      } else this.window(event, 'in');
-      if (!EventAudiencePolicy.canAttend({ ...profile, uid: claims.sub }, event)) throw new SafeError(403, 'You are not assigned to this event.');
+      // Retain event-bound issuance for installed older APKs. New clients use identity QR.
+      if (body.eventId) {
+        if (event?.checkoutOnlyReopened === true) {
+          const record = await get('attendance/' + claims.sub + '_' + body.eventId);
+          if (!record?.checkedInAt || record.status !== 'checked-in') throw new SafeError(409, 'A saved check-in is required for this reopened checkout.');
+          this.window(event, 'out');
+        } else this.window(event, 'in');
+        if (!EventAudiencePolicy.canAttend({ ...profile, uid: claims.sub }, event)) throw new SafeError(403, 'You are not assigned to this event.');
+      }
       const now = this.now(), fresh = limit && now - limit.windowStart < 60000, count = fresh ? limit.count : 0;
       if (count >= 10) throw new SafeError(429, 'Wait one minute before generating another QR.');
-      expiresAt = Math.min(now + TTL, +new Date(event.checkOutClosesAt));
-      token = await this.seal({ kind: 'student', uid: claims.sub, eventId: body.eventId, session: active.sessionId, authTime: sessionAuthTime(claims), iat: now, exp: expiresAt });
+      expiresAt = body.eventId ? Math.min(now + TTL, +new Date(event.checkOutClosesAt)) : now + TTL;
+      student = { name: name(profile), studentId: profile.accountId };
+      token = await this.seal({ kind: 'student', uid: claims.sub, ...(body.eventId ? { eventId: body.eventId } : { scope: 'identity' }), session: active.sessionId, authTime: sessionAuthTime(claims), iat: now, exp: expiresAt });
       return [this.db.write('attendanceQrLimits/issue_' + claims.sub, { windowStart: fresh ? limit.windowStart : now, count: count + 1 })];
     });
-    return { token, expiresAt, serverNow: this.now() };
+    return { token, expiresAt, serverNow: this.now(), student };
   }
   async actor(claims) {
     const user = await new ResetService(this.db, this.now).authenticate(claims);
@@ -84,7 +88,7 @@ export class AttendanceQrService {
     const agreement = await get(PolicyAgreementPolicy.path(qr.uid).join('/'));
     this.student(profile, qr.authTime);
     if (!PolicyAgreementPolicy.accepted(agreement, qr.uid)) throw new SafeError(403, PolicyAgreementPolicy.message);
-    if (qr.uid === claims.sub || qr.eventId !== eventId) throw new SafeError(403, 'This QR belongs to another event or cannot be scanned by its owner.');
+    if (qr.uid === claims.sub || (qr.scope !== 'identity' && qr.eventId !== eventId)) throw new SafeError(403, 'This QR belongs to another event or cannot be scanned by its owner.');
     if (studentSession?.sessionId !== qr.session || !claims.presenceSession || actorSession?.sessionId !== claims.presenceSession) throw new SafeError(401, 'The student or scanner session changed. Sign in and scan again.');
     if (!isSuperAuthority(claims, actor.user) && !(actorProfile?.active === true && ['head_admin', 'attendance_admin'].includes(actorProfile.role))) throw new SafeError(403, 'Attendance scanning permission is required.');
     this.window(event, action);

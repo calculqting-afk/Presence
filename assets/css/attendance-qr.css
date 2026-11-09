@@ -13,3 +13,5 @@
 @media(max-width:600px){.attendance-qr-dialog{padding:20px;max-height:92dvh}.attendance-qr-dialog .button-row button{flex:1}.attendance-qr-person{align-items:flex-start}}
 
 .attendance-qr-page{width:min(640px,100%);max-height:none;margin:0 auto;overflow:visible}.attendance-qr-page [data-qr-refresh]{display:block;margin:0 auto}.attendance-qr-page .attendance-qr-controls{grid-template-columns:minmax(0,1fr)}
+
+.attendance-qr-identity,.attendance-qr-countdown{text-align:center;font-weight:700}.attendance-qr-countdown{font-size:1.2rem}.attendance-qr-page .button-row{justify-content:center}

@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
     @Override public void onCreate(Bundle savedInstanceState) {
         registerPlugin(AttendancePdfPlugin.class);
         registerPlugin(AttendanceSpreadsheetPlugin.class);
+        registerPlugin(AttendanceQrImagePlugin.class);
         super.onCreate(savedInstanceState);
     }
 

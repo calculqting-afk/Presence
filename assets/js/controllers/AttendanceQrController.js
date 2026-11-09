@@ -27,8 +27,7 @@ export class AttendanceQrController {
       this.close();
       if (this.visible && !this.document.hidden) void this.open();
     };
-    this.onEvents = () => this.refreshStudentEvents();
-    if (this.page) this.window.addEventListener('presence:qr-events-changed', this.onEvents);
+
     this.window.addEventListener('presence:viewchange', this.onView);
     return this;
   }
@@ -47,11 +46,11 @@ export class AttendanceQrController {
     dialog.setAttribute('aria-labelledby', 'attendanceQrTitle');
     dialog.innerHTML = `<header><img src="../assets/images/presence-logo.png" alt="" width="40" height="40">${this.page ? '' : '<button class="outline-button" type="button" data-qr-close aria-label="Close attendance QR">×</button>'}</header>
       <h2 id="attendanceQrTitle">${this.admin ? 'Scan student QR' : 'My Attendance QR'}</h2>
-      <p>${this.admin ? 'Choose the session and action. Scan, verify the student in person, then confirm.' : 'Show this QR to an Attendance Admin at the venue. It works only for the selected session and refreshes every 30 minutes.'}</p>
-      <div class="attendance-qr-controls"><label>Event / session<select data-qr-event>${events.length ? events.map(event => `<option value="${e(event.id)}">${e(AttendanceViews.title(event))} · ${e(AttendanceViews.label(event))} · ${e(event.date)}</option>`).join('') : '<option value="">No current eligible sessions</option>'}</select></label>
-      ${this.admin ? '<label>Action<select data-qr-action><option value="in">Check-in</option><option value="out">Check-out</option></select></label>' : ''}</div>
+      <p>${this.admin ? 'Choose the session and action. Scan, verify the student in person, then confirm.' : 'Show this QR to an attendance administrator. They choose the event and verify you in person.'}</p>
+      ${this.admin ? `<div class="attendance-qr-controls"><label>Event / session<select data-qr-event>${events.length ? events.map(event => `<option value="${e(event.id)}">${e(AttendanceViews.title(event))} · ${e(AttendanceViews.label(event))} · ${e(event.date)}</option>`).join('') : '<option value="">No current eligible sessions</option>'}</select></label>
+      <label>Action<select data-qr-action><option value="in">Check-in</option><option value="out">Check-out</option></select></label></div>` : '<p class="attendance-qr-identity" data-qr-identity></p>'}
       <p data-qr-status role="status" aria-live="polite"></p>
-      ${this.admin ? '<video data-qr-video autoplay playsinline muted hidden aria-label="QR scanner camera"></video><button class="primary-button" type="button" data-qr-camera>Start camera</button><section data-qr-confirmation hidden></section>' : '<div class="attendance-qr-code" data-qr-code></div><p data-qr-countdown></p><button class="outline-button" type="button" data-qr-refresh>Refresh QR</button>'}`;
+      ${this.admin ? '<video data-qr-video autoplay playsinline muted hidden aria-label="QR scanner camera"></video><button class="primary-button" type="button" data-qr-camera>Start camera</button><section data-qr-confirmation hidden></section>' : '<p data-qr-countdown class="attendance-qr-countdown" role="timer" aria-live="off"></p><div class="attendance-qr-code" data-qr-code></div><p>Downloaded codes expire too. Keep your QR private.</p><div class="button-row"><button class="primary-button" type="button" data-qr-download disabled>Download QR</button><button class="outline-button" type="button" data-qr-refresh>Retry</button></div>'}`;
     this.dialog = dialog;
     this.field = selector => dialog.querySelector(selector);
     const closeButton = this.field('[data-qr-close]');
@@ -59,29 +58,22 @@ export class AttendanceQrController {
     dialog.addEventListener('cancel', event => { event.preventDefault(); this.close(); });
     dialog.addEventListener('close', () => { if (this.dialog === dialog) this.close(); });
     const changed = () => { this.reset(); if (!this.admin) void this.generate(); };
-    this.field('[data-qr-event]').onchange = changed;
     if (this.admin) {
+      this.field('[data-qr-event]').onchange = changed;
       this.field('[data-qr-action]').onchange = changed;
       this.field('[data-qr-camera]').onclick = () => void this.startCamera();
-    } else this.field('[data-qr-refresh]').onclick = () => void this.generate();
+    } else {
+      this.field('[data-qr-refresh]').onclick = () => void this.generate();
+      this.field('[data-qr-download]').onclick = () => void this.download();
+    }
     if (this.page) this.page.replaceChildren(dialog);
     else {
       this.document.body.setAttribute('data-attendance-qr', '');
       this.document.body.append(dialog);
       dialog.showModal();
     }
-    if (this.page) this.eventTimer = this.window.setInterval(() => this.refreshStudentEvents(), 30000);
-    if (!events.length) this.status('No current eligible attendance session is available.');
-    else if (!this.admin) await this.generate();
-  }
-  refreshStudentEvents() {
-    if (!this.page || !this.dialog || !this.visible || this.document.hidden) return;
-    const select = this.field('[data-qr-event]'), previous = select.value;
-    const events = this.currentEvents(), e = this.escapeHtml;
-    select.innerHTML = events.length ? events.map(event => `<option value="${e(event.id)}">${e(AttendanceViews.title(event))} · ${e(AttendanceViews.label(event))} · ${e(event.date)}</option>`).join('') : '<option value="">No current eligible sessions</option>';
-    if (events.some(event => event.id === previous)) select.value = previous;
-    if (!events.length) { this.reset(); this.status('No current eligible attendance session is available.'); }
-    else if (select.value !== previous) void this.generate();
+    if (!this.admin) await this.generate();
+    else if (!events.length) this.status('No current eligible attendance session is available.');
   }
   status(message, error = false) {
     if (!this.dialog) return;
@@ -89,14 +81,15 @@ export class AttendanceQrController {
     element.textContent = message;
     element.classList.toggle('is-error', error);
   }
-  selection() { return { eventId: this.field('[data-qr-event]').value, action: this.field('[data-qr-action]')?.value || 'in' }; }
+  selection() { return { eventId: this.field('[data-qr-event]')?.value, action: this.field('[data-qr-action]')?.value || 'in' }; }
   reset() {
     ++this.generation;
     this.stopCamera();
     this.window.clearInterval(this.expiryTimer);
     this.expiryTimer = undefined;
-    this.preview = null;
+    this.preview = null; this.downloadData = null;
     if (!this.dialog) return;
+    const download = this.field('[data-qr-download]'); if (download) download.disabled = true;
     for (const selector of ['[data-qr-code]', '[data-qr-countdown]', '[data-qr-confirmation]']) {
       const element = this.field(selector); if (element) { element.replaceChildren(); if (selector.includes('confirmation')) element.hidden = true; }
     }
@@ -107,33 +100,78 @@ export class AttendanceQrController {
   async generate() {
     if (!this.dialog || this.generating) return;
     this.reset();
-    const { eventId } = this.selection(); if (!eventId) return;
     const generation = this.generation, dialog = this.dialog, button = this.field('[data-qr-refresh]');
     this.generating = true; button.disabled = true; this.status('Generating your secure QR…');
     try {
-      const [result, factory] = await Promise.all([
-        this.api.call('/v1/student/attendance-qr', this.getUser(), { eventId }),
+      const cached = this.cachedQr?.uid === this.getUser()?.uid && this.cachedQr.deadline > Date.now() ? this.cachedQr : null;
+      const [result, factory] = cached ? [cached.result, cached.factory] : await Promise.all([
+        this.api.call('/v1/student/attendance-qr', this.getUser(), {}),
         new QrCodeLoader({ document: this.document, window: this.window }).load()
       ]);
       if (this.dialog !== dialog || generation !== this.generation) return;
       const code = factory(0, 'M'); code.addData(result.token); code.make();
       this.field('[data-qr-code]').innerHTML = code.createSvgTag({ cellSize: 5, margin: 4, scalable: true });
       this.field('[data-qr-code] svg')?.setAttribute('aria-label', 'Temporary attendance QR');
-      const deadline = Date.now() + result.expiresAt - result.serverNow;
+      const deadline = cached?.deadline ?? Date.now() + result.expiresAt - result.serverNow;
+      this.cachedQr = { uid: this.getUser()?.uid, result, factory, deadline };
+      this.downloadData = { code, student: result.student, expiresAt: result.expiresAt, deadline };
+      this.field('[data-qr-identity]').textContent = `${result.student.name} · ${result.student.studentId}`;
+      this.field('[data-qr-download]').disabled = false;
       this.status('Ready to scan. Keep this QR private.');
       const tick = () => {
         const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-        this.field('[data-qr-countdown]').textContent = `Refreshes in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+        this.field('[data-qr-countdown]').textContent = `New QR in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
         if (!seconds) {
           this.window.clearInterval(this.expiryTimer); this.field('[data-qr-code]').replaceChildren();
-          if (this.currentEvents().some(event => event.id === eventId)) void this.generate();
-          else this.status('This session is closed.');
+          this.field('[data-qr-download]').disabled = true; this.downloadData = null;
+          if (!this.document.hidden) void this.generate();
         }
       };
       tick(); this.expiryTimer = this.window.setInterval(tick, 1000);
     } catch (error) { if (this.dialog === dialog && generation === this.generation) this.status(error.message, true); }
     finally { this.generating = false; if (this.dialog === dialog) button.disabled = false;
-      if (this.dialog && generation !== this.generation && !this.admin && this.selection().eventId) void this.generate(); }
+      if (this.dialog && generation !== this.generation && !this.admin && !this.document.hidden) void this.generate(); }
+  }
+  async download() {
+    const data = this.downloadData;
+    if (!data || data.deadline <= Date.now() || this.downloading) {
+      if (!this.downloading) this.status('Your QR expired. Wait for the new code.', true);
+      return;
+    }
+    const button = this.field('[data-qr-download]');
+    this.downloading = true; button.disabled = true;
+    try {
+      const canvas = this.document.createElement('canvas'), scale = 8, margin = 4;
+      const modules = data.code.getModuleCount(), size = (modules + margin * 2) * scale;
+      canvas.width = Math.max(640, size + 64); canvas.height = size + 230;
+      const context = canvas.getContext('2d');
+      if (!context) throw Error('Image download is unavailable on this device.');
+      context.fillStyle = '#fff'; context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = '#142742'; context.textAlign = 'center'; context.font = 'bold 26px sans-serif';
+      context.fillText('Presence · Attendance QR', canvas.width / 2, 42);
+      context.font = '22px sans-serif'; context.fillText(data.student.name, canvas.width / 2, 78, canvas.width - 48);
+      context.fillText(data.student.studentId, canvas.width / 2, 110);
+      const left = Math.floor((canvas.width - size) / 2) + margin * scale, top = 130 + margin * scale;
+      context.fillStyle = '#000';
+      for (let row = 0; row < modules; row++) for (let col = 0; col < modules; col++) {
+        if (data.code.isDark(row, col)) context.fillRect(left + col * scale, top + row * scale, scale, scale);
+      }
+      context.font = '18px sans-serif';
+      context.fillText('Expires: ' + new Date(data.expiresAt).toLocaleString('en-PH', { timeZone: 'Asia/Manila' }) + ' (PH)', canvas.width / 2, size + 170, canvas.width - 36);
+      context.fillText('Keep private. Show to an attendance administrator.', canvas.width / 2, size + 202, canvas.width - 36);
+      const filename = 'Presence-QR-' + data.student.studentId.replace(/[^A-Za-z0-9_-]/g, '-') + '.png';
+      const image = canvas.toDataURL('image/png');
+      if (this.window.PresenceNative?.isNative) {
+        if (!this.window.PresenceNative.attendanceQrImage?.save) throw Error('Update the APK to download QR images.');
+        const result = await this.window.PresenceNative.attendanceQrImage.save({ base64: image.split(',')[1], filename });
+        this.showToast(result.cancelled ? 'Download cancelled' : 'QR saved', result.cancelled ? 'No image was saved.' : 'The downloaded QR expires at the time shown on the image.');
+      } else {
+        const link = this.document.createElement('a'); link.href = image; link.download = filename;
+        this.document.body.append(link); link.click(); link.remove();
+        this.showToast('QR download started', 'The downloaded QR expires at the time shown on the image.');
+      }
+    } catch (error) { this.showToast('QR download unavailable', error.message); }
+    finally { this.downloading = false; if (this.downloadData === data && data.deadline > Date.now()) button.disabled = false; }
   }
   async decoder() {
     if (this.window.jsQR) return this.window.jsQR;
@@ -249,10 +287,11 @@ export class AttendanceQrController {
     if (dialog && !this.page) this.opener?.focus();
   }
   dispose() {
+    this.cachedQr = null;
     this.close(true); this.button?.removeEventListener('click', this.onOpen);
     this.document.removeEventListener('visibilitychange', this.onVisibility);
     this.window.removeEventListener('presence:attendance-qr-back', this.onBack);
     this.window.removeEventListener('presence:viewchange', this.onView);
-    this.window.removeEventListener('presence:qr-events-changed', this.onEvents);
+
   }
 }
