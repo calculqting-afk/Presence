@@ -375,7 +375,7 @@ service cloud.firestore {
     function validLocation(location) {
       return location is map
         && location.keys().hasOnly(["latitude", "longitude", "accuracy", "distanceMeters"])
-        && location.keys().hasAll(["latitude", "longitude", "distanceMeters"])
+        // Required fields are validated directly below; missing fields deny access.
         && location.latitude is number && location.latitude >= -90 && location.latitude <= 90
         && location.longitude is number && location.longitude >= -180 && location.longitude <= 180
         && (!("accuracy" in location) || (location.accuracy is number && location.accuracy >= 0 && location.accuracy <= 100000))
@@ -389,7 +389,7 @@ service cloud.firestore {
           "checkedInAt", "checkedOutAt", "status", "recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason",
           "arrivalRecalculatedAt", "arrivalRecalculatedBy", "arrivalRecalculationId", "arrivalRecalculationReason"
         ])
-        && data.keys().hasAll(["studentUid", "studentId", "eventId", "eventName", "eventType", "eventDescription", "eventDate", "timeIn", "timeOut", "location", "audience", "status"])
+        // Direct type checks and status branches below require each of these fields.
         && shortText(data.studentUid, 128) && shortText(data.studentId, 64) && shortText(data.eventId, 128)
         && shortText(data.eventName, 160) && shortText(data.eventType, 60) && shortText(data.eventDescription, 4000)
         && shortText(data.eventDate, 10) && shortText(data.timeIn, 5) && shortText(data.timeOut, 5)
@@ -476,12 +476,9 @@ service cloud.firestore {
         && eligibleForAttendance(event, student, request.auth.uid)
         && request.time >= event.openAt && request.time <= event.checkOutClosesAt
         && data.attendedAt == request.time && data.checkedInAt == request.time
-        && data.keys().hasAll(["arrivalStatus"])
-        && ((request.time < (("lateAfterAt" in event) ? event.lateAfterAt : event.checkInClosesAt)
-          && data.arrivalStatus == "present")
-          || (request.time >= (("lateAfterAt" in event) ? event.lateAfterAt : event.checkInClosesAt)
-            && data.arrivalStatus == "late"))
-        && data.status == "checked-in"
+        // validAttendance and the create branch already require arrivalStatus
+        // and status == checked-in before this function is evaluated.
+        && data.arrivalStatus == (request.time < event.get("lateAfterAt", event.checkInClosesAt) ? "present" : "late")
         && !data.keys().hasAny(["recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason", "arrivalRecalculatedAt", "arrivalRecalculatedBy", "arrivalRecalculationId", "arrivalRecalculationReason"])
         && !data.keys().hasAny(["checkedOutAt", "checkOutLocation"])
         && withinSparkGeofence(data, data.eventId, event);

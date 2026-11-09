@@ -8,8 +8,8 @@ android {
         applicationId "io.github.calculatingafk.presence"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 25
-        versionName "1.8.16"
+        versionCode 26
+        versionName "1.8.17"
         buildConfigField "boolean", "DISTRIBUTION_UPDATES", "false"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {

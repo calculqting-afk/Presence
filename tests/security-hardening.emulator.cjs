@@ -20,7 +20,7 @@ async function write(path,data,who='owner',allowed=true,mask){
 }
 async function read(path,who,allowed){const response=await fetch(base+'/'+path,{headers:{Authorization:'Bearer '+token(who)}});assert.equal(response.ok,allowed,path);await response.body?.cancel();}
 (async()=>{
-  const profile={uid,accountId:'SECURE-STUDENT',accountIdKey:'secure-student',firstName:'Dummy',lastName:'Student',birthday:'2005-01-01',course:'BS Info Tech',section:'2A',active:true,role:'student',createdAt:new Date(now-86400000)};
+  const profile={uid,accountId:'SECURE-STUDENT',accountIdKey:'secure-student',firstName:'Dummy',lastName:'Student',birthday:'2005-01-01',course:'BS Info Tech',section:'2A',active:true,role:'student',passwordResetRequired:false,passwordResetValidAfter:Math.floor(now/1000)-3600,createdAt:new Date(now-86400000)};
   await write('accountSessions/'+uid,{sessionId:'secure-session'});await write('students/'+uid,profile);await write('students/secure-manager',{active:true,role:'student_manager'});
   await write('faceRegistrations/'+uid,{registered:true},uid,false);
   await write('faceRegistrations/'+uid,{registered:true,driveFileId:'forged'},uid,false);
@@ -30,7 +30,7 @@ async function read(path,who,allowed){const response=await fetch(base+'/'+path,{
   await write('studentIds/secure-other',{studentId:'secure-other',uid:'other'});
   await read('studentIds/secure-other',uid,false);await read('studentIds/secure-other','secure-manager',true);
   const indexList=await fetch(base+'/studentIds',{headers:{Authorization:'Bearer '+token(uid)}});assert.equal(indexList.ok,false);await indexList.body?.cancel();
-  const event={name:'Secure attendance',type:'Assembly',description:'Dummy event',date:new Date(now+8*3600000).toISOString().slice(0,10),timeIn:'07:00',timeOut:'11:00',location:'Hall',audience:'All students',requiresGeofence:true,openAt:new Date(now-60000),checkInClosesAt:new Date(now+60000),closeAt:new Date(now-1000),checkOutClosesAt:new Date(now+3600000),attendanceRoster:{[uid]:'2B'}};
+  const event={name:'Secure attendance',type:'Assembly',description:'Dummy event',date:new Date(now+8*3600000).toISOString().slice(0,10),timeIn:'07:00',timeOut:'11:00',location:'Hall',audience:'Selected sections',audienceSections:['2A','2B'],rosterCapturedAt:new Date(now-86400000),requiresGeofence:true,openAt:new Date(now-60000),checkInClosesAt:new Date(now+60000),closeAt:new Date(now-1000),checkOutClosesAt:new Date(now+3600000),attendanceRoster:{[uid]:'2B'}};
   const area={type:'circle',enabled:true,latitude:10,longitude:124,radiusMeters:50};
   await write('events/security-event',event);await write('eventGeofences/security-event',area);
   const location={latitude:10,longitude:124,accuracy:5,distanceMeters:0};
@@ -42,10 +42,28 @@ async function read(path,who,allowed){const response=await fetch(base+'/'+path,{
   await write(proofPath,{...proof,location:{...location,latitude:11}});await write(path,record,uid,false);
   await write(proofPath,{...proof,geofence:{...area,radiusMeters:50000}});await write(path,record,uid,false);
   await write(proofPath,{...proof,expiresAt:new Date(now+3600000)});await write(path,record,uid,false);
+  const invalidLocation={...location,accuracy:-1};
+  await write(proofPath,{...proof,location:invalidLocation});
+  await write(path,{...record,checkInLocation:invalidLocation},uid,false);
+  for(const field of ['latitude','longitude','distanceMeters']) {
+    const missingLocation={...location};delete missingLocation[field];
+    await write(proofPath,{...proof,location:missingLocation});
+    await write(path,{...record,checkInLocation:missingLocation},uid,false);
+  }
+  await write(proofPath,proof);
+  for(const field of ['studentUid','studentId','eventId','eventName','eventType','eventDescription','eventDate','timeIn','timeOut','location','audience','status','arrivalStatus']) {
+    const missingField={...record};delete missingField[field];
+    await write(path,missingField,uid,false);
+  }
   await write(proofPath,proof);await read(proofPath,uid,false);await write(path,record,uid,true);
   await write(path,record,uid,false); // duplicate cannot replace the saved check-in
   const checkout={checkedOutAt:server,status:'completed',checkOutLocation:location};
   await write(path,checkout,uid,false,['checkedOutAt','status','checkOutLocation']);
+  await write('events/security-late',{...event,lateAfterAt:new Date(now-1000)});
+  await write('eventGeofences/security-late',area);
+  await write('attendanceLocationProofs/'+uid+'_security-late_in',{...proof,eventId:'security-late'});
+  await write('attendance/'+uid+'_security-late',{...record,eventId:'security-late',arrivalStatus:'present'},uid,false);
+  await write('attendance/'+uid+'_security-late',{...record,eventId:'security-late',arrivalStatus:'late'},uid,true);
   await write('attendanceLocationProofs/'+uid+'_security-event_out',{...proof,action:'out'});
   await write(path,checkout,uid,true,['checkedOutAt','status','checkOutLocation']);
   await write(path,checkout,uid,false,['checkedOutAt','status','checkOutLocation']);

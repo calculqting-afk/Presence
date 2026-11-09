@@ -699,6 +699,7 @@ export class AdminDashboard {
     dashboard.listen('presence-authority', ["modify-students"], collection(db, "accountSessions"), snapshot => {
       if (snapshot.metadata?.fromCache) return;
       dashboard.presenceAuthorityByUid = new Map(snapshot.docs.map(item => [item.id, item.data()]));
+      dashboard.refreshPresenceOnAuthorityChange?.();
       dashboard.scheduleStudentsRender();
     });
     dashboard.listen('legacy-presence', ["modify-students"], () => query(collection(db, "presence"), where('lastSeen', '>=', Timestamp.fromMillis(Date.now() - 135000))), snapshot => {
@@ -707,19 +708,7 @@ export class AdminDashboard {
     });
     if (D1_PRESENCE_ENABLED && dashboard.can('viewStudents')) {
       dashboard.presenceClient = new PresenceClient();
-      dashboard.subscriptions.register('d1-presence', ['modify-students'], (guard, onError) => {
-        let stopped = false, timer;
-        const poll = async () => {
-          if (stopped) return;
-          try {
-            if (!dashboard.document.hidden) await dashboard.refreshD1Presence(guard);
-          } catch (error) { if (!stopped) onError(error); }
-          // Serial polling prevents overlapping requests; leaving the view cancels it.
-          if (!stopped) timer = dashboard.window.setTimeout(poll, 60000);
-        };
-        void poll();
-        return () => { stopped = true; dashboard.window.clearTimeout(timer); };
-      });
+      dashboard.subscriptions.register('d1-presence', ['modify-students'], (guard, onError) => dashboard.watchD1Presence(guard, onError));
     }
     const attendanceOptions = {
       onRecords(records) {
@@ -1413,6 +1402,41 @@ export class AdminDashboard {
       nextPresence.set(session.studentUid, sessions);
     });
     dashboard.presenceByUid = nextPresence;
+  }
+  watchD1Presence(guard, onError) {
+    let stopped = false, timer, running = false, followups = 0;
+    const poll = async () => {
+      if (stopped || running) return;
+      running = true;
+      try {
+        if (!this.document.hidden) await this.refreshD1Presence(guard);
+      } catch (error) { if (!stopped) onError(error); }
+      finally {
+        running = false;
+        if (!stopped) {
+          // Device authority arrives before the student's first D1 heartbeat.
+          // Only session changes get short retries; idle polling stays at one minute.
+          const delay = followups > 0 ? (followups--, 2000) : 60000;
+          timer = this.window.setTimeout(poll, delay);
+        }
+      }
+    };
+    const changed = () => {
+      if (stopped) return;
+      followups = 2;
+      if (!running) {
+        this.window.clearTimeout(timer);
+        followups--;
+        timer = this.window.setTimeout(poll, 2000);
+      }
+    };
+    this.refreshPresenceOnAuthorityChange = changed;
+    void poll();
+    return () => {
+      stopped = true;
+      this.window.clearTimeout(timer);
+      if (this.refreshPresenceOnAuthorityChange === changed) this.refreshPresenceOnAuthorityChange = undefined;
+    };
   }
   async refreshD1Presence(guard = callback => callback) {
     const sessions = await this.presenceClient.list(currentUser);

@@ -2527,6 +2527,32 @@ test('student focus cannot resurrect presence after logout, auth loss or disposa
   await StudentDashboard.prototype.updatePresence.call(dashboard); assert.equal(writes, 1);
 });
 
+test('D1 live status refreshes after device changes without overlapping requests or polling after leaving', async () => {
+  const names = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared = Object.fromEntries(names.map(name => [name, () => '']));
+  const { AdminDashboard } = await isolatedModule('assets/js/admin/AdminDashboard.js', shared);
+  const timers = new Map(); let next = 0, reads = 0, finish;
+  const state = { document: { hidden: false }, window: {
+    setTimeout(callback, delay) { timers.set(++next, { callback, delay }); return next; },
+    clearTimeout(id) { timers.delete(id); }
+  }, refreshD1Presence: async () => { reads++; } };
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  const tick = async () => { const [id, timer] = timers.entries().next().value; timers.delete(id); await timer.callback(); };
+  const stop = AdminDashboard.prototype.watchD1Presence.call(state, callback => callback, error => assert.fail(error));
+  await flush(); assert.equal(reads, 1); assert.equal([...timers.values()][0].delay, 60000);
+  state.refreshPresenceOnAuthorityChange(); state.refreshPresenceOnAuthorityChange();
+  assert.equal(timers.size, 1); assert.equal([...timers.values()][0].delay, 2000);
+  await tick(); assert.equal(reads, 2); assert.equal([...timers.values()][0].delay, 2000);
+  await tick(); assert.equal(reads, 3); assert.equal([...timers.values()][0].delay, 60000);
+  state.refreshD1Presence = () => { reads++; return new Promise(resolve => { finish = resolve; }); };
+  const pending = tick(); state.refreshPresenceOnAuthorityChange();
+  assert.equal(reads, 4); assert.equal(timers.size, 0);
+  stop(); finish(); await pending;
+  assert.equal(timers.size, 0); assert.equal(state.refreshPresenceOnAuthorityChange, undefined);
+  const source = fs.readFileSync(path.join(root, 'assets/js/admin/AdminDashboard.js'), 'utf8');
+  assert.match(source, /presenceAuthorityByUid = new Map\(snapshot.docs.map\(item => \[item.id, item.data\(\)\]\)\);\s+dashboard.refreshPresenceOnAuthorityChange\?\.\(\)/);
+});
+
 test('presence expires without another write while another recent device remains online', async () => {
   const names = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
   const shared = Object.fromEntries(names.map(name => [name, () => '']));
