@@ -37,5 +37,12 @@ async function read(path,token,allowed){const result=await fetch(base+'/'+path,{
  await write('accountSessions/device-admin',{sessionId:next});
  await read('events/device-demo',jwt('device-admin',{superAdmin:true,presenceSession:old}),false);
  await read('events/device-demo',jwt('device-admin',{superAdmin:true,presenceSession:next}),true);
+ // Password sign-in alone does not regain an enrolled device's write authority.
+ const setupUid='first-login-device-dummy';
+ const setup={uid:setupUid,active:true,role:'student',firstName:'Dummy',lastName:'Student',mustChangePassword:true};
+ await write('students/'+setupUid,setup);await write('accountSessions/'+setupUid,{sessionId:old});
+ const completed={...setup,mustChangePassword:false,updatedAt:new Date()};
+ await write('students/'+setupUid,completed,jwt(setupUid),false);
+ await write('students/'+setupUid,completed,jwt(setupUid,{presenceSession:old,presenceAuthTime:now,firebase:{sign_in_provider:'custom'}}),true);
  console.log('Device session Rules passed: immutable server lock, active-token access, old-token/attendance denial, release, Super Admin enforcement, safe legacy rollout.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

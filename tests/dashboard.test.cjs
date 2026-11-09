@@ -2686,3 +2686,48 @@ test('unavailable session storage never breaks authentication feedback', async (
   assert.doesNotThrow(() => Feedback.save(storage, 'login', 'student'));
   assert.equal(Feedback.take(storage, 'login', 'student'), null);
 });
+
+
+test('first-login setup restores the device session before clearing its flag and reloads stale dashboard references', async () => {
+  const browser=fakeBrowser(),steps=[],toasts=[];
+  browser.document.body.hasAttribute=name=>name==='data-device-session-enabled';
+  const actor={uid:'student-1',email:'student-1@students.presence.local'};
+  const shared=birthdayOnboardingShared({auth:{currentUser:actor},currentUser:actor,
+    updatePassword:async(user)=>{assert.equal(user,actor);steps.push('password');},
+    setDoc:async()=>{assert.equal(steps.at(-1),'rebind');steps.push('profile');},showDashboardToast:(...args)=>toasts.push(args)});
+  const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
+  browser.document.querySelector('#requiredNewPassword').value='Personal!new42';browser.document.querySelector('#requiredConfirmPassword').value='Personal!new42';
+  const state={document:browser.document,window:{location:{reload:()=>steps.push('reload')}},studentProfile:shared.currentUserProfile,
+    completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),closeRequiredPasswordChangeModal:()=>steps.push('close'),
+    restorePasswordSession:async(email,password)=>{assert.equal(email,actor.email);assert.equal(password,'Personal!new42');steps.push('rebind');}};
+  await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});
+  assert.deepEqual(steps,['password','rebind','profile','close','reload']);assert.equal(toasts.at(-1)[0],'Password changed');
+});
+
+test('failed first-login session restoration keeps setup required and never writes its completion flag', async () => {
+  const browser=fakeBrowser(),toasts=[];let writes=0;
+  browser.document.body.hasAttribute=()=>true;
+  const actor={uid:'student-1',email:'student-1@students.presence.local'};
+  const shared=birthdayOnboardingShared({auth:{currentUser:actor},updatePassword:async()=>{},setDoc:async()=>writes++,showDashboardToast:(...args)=>toasts.push(args)});
+  const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
+  browser.document.querySelector('#requiredNewPassword').value='Personal!new42';browser.document.querySelector('#requiredConfirmPassword').value='Personal!new42';
+  const state={document:browser.document,studentProfile:shared.currentUserProfile,completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),
+    restorePasswordSession:async()=>{throw Error('device transferred');},closeRequiredPasswordChangeModal(){throw Error('must stay open');}};
+  await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});
+  assert.equal(writes,0);assert.equal(state.requiredPasswordChangeBusy,false);assert.match(toasts.at(-1)[1],/Sign in with the new password/);
+});
+
+test('password session restoration signs in with the new credential before binding and rejects account substitution', async () => {
+  const browser=fakeBrowser(),steps=[],auth={currentUser:{uid:'student-1'}};
+  let returnedUid='student-1';
+  const shared=birthdayOnboardingShared({auth,signInWithEmailAndPassword:async(instance,email,password)=>{
+    assert.equal(instance,auth);assert.equal(email,'student@example.test');assert.equal(password,'Personal!new42');steps.push('signin');return {user:{uid:returnedUid}};
+  }});
+  const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
+  const rebind=async user=>{steps.push('bind');return {...user,presenceSession:'same-installation'};};
+  const user=await StudentDashboard.prototype.restorePasswordSession.call({},'student@example.test','Personal!new42',{rebind});
+  assert.equal(user.uid,'student-1');assert.deepEqual(steps,['signin','bind']);
+  returnedUid='another-account';steps.length=0;
+  await assert.rejects(StudentDashboard.prototype.restorePasswordSession.call({},'student@example.test','Personal!new42',{rebind}),/account changed/);
+  assert.deepEqual(steps,['signin']);
+});

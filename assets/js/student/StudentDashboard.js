@@ -1033,6 +1033,17 @@ export class StudentDashboard {
     const dashboard = this;
     if (event.key === "Escape" && !dashboard.studentProfileModal.hidden) dashboard.closeStudentProfileModal();
   }
+  async restorePasswordSession(email, password, { rebind = user => DeviceSessionController.rebind(user) } = {}) {
+    const expectedUid = auth.currentUser?.uid;
+    if (!expectedUid || !email) throw new Error('Sign in again using your new password to finish setup.');
+    const credential = await signInAfterPasswordReset(auth, email, password);
+    if (credential.user?.uid !== expectedUid) throw new Error('Your account changed. Sign in again to finish setup.');
+    // A password update can replace the token used by Firestore. Re-establish
+    // the same installation's signed device authority before any profile write.
+    const user = await rebind(credential.user);
+    if (user?.uid !== expectedUid) throw new Error('Your device session could not be restored. Sign in again.');
+    return user;
+  }
   async handleRequiredPasswordChangeFormSubmit(event) {
     const dashboard = this;
     event.preventDefault();
@@ -1067,12 +1078,18 @@ export class StudentDashboard {
         dashboard.window.location.reload();
         return;
       } else {
-        await updatePassword(currentUser, newPassword);
+        const user = auth.currentUser || currentUser;
+        const email = user.email;
+        await updatePassword(user, newPassword);
         passwordUpdated = true;
-        await setDoc(doc(db, "students", currentUser.uid), { mustChangePassword: false, updatedAt: serverTimestamp() }, { merge: true });
+        if (dashboard.document.body.hasAttribute?.('data-device-session-enabled')) {
+          await dashboard.restorePasswordSession(email, newPassword);
+        }
+        await setDoc(doc(db, "students", user.uid), { mustChangePassword: false, updatedAt: serverTimestamp() }, { merge: true });
       }
       dashboard.closeRequiredPasswordChangeModal();
       showDashboardToast("Password changed", "Your new password is now active.");
+      if (dashboard.document.body.hasAttribute?.('data-device-session-enabled')) dashboard.window.location.reload();
     } catch (error) {
       const message = passwordUpdated ? "Your password was changed, but Presence could not finish setup. Sign in with the new password and retry after checking your connection and Firestore rules." : error.code === "auth/requires-recent-login" ? "Please sign out and sign in again, then create your new password immediately." : error.code === "auth/weak-password" ? "Use a stronger password with at least 8 characters." : error.message || "Your password could not be changed.";
       showDashboardToast("Unable to finish password change", message);

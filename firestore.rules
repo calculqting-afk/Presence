@@ -571,7 +571,16 @@ service cloud.firestore {
       allow update: if !protectedSuperAdminUid(studentUid)
         && !exists(/databases/$(database)/documents/studentIdCorrectionLocks/$(studentUid))
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["accountId", "accountIdKey", "authEmail", "uid"])
-        && ((isSuperAdmin() && recentAdminLogin()
+        // Complete first-login setup before evaluating the larger role/profile
+        // validators. Otherwise enrolled students can exhaust the expression
+        // budget before reaching this narrowly scoped owner-only permission.
+        && ((request.auth != null && request.auth.uid == studentUid
+          && resource.data.get("mustChangePassword", false) == true
+          && request.resource.data.mustChangePassword == false
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["mustChangePassword", "updatedAt"])
+          && request.resource.data.updatedAt is timestamp
+          && isStudent())
+        || (isSuperAdmin() && recentAdminLogin()
           && resource.data.get("passwordResetRequired", false) == false
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["role", "roleUpdatedAt", "roleUpdatedBy"])
           && request.resource.data.role in ["head_admin", "attendance_admin", "student_manager", "student"]
@@ -594,13 +603,7 @@ service cloud.firestore {
           && (!("photoDataUrl" in request.resource.data)
             || (request.resource.data.photoDataUrl is string
               && request.resource.data.photoDataUrl.size() <= 350000))
-          && request.resource.data.section in ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"])
-        || (isStudent()
-          && request.auth.uid == studentUid
-          && resource.data.mustChangePassword == true
-          && request.resource.data.mustChangePassword == false
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["mustChangePassword", "updatedAt"])
-          && request.resource.data.updatedAt is timestamp));
+          && request.resource.data.section in ["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"]));
     }
 
     // An event and its push outbox request are saved in one client batch. Only
