@@ -359,6 +359,7 @@ export class StudentDashboard {
         ...item.data()
       }));
       dashboard.eventsById = new Map(dashboard.events.map(event => [event.id, event]));
+      dashboard.window.dispatchEvent(new dashboard.window.CustomEvent('presence:qr-events-changed'));
       dashboard.openPushEvent?.();
       dashboard.correctionRequests?.render();
       dashboard.metrics?.finish('events-first-data');

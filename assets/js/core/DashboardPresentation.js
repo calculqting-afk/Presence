@@ -5,6 +5,7 @@ const pageCopy = {
   student: {
     dashboard: ["Dashboard", "Your attendance at a glance"],
     events: ["Announcements & Events", "Clear descriptions and attendance schedules"],
+    "attendance-qr": ["My Attendance QR", "Show your QR to an attendance administrator"],
     attendances: ["My Attendances", "Your check-in and check-out records"],
     history: ["Event History", "Completed events and attendance records"],
     surveys: ["My Surveys", "Answer and resume your event surveys"],

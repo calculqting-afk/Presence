@@ -11,3 +11,5 @@
 .attendance-qr-person{display:flex;gap:16px;align-items:center}.attendance-qr-person img{width:80px;height:80px;object-fit:cover;border-radius:16px}.attendance-qr-person p{margin:4px 0}.attendance-qr-person [data-qr-photo]{max-width:100px;font-size:.8rem;color:var(--muted)}
 .attendance-qr-verify{display:flex;align-items:center;gap:10px;margin:18px 0}.attendance-qr-verify input{width:20px;height:20px;flex-shrink:0}.attendance-qr-dialog .button-row{display:flex;gap:10px;flex-wrap:wrap}
 @media(max-width:600px){.attendance-qr-dialog{padding:20px;max-height:92dvh}.attendance-qr-dialog .button-row button{flex:1}.attendance-qr-person{align-items:flex-start}}
+
+.attendance-qr-page{width:min(640px,100%);max-height:none;margin:0 auto;overflow:visible}.attendance-qr-page [data-qr-refresh]{display:block;margin:0 auto}.attendance-qr-page .attendance-qr-controls{grid-template-columns:minmax(0,1fr)}

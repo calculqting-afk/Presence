@@ -36,6 +36,7 @@
       <nav class="nav-list" aria-label="Student navigation">
         <button class="nav-button active" data-view="dashboard" type="button"><span class="nav-icon">⊞</span><span>Dashboard</span></button>
         <button class="nav-button" data-view="events" type="button"><span class="nav-icon">◇</span><span>Events</span></button>
+        <button class="nav-button" data-view="attendance-qr" type="button"><span class="nav-icon" aria-hidden="true">▦</span><span>My Attendance QR</span></button>
         <button class="nav-button" data-view="attendances" type="button"><span class="nav-icon">✓</span><span>My Attendances</span></button>
         <button class="nav-button" data-view="history" type="button"><span class="nav-icon">◷</span><span>Event History</span></button>
         <button class="nav-button" data-view="fines" type="button"><span class="nav-icon">!</span><span>Fines</span><span class="fine-warning-indicator" id="studentFineWarning" role="status" aria-label="Pending community service" hidden>!!</span></button>
@@ -99,10 +100,12 @@
 
         <section class="view-section" data-section="events" hidden>
           <div class="section-head"><div><p class="eyebrow">School updates</p><h2>Announcements &amp; Events</h2><p>Read announcements and view upcoming attendance schedules.</p></div></div>
-          <div class="button-row"><button class="outline-button" id="openStudentAttendanceQr" type="button" hidden>My Attendance QR</button></div>
           <div class="event-grid" id="studentEventGrid"><div class="empty-state panel event-empty">No events have been published yet.</div></div>
         </section>
 
+        <section class="view-section" data-section="attendance-qr" hidden>
+          <div id="studentAttendanceQrPanel"></div>
+        </section>
         <section class="view-section" data-section="attendances" hidden>
           <div class="section-head attendance-section-head"><h2>Your attendance</h2><details class="attendance-help" id="studentAttendanceHelp"><summary aria-label="Attendance help"><span aria-hidden="true">i</span></summary><div class="attendance-help-content"><strong>About your attendance</strong><p>Use the filters to find your saved check-ins and checkouts.</p><p>A missed checkout needs administrative review. It does not automatically create an absence or fine.</p></div></details></div>
           <div class="student-attendance-tabs" role="group" aria-label="Attendance view"><button class="outline-button active" type="button" data-attendance-tab="records" aria-pressed="true" aria-controls="studentAttendanceRecordsPanel">Records</button><button class="outline-button" type="button" data-attendance-tab="summary" aria-pressed="false" aria-controls="studentAttendanceSummary">Summary</button></div>

@@ -229,3 +229,28 @@ test('an unconfirmed save error resets the preview and tells the admin to check 
   assert.match(f.controller.field('[data-qr-status]').textContent, /Scan again to check the saved status/);
   assert.equal(f.controller.confirming, false);
 });
+
+
+test('student QR navigation renders inline only while its page is visible and clears timers on exit', async () => {
+  const f=await browserFixture(false);let generated=0;
+  f.controller.generate=async()=>{generated++;};
+  assert.equal(f.calls.length,0);assert.equal(f.controller.dialog,undefined);
+  f.controller.onView({detail:{viewName:'attendance-qr'}});
+  assert.equal(generated,1);assert.match(f.controller.dialog.className,/attendance-qr-page/);
+  assert.equal(f.controller.dialog.open,undefined,'student QR is a page, not a modal');
+  assert.equal(f.document.body.children.length,0);assert.equal(f.intervals.size,1);
+  f.controller.onView({detail:{viewName:'events'}});
+  assert.equal(f.controller.dialog,null);assert.equal(f.intervals.size,0);
+  f.controller.onEvents();assert.equal(generated,1);
+  f.controller.onView({detail:{viewName:'attendance-qr'}});assert.equal(generated,2);
+  f.document.hidden=true;f.controller.onVisibility();assert.equal(f.intervals.size,0);
+  f.document.hidden=false;f.controller.onVisibility();assert.equal(generated,3);
+  f.controller.dispose();assert.equal(f.intervals.size,0);
+});
+
+test('student QR has its own navigation and section instead of an Events shortcut', async () => {
+  const fs=await import('node:fs');
+  const html=fs.readFileSync(require('node:path').join(__dirname, '../pages/student-dashboard.html'),'utf8');
+  assert.match(html,/data-view="attendance-qr"/);assert.match(html,/data-section="attendance-qr"/);
+  assert.doesNotMatch(html,/id="openStudentAttendanceQr"/);
+});

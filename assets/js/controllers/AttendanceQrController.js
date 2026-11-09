@@ -10,15 +10,25 @@ export class AttendanceQrController {
   }
   initialize() {
     this.button = this.document.querySelector(this.admin ? '#openAttendanceQrScanner' : '#openStudentAttendanceQr');
-    if (!this.button) return this;
-    this.button.hidden = false;
+    this.page = !this.admin && this.document.querySelector('#studentAttendanceQrPanel');
+    if (!this.button && !this.page) return this;
+    if (this.button) this.button.hidden = false;
     this.onOpen = () => void this.open();
-    this.button.addEventListener('click', this.onOpen);
-    this.onVisibility = () => { if (this.document.hidden) { this.stopCamera(); this.close(); } };
+    this.button?.addEventListener('click', this.onOpen);
+    this.onVisibility = () => {
+      if (this.document.hidden) { this.stopCamera(); this.close(); }
+      else if (this.page && this.visible) void this.open();
+    };
     this.document.addEventListener('visibilitychange', this.onVisibility);
     this.onBack = () => this.close();
     this.window.addEventListener('presence:attendance-qr-back', this.onBack);
-    this.onView = () => this.close();
+    this.onView = event => {
+      this.visible = this.page && event.detail.viewName === 'attendance-qr';
+      this.close();
+      if (this.visible && !this.document.hidden) void this.open();
+    };
+    this.onEvents = () => this.refreshStudentEvents();
+    if (this.page) this.window.addEventListener('presence:qr-events-changed', this.onEvents);
     this.window.addEventListener('presence:viewchange', this.onView);
     return this;
   }
@@ -32,10 +42,10 @@ export class AttendanceQrController {
     this.close();
     const e = this.escapeHtml, events = this.currentEvents();
     this.opener = this.document.activeElement;
-    const dialog = this.document.createElement('dialog');
-    dialog.className = 'attendance-qr-dialog';
+    const dialog = this.document.createElement(this.page ? 'article' : 'dialog');
+    dialog.className = 'attendance-qr-dialog' + (this.page ? ' attendance-qr-page panel' : '');
     dialog.setAttribute('aria-labelledby', 'attendanceQrTitle');
-    dialog.innerHTML = `<header><img src="../assets/images/presence-logo.png" alt="" width="40" height="40"><button class="outline-button" type="button" data-qr-close aria-label="Close attendance QR">×</button></header>
+    dialog.innerHTML = `<header><img src="../assets/images/presence-logo.png" alt="" width="40" height="40">${this.page ? '' : '<button class="outline-button" type="button" data-qr-close aria-label="Close attendance QR">×</button>'}</header>
       <h2 id="attendanceQrTitle">${this.admin ? 'Scan student QR' : 'My Attendance QR'}</h2>
       <p>${this.admin ? 'Choose the session and action. Scan, verify the student in person, then confirm.' : 'Show this QR to an Attendance Admin at the venue. It works only for the selected session and refreshes every 30 minutes.'}</p>
       <div class="attendance-qr-controls"><label>Event / session<select data-qr-event>${events.length ? events.map(event => `<option value="${e(event.id)}">${e(AttendanceViews.title(event))} · ${e(AttendanceViews.label(event))} · ${e(event.date)}</option>`).join('') : '<option value="">No current eligible sessions</option>'}</select></label>
@@ -44,7 +54,8 @@ export class AttendanceQrController {
       ${this.admin ? '<video data-qr-video autoplay playsinline muted hidden aria-label="QR scanner camera"></video><button class="primary-button" type="button" data-qr-camera>Start camera</button><section data-qr-confirmation hidden></section>' : '<div class="attendance-qr-code" data-qr-code></div><p data-qr-countdown></p><button class="outline-button" type="button" data-qr-refresh>Refresh QR</button>'}`;
     this.dialog = dialog;
     this.field = selector => dialog.querySelector(selector);
-    this.field('[data-qr-close]').onclick = () => this.close();
+    const closeButton = this.field('[data-qr-close]');
+    if (closeButton) closeButton.onclick = () => this.close();
     dialog.addEventListener('cancel', event => { event.preventDefault(); this.close(); });
     dialog.addEventListener('close', () => { if (this.dialog === dialog) this.close(); });
     const changed = () => { this.reset(); if (!this.admin) void this.generate(); };
@@ -53,11 +64,24 @@ export class AttendanceQrController {
       this.field('[data-qr-action]').onchange = changed;
       this.field('[data-qr-camera]').onclick = () => void this.startCamera();
     } else this.field('[data-qr-refresh]').onclick = () => void this.generate();
-    this.document.body.setAttribute('data-attendance-qr', '');
-    this.document.body.append(dialog);
-    dialog.showModal();
+    if (this.page) this.page.replaceChildren(dialog);
+    else {
+      this.document.body.setAttribute('data-attendance-qr', '');
+      this.document.body.append(dialog);
+      dialog.showModal();
+    }
+    if (this.page) this.eventTimer = this.window.setInterval(() => this.refreshStudentEvents(), 30000);
     if (!events.length) this.status('No current eligible attendance session is available.');
     else if (!this.admin) await this.generate();
+  }
+  refreshStudentEvents() {
+    if (!this.page || !this.dialog || !this.visible || this.document.hidden) return;
+    const select = this.field('[data-qr-event]'), previous = select.value;
+    const events = this.currentEvents(), e = this.escapeHtml;
+    select.innerHTML = events.length ? events.map(event => `<option value="${e(event.id)}">${e(AttendanceViews.title(event))} · ${e(AttendanceViews.label(event))} · ${e(event.date)}</option>`).join('') : '<option value="">No current eligible sessions</option>';
+    if (events.some(event => event.id === previous)) select.value = previous;
+    if (!events.length) { this.reset(); this.status('No current eligible attendance session is available.'); }
+    else if (select.value !== previous) void this.generate();
   }
   status(message, error = false) {
     if (!this.dialog) return;
@@ -218,15 +242,17 @@ export class AttendanceQrController {
   close(force = false) {
     if (this.confirming && !force) { this.status('Please wait while attendance is saved.'); return; }
     this.reset();
+    this.window.clearInterval(this.eventTimer); this.eventTimer = undefined;
     const dialog = this.dialog; this.dialog = null;
-    if (dialog) { dialog.close(); dialog.remove(); }
+    if (dialog) { dialog.close?.(); dialog.remove(); }
     this.document.body.removeAttribute('data-attendance-qr');
-    if (dialog) this.opener?.focus();
+    if (dialog && !this.page) this.opener?.focus();
   }
   dispose() {
     this.close(true); this.button?.removeEventListener('click', this.onOpen);
     this.document.removeEventListener('visibilitychange', this.onVisibility);
     this.window.removeEventListener('presence:attendance-qr-back', this.onBack);
     this.window.removeEventListener('presence:viewchange', this.onView);
+    this.window.removeEventListener('presence:qr-events-changed', this.onEvents);
   }
 }
