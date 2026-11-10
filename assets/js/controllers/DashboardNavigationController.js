@@ -80,6 +80,10 @@ export class DashboardNavigationController {
         label: 'Logging out…',
         successLabel: 'Logged out',
         action: async () => {
+          const subscriptions = sessionState.dashboard?.dashboard?.subscriptions;
+          // Invalidate listener callbacks before ending database access. Keep
+          // the current view available to restore if logout fails.
+          subscriptions?.pause();
           try {
             if (dashboardRole === "student") await endPresenceSession({
               user: currentUser, state: sessionState, window: dashboard.window, storage: dashboard.sessionStorage,
@@ -92,7 +96,7 @@ export class DashboardNavigationController {
               Promise.resolve().then(() => clearPhoneReminders())
             ]));
             if (sessionState.mediaStream) sessionState.mediaStream.getTracks().forEach(track => track.stop());
-            await DeviceSessionController.release(auth.currentUser);
+            await DeviceSessionController.release(auth.currentUser, { window: dashboard.window });
             await signOut(auth);
             try {
               dashboard.sessionStorage.removeItem("presenceSession");
@@ -103,6 +107,7 @@ export class DashboardNavigationController {
             sessionState.dashboard?.dispose();
             dashboard.window.location.replace("../index.html");
           } catch (error) {
+            if (auth.currentUser) subscriptions?.resume();
             // A failed server release leaves the account signed in. Resume its
             // heartbeat so the visible status does not falsely report logout.
             if (auth.currentUser && dashboardRole === 'student') {

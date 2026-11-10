@@ -31,7 +31,7 @@ export class AttendanceQrController {
     this.window.addEventListener('presence:viewchange', this.onView);
     this.onSigningOut = () => {
       this.cachedQr = null;
-      try { this.window.sessionStorage?.removeItem('presence.attendanceQr.v1'); } catch {}
+      try { this.window.sessionStorage?.removeItem('presence.attendanceQr.v2'); } catch {}
       if (!this.admin) this.close(true);
     };
     this.window.addEventListener('presence:device-signing-out', this.onSigningOut);
@@ -48,15 +48,15 @@ export class AttendanceQrController {
     const e = this.escapeHtml, events = this.currentEvents();
     this.opener = this.document.activeElement;
     const dialog = this.document.createElement(this.page ? 'article' : 'dialog');
-    dialog.className = 'attendance-qr-dialog' + (this.page ? ' attendance-qr-page panel' : '');
+    dialog.className = 'attendance-qr-dialog' + (!this.admin ? ' attendance-qr-student' : '') + (this.page ? ' attendance-qr-page panel' : '');
     dialog.setAttribute('aria-labelledby', 'attendanceQrTitle');
-    dialog.innerHTML = `<header><img src="../assets/images/presence-logo.png" alt="" width="40" height="40">${this.page ? '' : '<button class="outline-button" type="button" data-qr-close aria-label="Close attendance QR">×</button>'}</header>
-      <h2 id="attendanceQrTitle">${this.admin ? 'Scan student QR' : 'My Attendance QR'}</h2>
-      <p>${this.admin ? 'Choose the session and action. Scan, verify the student in person, then confirm.' : 'Show this QR to an attendance administrator. They choose the event and verify you in person.'}</p>
+    dialog.innerHTML = `<header><img src="../assets/images/presence-logo.png" alt="" width="40" height="40">${this.admin ? '' : '<h2 id="attendanceQrTitle">My Attendance QR</h2>'}${this.page ? '' : '<button class="outline-button" type="button" data-qr-close aria-label="Close attendance QR">×</button>'}</header>
+      ${this.admin ? '<h2 id="attendanceQrTitle">Scan student QR</h2>' : ''}
+      <p>${this.admin ? 'Choose the session and action. Scan, verify the student in person, then confirm.' : 'Show your QR to an attendance administrator for verification.'}</p>
       ${this.admin ? `<div class="attendance-qr-controls"><label>Event / session<select data-qr-event>${events.length ? events.map(event => `<option value="${e(event.id)}">${e(AttendanceViews.title(event))} · ${e(AttendanceViews.label(event))} · ${e(event.date)}</option>`).join('') : '<option value="">No current eligible sessions</option>'}</select></label>
       <label>Action<select data-qr-action><option value="in">Check-in</option><option value="out">Check-out</option></select></label></div>` : '<p class="attendance-qr-identity" data-qr-identity></p>'}
       <p data-qr-status role="status" aria-live="polite"></p>
-      ${this.admin ? '<video data-qr-video autoplay playsinline muted hidden aria-label="QR scanner camera"></video><button class="primary-button" type="button" data-qr-camera>Start camera</button><section data-qr-confirmation hidden></section>' : '<p data-qr-countdown class="attendance-qr-countdown" role="timer" aria-live="off"></p><div class="attendance-qr-code" data-qr-code></div><p>Downloaded codes expire too. Keep your QR private.</p><div class="button-row"><button class="primary-button" type="button" data-qr-download disabled>Download QR</button><button class="outline-button" type="button" data-qr-refresh>Retry</button></div>'}`;
+      ${this.admin ? '<video data-qr-video autoplay playsinline muted hidden aria-label="QR scanner camera"></video><button class="primary-button" type="button" data-qr-camera>Start camera</button><section data-qr-confirmation hidden></section>' : '<div class="attendance-qr-display"><p data-qr-countdown class="attendance-qr-countdown" role="timer" aria-live="off"></p><div class="attendance-qr-code" data-qr-code></div></div><div class="attendance-qr-expiry"><div><span>On-screen QR</span><strong>Renews every 30 min</strong></div><div><span>Downloaded QR</span><strong>Valid for 15 min</strong></div></div><p class="attendance-qr-note">Downloads stay valid after logout until the expiry shown. Keep your QR private.</p><div class="button-row attendance-qr-actions"><button class="primary-button" type="button" data-qr-download disabled>Download QR</button><button class="outline-button" type="button" data-qr-refresh>Retry</button></div>'}`;
     this.dialog = dialog;
     this.field = selector => dialog.querySelector(selector);
     const closeButton = this.field('[data-qr-close]');
@@ -69,7 +69,7 @@ export class AttendanceQrController {
       this.field('[data-qr-action]').onchange = changed;
       this.field('[data-qr-camera]').onclick = () => void this.startCamera();
     } else {
-      this.field('[data-qr-refresh]').onclick = () => void this.generate();
+      this.field('[data-qr-refresh]').onclick = () => void this.generate({ force: true });
       this.field('[data-qr-download]').onclick = () => void this.download();
     }
     if (this.page) this.page.replaceChildren(dialog);
@@ -103,41 +103,45 @@ export class AttendanceQrController {
     const button = this.field(this.admin ? '[data-qr-camera]' : '[data-qr-refresh]');
     button.disabled = false;
   }
-  async generate() {
+  async generate({ force = false } = {}) {
     if (!this.dialog || this.generating) return;
-    this.reset();
+    // Keep the last usable code and its expiry timer until a replacement is ready.
+    if (!this.downloadData || this.downloadData.deadline <= Date.now() || this.cachedQr?.uid !== this.getUser()?.uid) this.reset();
     const generation = this.generation, dialog = this.dialog, button = this.field('[data-qr-refresh]');
-    this.generating = true; button.disabled = true; this.status('Generating your secure QR…');
+    this.generating = true; button.disabled = true; button.textContent = 'Loading…'; this.status('Generating your secure QR…');
     try {
       const user = this.getUser(), claims = (await user?.getIdTokenResult?.())?.claims;
       if (this.dialog !== dialog || generation !== this.generation) return;
       const session = claims?.presenceSession ? `${claims.presenceSession}:${claims.presenceAuthTime ?? claims.auth_time}` : null;
       let stored;
-      if (session) try { stored = JSON.parse(this.window.sessionStorage?.getItem('presence.attendanceQr.v1') || 'null'); } catch {}
+      if (session) try { stored = JSON.parse(this.window.sessionStorage?.getItem('presence.attendanceQr.v2') || 'null'); } catch {}
       const candidate = this.cachedQr || stored;
-      const cached = candidate?.uid === user?.uid && candidate.session === session
+      const reusable = candidate?.uid === user?.uid && candidate.session === session
         && Number.isFinite(candidate.deadline) && candidate.deadline > Date.now() && candidate.deadline <= Date.now() + 1800000
         && typeof candidate.result?.token === 'string' && Number.isFinite(candidate.result.expiresAt)
         && candidate.result.expiresAt - candidate.result.serverNow <= 1800000
         && candidate.result.student?.name && candidate.result.student?.studentId ? candidate : null;
-      if (!cached && session) try { this.window.sessionStorage?.removeItem('presence.attendanceQr.v1'); } catch {}
+      const cached = force ? null : reusable;
+      if (!reusable && session) try { this.window.sessionStorage?.removeItem('presence.attendanceQr.v2'); } catch {}
       const [result, factory] = await Promise.all([
         cached ? cached.result : this.api.call('/v1/student/attendance-qr', user, {}),
         cached?.factory || new QrCodeLoader({ document: this.document, window: this.window }).load()
       ]);
       if (this.dialog !== dialog || generation !== this.generation) return;
       const code = factory(0, 'M'); code.addData(result.token); code.make();
-      this.field('[data-qr-code]').innerHTML = code.createSvgTag({ cellSize: 5, margin: 4, scalable: true });
+      const svg = code.createSvgTag({ cellSize: 5, margin: 4, scalable: true });
+      this.window.clearInterval(this.expiryTimer);
+      this.field('[data-qr-code]').innerHTML = svg;
       this.field('[data-qr-code] svg')?.setAttribute('aria-label', 'Temporary attendance QR');
       const deadline = cached?.deadline ?? Date.now() + result.expiresAt - result.serverNow;
       this.cachedQr = { uid: user?.uid, session, result, factory, deadline };
       if (session) try {
-        this.window.sessionStorage?.setItem('presence.attendanceQr.v1', JSON.stringify({ uid: user.uid, session, result, deadline }));
+        this.window.sessionStorage?.setItem('presence.attendanceQr.v2', JSON.stringify({ uid: user.uid, session, result, deadline }));
       } catch { /* Restricted storage falls back to the in-memory QR. */ }
       this.downloadData = { code, student: result.student, expiresAt: result.expiresAt, deadline };
-      this.field('[data-qr-identity]').textContent = `${result.student.name} · ${result.student.studentId}`;
-      this.field('[data-qr-download]').disabled = false;
-      this.status('Ready to scan. Keep this QR private.');
+      this.field('[data-qr-identity]').innerHTML = `<strong>${this.escapeHtml(result.student.name)}</strong><span>Student ID · ${this.escapeHtml(result.student.studentId)}</span>`;
+      this.field('[data-qr-download]').disabled = Boolean(this.downloading);
+      this.status(force ? 'New QR ready to scan.' : 'Ready to scan.');
       const tick = () => {
         const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
         this.field('[data-qr-countdown]').textContent = `New QR in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
@@ -148,19 +152,30 @@ export class AttendanceQrController {
         }
       };
       tick(); this.expiryTimer = this.window.setInterval(tick, 1000);
-    } catch (error) { if (this.dialog === dialog && generation === this.generation) this.status(error.message, true); }
-    finally { this.generating = false; if (this.dialog === dialog) button.disabled = false;
+    } catch (error) {
+      if (this.dialog === dialog && generation === this.generation) this.status(
+        this.downloadData?.deadline > Date.now() ? `${error.message} Your current QR is still valid.` : error.message, true);
+    }
+    finally { this.generating = false; if (this.dialog === dialog) { button.disabled = false; button.textContent = 'Retry'; }
       if (this.dialog && generation !== this.generation && !this.admin && !this.document.hidden) void this.generate(); }
   }
   async download() {
-    const data = this.downloadData;
-    if (!data || data.deadline <= Date.now() || this.downloading) {
+    const displayed = this.downloadData;
+    const dialog = this.dialog, user = this.getUser();
+    if (!displayed || displayed.deadline <= Date.now() || this.downloading) {
       if (!this.downloading) this.status('Your QR expired. Wait for the new code.', true);
       return;
     }
     const button = this.field('[data-qr-download]');
     this.downloading = true; button.disabled = true;
     try {
+      // Mint a separate short-lived token without changing the displayed QR or timer.
+      const result = await this.api.call('/v1/student/attendance-qr', user, { download: true });
+      if (this.dialog !== dialog || this.getUser()?.uid !== user?.uid) return;
+      const factory = await new QrCodeLoader({ document: this.document, window: this.window }).load();
+      if (this.dialog !== dialog || this.getUser()?.uid !== user?.uid) return;
+      const code = factory(0, 'M'); code.addData(result.token); code.make();
+      const data = { code, student: result.student, expiresAt: result.expiresAt };
       const canvas = this.document.createElement('canvas'), scale = 8, margin = 4;
       const modules = data.code.getModuleCount(), size = (modules + margin * 2) * scale;
       canvas.width = Math.max(640, size + 64); canvas.height = size + 230;
@@ -191,7 +206,7 @@ export class AttendanceQrController {
         this.showToast('QR download started', 'The downloaded QR expires at the time shown on the image.');
       }
     } catch (error) { this.showToast('QR download unavailable', error.message); }
-    finally { this.downloading = false; if (this.downloadData === data && data.deadline > Date.now()) button.disabled = false; }
+    finally { this.downloading = false; if (this.dialog === dialog && this.downloadData?.deadline > Date.now()) this.field('[data-qr-download]').disabled = false; }
   }
   async decoder() {
     if (this.window.jsQR) return this.window.jsQR;

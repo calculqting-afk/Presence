@@ -2786,3 +2786,62 @@ test('password session restoration signs in with the new credential before bindi
   await assert.rejects(StudentDashboard.prototype.restorePasswordSession.call({},'student@example.test','Personal!new42',{rebind}),/account changed/);
   assert.deepEqual(steps,['signin']);
 });
+
+
+test('student attendance search filters on the first typed letter and clears without submitting',async()=>{
+  const browser=fakeBrowser();
+  const {StudentAttendanceListController}=await isolatedModule('assets/js/controllers/StudentAttendanceListController.js',{},browser);
+  const records=[{id:'bits',eventName:'BITS CLEANUP',eventDate:'2026-10-28',checkedOutAt:'saved'},{id:'day2',eventName:'Day 2 Intramurals',eventDate:'2026-10-20',checkedOutAt:'saved'}];
+  let shown=[],renders=0;
+  const controller=new StudentAttendanceListController({summary:{needsReview:()=>false},getEvents:()=>[],render:()=>{renders++;shown=controller.select(records);},pageSize:1});
+  controller.initialize();controller.page=1;
+  const search=browser.document.querySelector('#studentAttendanceSearch');
+  search.value='b';await search.emit('input',{preventDefault(){}});
+  assert.deepEqual(Array.from(shown,row=>row.id),['bits']);assert.equal(controller.page,0);
+  search.value='NO MATCH';await search.emit('input',{preventDefault(){}});assert.equal(shown.length,0);
+  search.value='';await search.emit('input',{preventDefault(){}});
+  assert.equal(browser.document.querySelector('#studentAttendancePageInfo').textContent,'1–1 of 2 records');
+  const before=renders;controller.dispose();await search.emit('input',{preventDefault(){}});assert.equal(renders,before);
+});
+
+
+test('paused subscriptions reject late data/errors and stay stopped across visibility and navigation until resumed',async()=>{
+  const {ScopedSubscriptions}=await import(pathToFileURL(path.join(root,'assets/js/core/ScopedSubscriptions.js')));
+  let starts=0,stops=0,received=0,errors=0;const callbacks=[];
+  const subscriptions=new ScopedSubscriptions({onError:()=>errors++});
+  subscriptions.register('profile',['*'],(guard,onError)=>{starts++;callbacks.push({data:guard(()=>received++),error:onError});return ()=>stops++;});
+  subscriptions.setView('dashboard');callbacks[0].data();
+  subscriptions.pause();subscriptions.pause();
+  callbacks[0].data();callbacks[0].error(Error('Permission removed during logout'));
+  subscriptions.setVisible(false);subscriptions.setView('profile');subscriptions.setVisible(true);
+  assert.equal(starts,1);assert.equal(stops,1);assert.equal(received,1);assert.equal(errors,0);
+  subscriptions.resume();subscriptions.resume();assert.equal(starts,2);assert.equal(subscriptions.view,'profile');
+  callbacks[0].error(Error('Old listener'));assert.equal(errors,0);
+  callbacks[1].error(Error('Genuine sync failure'));assert.equal(errors,1);
+  subscriptions.stop();
+});
+
+for(const role of ['admin','student'])for(const fails of [false,true]){
+  test(role+' logout stops data listeners before release and '+(fails?'restores them on failure':'ignores revoked-access callbacks'),async()=>{
+    const browser=fakeBrowser(),errors=[],calls=[],callbacks=[];
+    browser.window.dispatchEvent=()=>{};browser.window.location={replace:()=>calls.push('redirect')};
+    browser.sessionStorage.removeItem=()=>{};
+    const {ScopedSubscriptions}=await import(pathToFileURL(path.join(root,'assets/js/core/ScopedSubscriptions.js')));
+    const subscriptions=new ScopedSubscriptions({onError:error=>errors.push(error)});
+    subscriptions.register('profile',['*'],(guard,onError)=>{callbacks.push(onError);calls.push('subscribe');return ()=>calls.push('stop');});
+    subscriptions.setView('dashboard');
+    const user={uid:'test-user',getIdToken:async()=> 'test-token'},auth={currentUser:user};
+    const shared={dashboardRole:role,currentUser:user,currentUserRole:role,currentUserProfile:{},activeView:'dashboard',previousView:'dashboard',pageCopy:{},ROLE_VIEWS:{},ROLE_ACCESS_LABELS:{},roleLabel:()=>role,renderView(){},openView(){},setDashboardViewState(){},db:{},auth,
+      sessionState:{dashboard:{dashboard:{subscriptions,updatePresence(){}},dispose:()=>{calls.push('dispose');subscriptions.stop();}}},
+      signOut:async()=>{calls.push('signOut');callbacks[0](Error('Auth removed'));auth.currentUser=null;},setDoc:async()=>{},doc(){},serverTimestamp(){},showDashboardToast:(title)=>calls.push(title)};
+    const fetch=async()=>{calls.push('release');assert.equal(subscriptions.paused,true);callbacks[0](Error('Session released'));return {ok:!fails,json:async()=>fails?{error:'Release unavailable'}:{released:true}};};
+    const {DashboardNavigationController}=await isolatedModule('assets/js/controllers/DashboardNavigationController.js',shared,{...browser,fetch,AbortSignal,Event,console:{...console,error(){}}});
+    const navigation=new DashboardNavigationController({...browser,history:{}});navigation.initialize();
+    navigation.logoutAction.run=async({action})=>action();
+    await browser.document.querySelector('#confirmLogout').emit('click');
+    assert.ok(calls.indexOf('stop')<calls.indexOf('release'));assert.equal(errors.length,0);
+    if(fails){assert.equal(subscriptions.paused,false);assert.equal(callbacks.length,2);assert.equal(auth.currentUser,user);assert.ok(!calls.includes('redirect'));callbacks[1](Error('Real error'));assert.equal(errors.length,1);}
+    else{assert.equal(auth.currentUser,null);assert.ok(calls.indexOf('release')<calls.indexOf('signOut'));assert.ok(calls.includes('redirect'));}
+    navigation.dispose();subscriptions.stop();
+  });
+}

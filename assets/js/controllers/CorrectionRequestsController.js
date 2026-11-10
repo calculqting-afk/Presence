@@ -121,6 +121,7 @@ export class CorrectionRequestsController {
       const time = value => value?.toDate?.()?.toLocaleString() || 'Time unavailable';
       const person = student ? [student.firstName, student.middleName, student.lastName].filter(Boolean).join(' ') : item.studentUid;
       const year = CorrectionRequestFilters.year(student?.section);
+      if (!this.admin) return this.studentCard(item, event);
       const decision = item.status !== 'pending' ? `<div class="correction-request-decision"><strong>Decision</strong><p class="correction-request-reason">${e(item.decisionReason)}</p><small>Reviewed by ${e(item.reviewedByName || 'Administrator')} · ${e(time(item.reviewedAt))}</small></div>` : this.admin
         ? `<aside class="correction-request-review"><button class="primary-button" type="button" data-review-request="${e(item.id)}">Review and correct</button><details class="correction-request-decline"><summary>Decline request</summary><form data-decline-request="${e(item.id)}" class="correction-decline-form"><label class="field">Required decline reason<textarea name="reason" minlength="5" maxlength="1000" required></textarea></label><button class="outline-button" type="submit">Confirm decline</button></form></details></aside>`
         : '<p class="correction-request-waiting">Awaiting admin review. Your saved attendance is unchanged.</p>';
@@ -128,6 +129,24 @@ export class CorrectionRequestsController {
     }).join('') || '<p>No matching correction requests.</p>';
     for (const form of this.root.querySelectorAll?.('[data-decline-request]') || []) form.elements.reason.value = this.declineDrafts.get(form.dataset.declineRequest) || '';
     this.refreshEvents();
+  }
+  studentCard(item, event) {
+    const e = this.escapeHtml;
+    const date = value => value?.toDate?.()?.toLocaleString('en-PH', {
+      timeZone: 'Asia/Manila', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit'
+    }) || 'Time unavailable';
+    const status = { approved: 'Approved', declined: 'Declined', pending: 'Pending review' }[item.status] || item.status;
+    const tone = item.status === 'approved' ? 'green' : item.status === 'declined' ? 'orange' : 'blue';
+    const title = event ? AttendanceViews.title(event) : `Event ${item.eventId}`;
+    const details = event ? `${AttendanceViews.label(event)} · ${event.date}` : 'Event details unavailable';
+    return `<article class="community-service-record correction-request-card student-correction-card">
+      <div class="student-correction-heading"><div><h4>${e(title)}</h4><p>${e(details)}</p></div><span class="badge ${tone}">${e(status)}</span></div>
+      <div class="student-correction-sections">
+        <section class="student-correction-section"><h5>Your request</h5><span class="student-correction-kind">${e(CORRECTION_KINDS[item.kind] || item.kind)}</span><p class="correction-request-reason">${e(item.reason)}</p><small>Submitted · ${e(date(item.submittedAt))} (PH)</small></section>
+        <section class="student-correction-section student-correction-outcome"><h5>Admin decision</h5>${item.status === 'pending'
+          ? '<p class="correction-request-reason">Awaiting admin review.</p><small>Your attendance has not changed.</small>'
+          : `<p class="correction-request-reason">${e(item.decisionReason || 'No decision note provided.')}</p><small>Reviewed by <strong>${e(item.reviewedByName || 'Administrator')}</strong><br>${e(date(item.reviewedAt))} (PH)</small>`}</section>
+      </div></article>`;
   }
   refreshFilters() {
     if (!this.admin) return;

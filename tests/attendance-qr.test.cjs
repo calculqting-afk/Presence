@@ -284,7 +284,7 @@ test('identity QR is available outside events but cannot bypass windows, expiry 
 test('student identity QR loads without a selector, reuses its lifetime and downloads a labelled PNG',async()=>{
   const f=await browserFixture(false),makeQr=require('qrcode-generator');
   f.window.qrcode=makeQr;
-  f.controller.api.call=async(route,user,body)=>{const now=Date.now();f.calls.push({route,body});return {token:'opaque-test-token',student:{name:'Test Student',studentId:'2510004-1'},serverNow:now,expiresAt:now+1800000};};
+  f.controller.api.call=async(route,user,body)=>{const now=Date.now();f.calls.push({route,body});return {token:'opaque-test-token',student:{name:'Test Student',studentId:'2510004-1'},serverNow:now,expiresAt:now+(body.download?900000:1800000)};};
   await f.controller.open();
   assert.deepEqual(f.calls[0].body,{});
   assert.doesNotMatch(f.controller.dialog.innerHTML,/<select/);
@@ -294,7 +294,8 @@ test('student identity QR loads without a selector, reuses its lifetime and down
   f.document.createElement=tag=>tag==='canvas'?{getContext:()=>({fillRect:(...args)=>rects.push(args),fillText:text=>labels.push(text)}),toDataURL:()=> 'data:image/png;base64,PNGDATA'}:tag==='a'?(link={click(){this.clicked=true;},remove(){}}):original(tag);
   await f.controller.download();assert.equal(link.download,'Presence-QR-2510004-1.png');assert.equal(link.clicked,true);
   assert.ok(labels.includes('Test Student'));assert.ok(labels.includes('2510004-1'));assert.ok(labels.some(text=>text.startsWith('Expires:')));assert.ok(rects.length>10);
-  f.controller.close();await f.controller.open();assert.equal(f.calls.length,1,'reopening must not renew a still-valid code');
+  assert.deepEqual(f.calls[1].body,{download:true});
+  f.controller.close();await f.controller.open();assert.equal(f.calls.length,2,'reopening must not renew a still-valid code');
   f.controller.dispose();assert.equal(f.intervals.size,0);
 });
 
@@ -352,4 +353,173 @@ test('Android QR download confirms gallery saves and reports native failures wit
   f.window.PresenceNative.attendanceQrImage.save=async()=>{throw Error('Storage unavailable');};
   await f.controller.download();assert.deepEqual(f.notifications.at(-1),['QR download unavailable','Storage unavailable']);
   assert.equal(f.controller.field('[data-qr-download]').disabled,false);f.controller.dispose();
+});
+
+test('downloadable identity QR survives logout and a new login until its exact original expiry', async()=>{
+  const f=await fixture(), qr=await f.service.issue(f.student,{});
+  const {DeviceSessionService}=await import('../workers/admin-api/src/device-session.js');
+  await new DeviceSessionService(f.db,()=>qr.serverNow).release(f.student);
+  assert.equal(f.store.get('accountSessions/student').sessionId,null);
+  await assert.rejects(f.service.issue(f.student,{}),/Sign in again/,'logged-out students cannot issue codes');
+  const view=await f.preview(qr.token);assert.ok(view.confirmation,'saved QR works after logout');
+  f.store.set('accountSessions/student',{sessionId:'new-login-session'});
+  const newer=await f.service.issue({...f.student,presenceSession:'new-login-session'},{});
+  assert.notEqual(newer.token,qr.token);
+  f.advance(1799999);
+  const last=await f.preview(qr.token);assert.equal(last.expiresAt,qr.expiresAt);
+  assert.equal((await f.confirm(last.confirmation)).saved,true);
+  f.advance(1);await assert.rejects(f.preview(qr.token),/expired/);
+  await assert.rejects(f.confirm(last.confirmation),/expired/);
+});
+
+test('student logout between QR preview and confirmation does not end its validity; scanner logout still blocks saving',async()=>{
+  const f=await fixture(),qr=await f.service.issue(f.student,{}),preview=await f.preview(qr.token);
+  f.store.get('accountSessions/student').sessionId=null;
+  assert.equal((await f.confirm(preview.confirmation)).saved,true);
+  const g=await fixture(),other=await g.service.issue(g.student,{}),pending=await g.preview(other.token);
+  g.store.get('accountSessions/student').sessionId=null;g.store.get('accountSessions/admin').sessionId=null;
+  await assert.rejects(g.confirm(pending.confirmation),/session|Sign in/i);
+  assert.equal(g.store.has('attendance/student_morning'),false);
+});
+
+test('logged-out identity QR still rejects disabled/reset accounts, ineligible students and closed attendance windows',async()=>{
+  for(const change of ['disabled','inactive','password','revoked-token','roster','closed']){
+    const f=await fixture(),qr=await f.service.issue(f.student,{});
+    f.store.get('accountSessions/student').sessionId=null;
+    if(change==='disabled')f.users.get('student').disabled=true;
+    if(change==='inactive')f.store.get('students/student').active=false;
+    if(change==='password')f.store.get('students/student').passwordResetRequired=true;
+    if(change==='revoked-token')f.users.get('student').validSince=String(f.student.auth_time+1);
+    if(change==='roster')f.store.get('events/morning').attendanceRoster={other:'2A'};
+    if(change==='closed')f.store.get('events/morning').checkOutClosesAt=new Date(qr.serverNow-1);
+    await assert.rejects(f.preview(qr.token),undefined,change);
+    assert.equal(f.store.has('attendance/student_morning'),false,change);
+  }
+});
+
+
+test('downloads have a separate 15-minute lifetime from issue, survive logout and outlast the screen code',async()=>{
+  const f=await fixture(),screen=await f.service.issue(f.student,{});
+  assert.equal(screen.expiresAt-screen.serverNow,1800000);
+  f.advance(20*60000);
+  const download=await f.service.issue(f.student,{download:true});
+  assert.equal(download.expiresAt-download.serverNow,900000);
+  assert.notEqual(download.token,screen.token);
+  assert.equal((await f.service.open(download.token,'student')).scope,'download');
+  f.store.get('accountSessions/student').sessionId=null;
+  await assert.rejects(f.service.issue(f.student,{download:true}),/Sign in again/);
+  f.advance(10*60000);
+  await assert.rejects(f.preview(screen.token),/expired/);
+  assert.ok((await f.preview(download.token)).confirmation);
+  f.advance(5*60000-1);const preview=await f.preview(download.token);
+  assert.equal(preview.expiresAt,download.expiresAt);
+  f.advance(1);
+  await assert.rejects(f.preview(download.token),/expired/);
+  await assert.rejects(f.confirm(preview.confirmation),/expired/);
+  assert.equal(f.store.has('attendance/student_morning'),false);
+});
+
+test('download lifetime is enforced on signed tokens and nested confirmations',async()=>{
+  const f=await fixture(),download=await f.service.issue(f.student,{download:true});
+  const payload=await f.service.open(download.token,'student');
+  const extended={...payload,exp:payload.iat+1800000};
+  await assert.rejects(f.preview(await f.service.seal(extended)),/invalid/);
+  f.advance(900000);
+  const confirmation=await f.service.seal({kind:'confirmation',actor:'admin',qr:extended,eventId:'morning',action:'in',iat:download.serverNow+900000,exp:download.serverNow+1020000});
+  await assert.rejects(f.confirm(confirmation),/expired/);
+  await assert.rejects(f.service.issue(f.student,{download:true,eventId:'morning'}));
+  await assert.rejects(f.service.issue(f.student,{download:'true'}));
+});
+
+test('download encodes a separate token and expiry without resetting the screen timer or cache',async()=>{
+  const originalNow=Date.now;let clock=originalNow();Date.now=()=>clock;
+  const f=await browserFixture(false),encoded=[],labels=[],makeQr=require('qrcode-generator');
+  f.window.qrcode=(...args)=>{const code=makeQr(...args),add=code.addData;code.addData=value=>{encoded.push(value);add.call(code,value);};return code;};
+  f.controller.api.call=async(route,user,body)=>{f.calls.push(body);return {token:body.download?'download-only-token':'screen-only-token',student:{name:'Test Student',studentId:'123'},serverNow:clock,expiresAt:clock+(body.download?900000:1800000)};};
+  const original=f.document.createElement;
+  f.document.createElement=tag=>tag==='canvas'?{getContext:()=>({fillRect(){},fillText:text=>labels.push(text)}),toDataURL:()=> 'data:image/png;base64,PNGDATA'}:tag==='a'?{click(){},remove(){}}:original(tag);
+  try{
+    await f.controller.open();const cache=f.controller.cachedQr,displayed=f.controller.downloadData;
+    clock+=20*60000;[...f.intervals.values()][0]();
+    const countdown=f.controller.field('[data-qr-countdown]').textContent,svg=f.controller.field('[data-qr-code]').innerHTML;
+    assert.equal(countdown,'New QR in 10:00');
+    await f.controller.download();
+    assert.deepEqual(f.calls,[{},{download:true}]);
+    assert.deepEqual(encoded,['screen-only-token','download-only-token']);
+    assert.equal(f.controller.cachedQr,cache);assert.equal(f.controller.downloadData,displayed);
+    assert.equal(f.controller.field('[data-qr-code]').innerHTML,svg);
+    assert.equal(f.controller.field('[data-qr-countdown]').textContent,countdown);
+    assert.equal(f.intervals.size,1);
+    assert.ok(labels.includes('Expires: '+new Date(clock+900000).toLocaleString('en-PH',{timeZone:'Asia/Manila'})+' (PH)'));
+    f.controller.api.call=async()=>{throw Error('Connection lost');};
+    await f.controller.download();assert.deepEqual(f.notifications.at(-1),['QR download unavailable','Connection lost']);
+    assert.equal(f.controller.cachedQr,cache);
+  }finally{Date.now=originalNow;f.controller.dispose();}
+});
+
+
+test('Retry explicitly issues a fresh QR, shows loading and keeps normal refresh cached',async()=>{
+  const originalNow=Date.now;let clock=originalNow();Date.now=()=>clock;
+  const f=await browserFixture(false);f.window.qrcode=require('qrcode-generator');
+  let release,requests=0;
+  f.controller.api.call=async()=>{requests++;if(requests===2)await new Promise(resolve=>{release=resolve;});return {token:'retry-token-'+requests,student:{name:'Test Student',studentId:'123'},serverNow:clock,expiresAt:clock+1800000};};
+  try{
+    await f.controller.open();const first=f.controller.cachedQr.result.token;clock+=60000;
+    await f.controller.generate();assert.equal(requests,1);
+    assert.equal(f.controller.field('[data-qr-countdown]').textContent,'New QR in 29:00');
+    const button=f.controller.field('[data-qr-refresh]');button.onclick();
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(button.disabled,true);assert.equal(button.textContent,'Loading…');
+    button.onclick();assert.equal(requests,2,'repeated clicks cannot start parallel requests');
+    release();await new Promise(resolve=>setImmediate(resolve));
+    assert.notEqual(f.controller.cachedQr.result.token,first);
+    assert.equal(f.controller.field('[data-qr-countdown]').textContent,'New QR in 30:00');
+    assert.equal(button.disabled,false);assert.equal(button.textContent,'Retry');
+    assert.equal(f.controller.field('[data-qr-status]').textContent,'New QR ready to scan.');
+    assert.equal(f.intervals.size,1);
+    f.controller.api.call=async()=>{throw Error('Wait one minute before generating another QR.');};
+    button.onclick();await new Promise(resolve=>setImmediate(resolve));
+    assert.match(f.controller.field('[data-qr-status]').textContent,/Wait one minute/);
+    assert.equal(button.disabled,false);assert.equal(button.textContent,'Retry');
+  }finally{Date.now=originalNow;f.controller.dispose();}
+});
+
+
+test('failed Retry preserves the visible QR, running countdown, download button and refresh cache',async()=>{
+  const originalNow=Date.now;let clock=originalNow();Date.now=()=>clock;
+  const f=await browserFixture(false),values=new Map();f.window.qrcode=require('qrcode-generator');
+  f.window.sessionStorage={getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};
+  f.controller.getUser=()=>({uid:'student',getIdTokenResult:async()=>({claims:{presenceSession:'session-a',presenceAuthTime:123}})});
+  f.controller.api.call=async()=>({token:'valid-qr',student:{name:'Student',studentId:'123'},serverNow:clock,expiresAt:clock+1800000});
+  let reject;
+  try{
+    await f.controller.open();const data=f.controller.downloadData,cache=f.controller.cachedQr,stored=values.get('presence.attendanceQr.v2'),svg=f.controller.field('[data-qr-code]').innerHTML;
+    f.controller.api.call=()=>new Promise((resolve,fail)=>{reject=fail;});
+    const pending=f.controller.generate({force:true});await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(f.controller.downloadData,data);assert.equal(f.controller.field('[data-qr-code]').innerHTML,svg);
+    assert.equal(f.controller.field('[data-qr-download]').disabled,false);assert.equal(f.intervals.size,1);
+    clock+=60000;[...f.intervals.values()][0]();assert.equal(f.controller.field('[data-qr-countdown]').textContent,'New QR in 29:00');
+    reject(Error('Network unavailable'));await pending;
+    assert.equal(f.controller.downloadData,data);assert.equal(f.controller.cachedQr,cache);assert.equal(values.get('presence.attendanceQr.v2'),stored);
+    assert.equal(f.intervals.size,1);assert.match(f.controller.field('[data-qr-status]').textContent,/current QR is still valid/);
+    assert.equal(f.controller.field('[data-qr-refresh]').disabled,false);
+    f.controller.close();await f.controller.open();assert.equal(f.controller.cachedQr.result.token,'valid-qr');
+    assert.equal(f.controller.field('[data-qr-countdown]').textContent,'New QR in 29:00');
+  }finally{Date.now=originalNow;f.controller.dispose();}
+});
+
+test('a retained QR still expires normally while Retry is pending and cannot be downloaded after failure',async()=>{
+  const originalNow=Date.now;let clock=originalNow();Date.now=()=>clock;
+  const f=await browserFixture(false);f.window.qrcode=require('qrcode-generator');
+  f.controller.api.call=async()=>({token:'old-qr',student:{name:'Student',studentId:'123'},serverNow:clock,expiresAt:clock+1800000});
+  let reject;
+  try{
+    await f.controller.open();f.controller.api.call=()=>new Promise((resolve,fail)=>{reject=fail;});
+    const pending=f.controller.generate({force:true});await new Promise(resolve=>setImmediate(resolve));
+    clock+=1800000;[...f.intervals.values()][0]();assert.equal(f.controller.downloadData,null);assert.equal(f.intervals.size,0);
+    reject(Error('Request failed'));await pending;
+    assert.equal(f.controller.downloadData,null);assert.equal(f.controller.field('[data-qr-download]').disabled,true);
+    assert.doesNotMatch(f.controller.field('[data-qr-status]').textContent,/still valid/);
+    await f.controller.download();assert.match(f.controller.field('[data-qr-status]').textContent,/expired/);
+  }finally{Date.now=originalNow;f.controller.dispose();}
 });

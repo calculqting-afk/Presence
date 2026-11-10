@@ -150,11 +150,11 @@ test('student UI scopes its listener, escapes reasons, waits for server acknowle
   assert.match(nodes['[data-request-list]'].innerHTML, /Awaiting admin review/);
   const decision = { ...docs[0].data(), status: 'declined', reviewedBy: 'private-uid', reviewedByName: 'Alex <Reviewer>', decisionReason: 'Not verified' };
   f.emit({ docs: [{ id: 'student_morning', data: () => decision }], metadata: {} });
-  assert.match(nodes['[data-request-list]'].innerHTML, /Reviewed by Alex &lt;Reviewer&gt;/);
+  assert.match(nodes['[data-request-list]'].innerHTML, /Reviewed by <strong>Alex &lt;Reviewer&gt;<\/strong>/);
   assert.doesNotMatch(nodes['[data-request-list]'].innerHTML, /private-uid/);
   delete decision.reviewedByName;
   f.emit({ docs: [{ id: 'student_morning', data: () => decision }], metadata: {} });
-  assert.match(nodes['[data-request-list]'].innerHTML, /Reviewed by Administrator/);
+  assert.match(nodes['[data-request-list]'].innerHTML, /Reviewed by <strong>Administrator<\/strong>/);
   ui.dispose(); assert.equal(f.unsubscribed, true);
   f.emit({ docs: [], metadata: {} }); assert.equal(ui.requests.length, 1);
 });

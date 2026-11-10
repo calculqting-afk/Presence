@@ -4,7 +4,10 @@ import { requireActiveDevice, sessionAuthTime } from './device-session.js';
 import { EventAudiencePolicy } from '../../../assets/js/controllers/EventAudiencePolicy.js';
 import { PolicyAgreementPolicy } from '../../../assets/js/core/PolicyAgreementPolicy.js';
 
-const TTL = 30 * 60 * 1000;
+const DISPLAY_TTL = 30 * 60 * 1000;
+const DOWNLOAD_TTL = 15 * 60 * 1000;
+const lifetime = qr => qr.scope === 'download' ? DOWNLOAD_TTL : DISPLAY_TTL;
+const identityCode = qr => ['identity', 'download'].includes(qr.scope);
 const bytes = value => new TextEncoder().encode(value);
 const encode = value => btoa(String.fromCharCode(...value)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 const decode = value => Uint8Array.from(atob(value.replaceAll('-', '+').replaceAll('_', '/')), c => c.charCodeAt(0));
@@ -30,7 +33,9 @@ export class AttendanceQrService {
       const [, iv, encrypted] = token.split('.');
       const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: decode(iv) }, await this.key(), decode(encrypted));
       const data = JSON.parse(new TextDecoder().decode(plain));
-      if (data.kind !== kind || !Number.isFinite(data.exp) || data.exp <= this.now() || data.iat > this.now() || data.exp - data.iat > (kind === 'student' ? TTL : 120000)) throw Error();
+      if (data.kind !== kind || !Number.isFinite(data.iat) || !Number.isFinite(data.exp) || data.exp <= data.iat || data.iat > this.now()
+        || data.exp - data.iat > (kind === 'student' ? lifetime(data) : 120000)) throw Error();
+      if (data.exp <= this.now()) throw Error();
       return data;
     } catch (error) {
       if (error instanceof SafeError) throw error;
@@ -47,7 +52,7 @@ export class AttendanceQrService {
       || (action === 'in' && event.checkoutOnlyReopened === true)) throw new SafeError(409, 'The selected attendance window is closed.');
   }
   async issue(claims, body) {
-    if (Object.keys(body).some(key => key !== 'eventId') || (body.eventId !== undefined && !validEvent(body.eventId))) throw new SafeError(400, 'Choose a current event session.');
+    if (Object.keys(body).some(key => !['eventId', 'download'].includes(key)) || (body.eventId !== undefined && !validEvent(body.eventId)) || (body.download !== undefined && body.download !== true) || (body.download && body.eventId)) throw new SafeError(400, 'Choose a current event session.');
     await new ResetService(this.db, this.now).authenticate(claims);
     let token, expiresAt, student;
     await this.db.transaction(async get => {
@@ -68,9 +73,9 @@ export class AttendanceQrService {
       }
       const now = this.now(), fresh = limit && now - limit.windowStart < 60000, count = fresh ? limit.count : 0;
       if (count >= 10) throw new SafeError(429, 'Wait one minute before generating another QR.');
-      expiresAt = body.eventId ? Math.min(now + TTL, +new Date(event.checkOutClosesAt)) : now + TTL;
+      expiresAt = body.eventId ? Math.min(now + DISPLAY_TTL, +new Date(event.checkOutClosesAt)) : now + (body.download ? DOWNLOAD_TTL : DISPLAY_TTL);
       student = { name: name(profile), studentId: profile.accountId };
-      token = await this.seal({ kind: 'student', uid: claims.sub, ...(body.eventId ? { eventId: body.eventId } : { scope: 'identity' }), session: active.sessionId, authTime: sessionAuthTime(claims), iat: now, exp: expiresAt });
+      token = await this.seal({ kind: 'student', uid: claims.sub, ...(body.eventId ? { eventId: body.eventId } : { scope: body.download ? 'download' : 'identity' }), session: active.sessionId, authTime: sessionAuthTime(claims), iat: now, exp: expiresAt });
       return [this.db.write('attendanceQrLimits/issue_' + claims.sub, { windowStart: fresh ? limit.windowStart : now, count: count + 1 })];
     });
     return { token, expiresAt, serverNow: this.now(), student };
@@ -83,13 +88,16 @@ export class AttendanceQrService {
   }
   async validate(get, claims, qr, eventId, action, actor) {
     const profile = await (get.qrStudent ? get.qrStudent(qr.uid) : get('students/' + qr.uid)), event = await get('events/' + eventId);
-    const studentSession = await get('accountSessions/' + qr.uid), actorSession = await get('accountSessions/' + claims.sub);
+    // Downloadable identity codes keep their signed expiry after student logout.
+    // Older event-bound codes retain their original session restriction.
+    const studentSession = identityCode(qr) ? null : await get('accountSessions/' + qr.uid);
+    const actorSession = await get('accountSessions/' + claims.sub);
     const actorProfile = await get('students/' + claims.sub), record = await get('attendance/' + qr.uid + '_' + eventId);
     const agreement = await get(PolicyAgreementPolicy.path(qr.uid).join('/'));
     this.student(profile, qr.authTime);
     if (!PolicyAgreementPolicy.accepted(agreement, qr.uid)) throw new SafeError(403, PolicyAgreementPolicy.message);
-    if (qr.uid === claims.sub || (qr.scope !== 'identity' && qr.eventId !== eventId)) throw new SafeError(403, 'This QR belongs to another event or cannot be scanned by its owner.');
-    if (studentSession?.sessionId !== qr.session || !claims.presenceSession || actorSession?.sessionId !== claims.presenceSession) throw new SafeError(401, 'The student or scanner session changed. Sign in and scan again.');
+    if (qr.uid === claims.sub || (!identityCode(qr) && qr.eventId !== eventId)) throw new SafeError(403, 'This QR belongs to another event or cannot be scanned by its owner.');
+    if ((!identityCode(qr) && studentSession?.sessionId !== qr.session) || !claims.presenceSession || actorSession?.sessionId !== claims.presenceSession) throw new SafeError(401, 'The student or scanner session changed. Sign in and scan again.');
     if (!isSuperAuthority(claims, actor.user) && !(actorProfile?.active === true && ['head_admin', 'attendance_admin'].includes(actorProfile.role))) throw new SafeError(403, 'Attendance scanning permission is required.');
     this.window(event, action);
     if (!EventAudiencePolicy.canAttend({ ...profile, uid: qr.uid }, event)) throw new SafeError(403, 'This student is not assigned to the selected session.');
@@ -112,7 +120,7 @@ export class AttendanceQrService {
       confirmation = await this.open(body.confirmation, 'confirmation');
       if (confirmation.actor !== claims.sub || confirmation.eventId !== body.eventId || confirmation.action !== body.action) throw new SafeError(403, 'Scan again for this event and action.');
       qr = confirmation.qr;
-      if (qr.exp <= this.now()) throw new SafeError(400, 'The student QR expired. Scan the refreshed QR.');
+      if (Math.min(qr.exp, qr.iat + lifetime(qr)) <= this.now()) throw new SafeError(400, 'The student QR expired. Scan the refreshed QR.');
     } else qr = await this.open(body.token, 'student');
     const studentUser = await this.db.user(qr.uid);
     if (!studentUser || studentUser.disabled || qr.authTime < Number(studentUser.validSince || 0)) throw new SafeError(403, 'The student login is no longer active.');

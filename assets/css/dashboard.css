@@ -884,6 +884,24 @@ button, a, summary { touch-action: manipulation; }
 .correction-request-context > small { display: block; color: var(--muted); font-size: .7rem; line-height: 1.55; }
 .correction-decline-form { display: grid; gap: 10px; margin-top: 14px; }
 .correction-request-card .community-service-record-top { flex-wrap: wrap; }
+.student-correction-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.student-correction-heading > div { min-width: 0; }
+.student-correction-heading h4 { margin: 0; color: var(--ink); font-size: .95rem; line-height: 1.5; overflow-wrap: anywhere; }
+.student-correction-card .student-correction-heading p { margin: 4px 0 0; font-size: .78rem; }
+.student-correction-heading .badge { flex-shrink: 0; }
+.student-correction-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; padding-top: 16px; }
+.student-correction-section { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+.student-correction-section h5 { margin: 0 0 10px; color: var(--muted); font-size: .73rem; font-weight: 600; }
+.student-correction-kind { display: inline-block; padding: 5px 9px; border-radius: 7px; background: var(--surface-soft); color: var(--ink); font-size: .74rem; font-weight: 600; }
+.student-correction-card .student-correction-section .correction-request-reason { margin: 10px 0 14px; color: var(--ink); font-size: .85rem; line-height: 1.65; }
+.student-correction-card .student-correction-section small { display: block; margin-top: auto; font-size: .72rem; line-height: 1.7; overflow-wrap: anywhere; }
+.student-correction-section small strong { color: var(--ink); font-weight: 600; }
+.student-correction-outcome { border-left: 1px solid var(--line); padding-left: 20px; }
+@media (max-width: 760px) {
+  .student-correction-sections { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .student-correction-outcome { border-left: 0; border-top: 1px solid var(--line); padding: 16px 0 0; }
+}
+@media (max-width: 400px) { .student-correction-heading { flex-wrap: wrap; gap: 8px; } }
 @media (max-width: 580px) { .correction-request-form { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 1100px) { .correction-request-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } .correction-request-filters .request-search-field { grid-column: 1 / -1; } }
 @media (max-width: 760px) { .correction-request-body.has-review { grid-template-columns: minmax(0, 1fr); } }

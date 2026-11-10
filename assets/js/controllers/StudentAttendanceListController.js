@@ -8,6 +8,7 @@ export class StudentAttendanceListController {
     if (this.initialized) return;
     this.initialized = true;
     this.form = document.querySelector('#studentAttendanceFilters');
+    this.search = document.querySelector('#studentAttendanceSearch');
     this.previous = document.querySelector('#studentAttendancePrevious');
     this.next = document.querySelector('#studentAttendanceNext');
     this.toolbar = new AttendanceToolbarController({ form: this.form, prefix: 'studentAttendance', onClear: () => { this.page = 0; this.render(); } });
@@ -21,6 +22,7 @@ export class StudentAttendanceListController {
     this.onPrevious = () => { this.page = Math.max(0, this.page - 1); this.render(); };
     this.onNext = () => { this.page++; this.render(); };
     this.form.addEventListener('submit', this.onFilter);
+    this.search.addEventListener('input', this.onFilter);
     this.previous.addEventListener('click', this.onPrevious); this.next.addEventListener('click', this.onNext);
   }
   select(records) {
@@ -48,6 +50,7 @@ export class StudentAttendanceListController {
     if (!this.initialized) return;
     this.toolbar.dispose();
     this.form.removeEventListener('submit', this.onFilter);
+    this.search.removeEventListener('input', this.onFilter);
     this.previous.removeEventListener('click', this.onPrevious); this.next.removeEventListener('click', this.onNext);
     this.initialized = false;
   }

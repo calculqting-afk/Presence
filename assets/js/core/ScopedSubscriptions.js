@@ -18,6 +18,7 @@ export class ScopedSubscriptions {
 
   setView(view) {
     this.view = view;
+    if (this.paused) return;
     for (const [key, entry] of this.entries) {
       const needed = this.isEnabled(key) && (entry.views.includes('*') || (this.visible && entry.views.includes(view)));
       if (needed && entry.stopTimer != null) { this.cancel(entry.stopTimer); entry.stopTimer = null; }
@@ -48,6 +49,20 @@ export class ScopedSubscriptions {
 
   setVisible(visible) {
     this.visible = visible;
+    if (this.view !== null) this.setView(this.view);
+  }
+
+  pause() {
+    if (this.paused) return;
+    this.paused = true;
+    const view = this.view;
+    this.stop();
+    this.view = view;
+  }
+
+  resume() {
+    if (!this.paused) return;
+    this.paused = false;
     if (this.view !== null) this.setView(this.view);
   }
 
