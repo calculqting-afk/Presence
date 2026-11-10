@@ -29,6 +29,12 @@ export class AttendanceQrController {
     };
 
     this.window.addEventListener('presence:viewchange', this.onView);
+    this.onSigningOut = () => {
+      this.cachedQr = null;
+      try { this.window.sessionStorage?.removeItem('presence.attendanceQr.v1'); } catch {}
+      if (!this.admin) this.close(true);
+    };
+    this.window.addEventListener('presence:device-signing-out', this.onSigningOut);
     return this;
   }
   currentEvents() {
@@ -103,17 +109,31 @@ export class AttendanceQrController {
     const generation = this.generation, dialog = this.dialog, button = this.field('[data-qr-refresh]');
     this.generating = true; button.disabled = true; this.status('Generating your secure QR…');
     try {
-      const cached = this.cachedQr?.uid === this.getUser()?.uid && this.cachedQr.deadline > Date.now() ? this.cachedQr : null;
-      const [result, factory] = cached ? [cached.result, cached.factory] : await Promise.all([
-        this.api.call('/v1/student/attendance-qr', this.getUser(), {}),
-        new QrCodeLoader({ document: this.document, window: this.window }).load()
+      const user = this.getUser(), claims = (await user?.getIdTokenResult?.())?.claims;
+      if (this.dialog !== dialog || generation !== this.generation) return;
+      const session = claims?.presenceSession ? `${claims.presenceSession}:${claims.presenceAuthTime ?? claims.auth_time}` : null;
+      let stored;
+      if (session) try { stored = JSON.parse(this.window.sessionStorage?.getItem('presence.attendanceQr.v1') || 'null'); } catch {}
+      const candidate = this.cachedQr || stored;
+      const cached = candidate?.uid === user?.uid && candidate.session === session
+        && Number.isFinite(candidate.deadline) && candidate.deadline > Date.now() && candidate.deadline <= Date.now() + 1800000
+        && typeof candidate.result?.token === 'string' && Number.isFinite(candidate.result.expiresAt)
+        && candidate.result.expiresAt - candidate.result.serverNow <= 1800000
+        && candidate.result.student?.name && candidate.result.student?.studentId ? candidate : null;
+      if (!cached && session) try { this.window.sessionStorage?.removeItem('presence.attendanceQr.v1'); } catch {}
+      const [result, factory] = await Promise.all([
+        cached ? cached.result : this.api.call('/v1/student/attendance-qr', user, {}),
+        cached?.factory || new QrCodeLoader({ document: this.document, window: this.window }).load()
       ]);
       if (this.dialog !== dialog || generation !== this.generation) return;
       const code = factory(0, 'M'); code.addData(result.token); code.make();
       this.field('[data-qr-code]').innerHTML = code.createSvgTag({ cellSize: 5, margin: 4, scalable: true });
       this.field('[data-qr-code] svg')?.setAttribute('aria-label', 'Temporary attendance QR');
       const deadline = cached?.deadline ?? Date.now() + result.expiresAt - result.serverNow;
-      this.cachedQr = { uid: this.getUser()?.uid, result, factory, deadline };
+      this.cachedQr = { uid: user?.uid, session, result, factory, deadline };
+      if (session) try {
+        this.window.sessionStorage?.setItem('presence.attendanceQr.v1', JSON.stringify({ uid: user.uid, session, result, deadline }));
+      } catch { /* Restricted storage falls back to the in-memory QR. */ }
       this.downloadData = { code, student: result.student, expiresAt: result.expiresAt, deadline };
       this.field('[data-qr-identity]').textContent = `${result.student.name} · ${result.student.studentId}`;
       this.field('[data-qr-download]').disabled = false;
@@ -164,7 +184,7 @@ export class AttendanceQrController {
       if (this.window.PresenceNative?.isNative) {
         if (!this.window.PresenceNative.attendanceQrImage?.save) throw Error('Update the APK to download QR images.');
         const result = await this.window.PresenceNative.attendanceQrImage.save({ base64: image.split(',')[1], filename });
-        this.showToast(result.cancelled ? 'Download cancelled' : 'QR saved', result.cancelled ? 'No image was saved.' : 'The downloaded QR expires at the time shown on the image.');
+        this.showToast(result.cancelled ? 'Download cancelled' : 'QR saved', result.cancelled ? 'No image was saved.' : result.album === 'Pictures/Presence' ? 'Saved to Photos / Gallery · Pictures/Presence. The QR expires at the time shown.' : 'The downloaded QR expires at the time shown on the image.');
       } else {
         const link = this.document.createElement('a'); link.href = image; link.download = filename;
         this.document.body.append(link); link.click(); link.remove();
@@ -292,6 +312,7 @@ export class AttendanceQrController {
     this.document.removeEventListener('visibilitychange', this.onVisibility);
     this.window.removeEventListener('presence:attendance-qr-back', this.onBack);
     this.window.removeEventListener('presence:viewchange', this.onView);
+    this.window.removeEventListener('presence:device-signing-out', this.onSigningOut);
 
   }
 }
