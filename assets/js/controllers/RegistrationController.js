@@ -97,6 +97,7 @@ export class RegistrationController {
     if (required.some(name => !String(values[name] ?? '').trim())) {
       return 'Fill all the fields first before proceeding';
     }
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(String(values.accountId).trim())) return 'Use letters, numbers, hyphens or underscores for your Student ID (up to 64 characters).';
     if (values.password !== values.confirmPassword) return 'Passwords do not match.';
     if (!GenderPolicy.valid(values.gender)) return 'Choose Male, Female, or Not specified for gender.';
     try { hometownFields(values); } catch (error) { return error.message; }

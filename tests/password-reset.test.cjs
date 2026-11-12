@@ -16,9 +16,11 @@ test('browser fetch keeps its global receiver for reset and password completion'
     const user = {getIdToken:async force=>{assert.equal(force,true);return 'test-token';}};
     await api.reset(user, 'student', 'Testing reset');
     await api.complete(user, 'New-personal-password');
-    assert.equal(calls.length,2);
+    await api.completeFirstLogin(user, 'First-personal-password');
+    assert.equal(calls.length,3);
     assert.ok(calls[0].url.endsWith('/v1/admin/password-reset'));
     assert.ok(calls[1].url.endsWith('/v1/student/password-change'));
+    assert.ok(calls[2].url.endsWith('/v1/student/first-login-password'));
     assert.equal(calls[0].options.headers.Authorization,'Bearer test-token');
   } finally { globalThis.fetch = originalFetch; }
 });
@@ -158,4 +160,48 @@ test('Firebase token verifier checks RSA signature, project, expiry and key ID',
   await assert.rejects(verifyToken(await sign({...claims,aud:'other-project'}),fetcher,now),/Sign in/);
   await assert.rejects(verifyToken(await sign({...claims,exp:1}),fetcher,now),/Sign in/);
   const token=await sign(claims);await assert.rejects(verifyToken(token.slice(0,token.lastIndexOf('.')+1)+'AAAA',fetcher,now),/Sign in/);
+});
+
+test('first-login completion changes Auth server-side before unlocking and never stores the password', async () => {
+  const f = await fixture(); f.store.get('students/student').mustChangePassword = true;
+  await assert.rejects(f.service.completeFirstLogin(f.claims('student'), {newPassword:'01012005'}), /birthday/);
+  assert.equal(f.passwords.length, 0);
+  const result = await f.service.completeFirstLogin(f.claims('student'), {newPassword:'Personal!first-login42'});
+  assert.equal(f.passwords.length, 1);
+  assert.equal(f.store.get('students/student').mustChangePassword, false);
+  assert.ok(result.signInAfter > f.store.get('students/student').passwordResetValidAfter);
+  assert.ok(!JSON.stringify([...f.store]).includes('Personal!first-login42'));
+  f.advance(2000);
+  await assert.rejects(f.service.completeFirstLogin(f.claims('student'), {newPassword:'Another!first-login42'}), /no first-login/);
+});
+
+test('first-login completion cannot bypass reset, disabled account, correction lock or concurrent operation', async () => {
+  for (const kind of ['reset', 'disabled', 'correction', 'leased']) {
+    const f = await fixture(); f.store.get('students/student').mustChangePassword = true;
+    if (kind === 'reset') f.store.get('students/student').passwordResetRequired = true;
+    if (kind === 'disabled') f.users.get('student').disabled = true;
+    if (kind === 'correction') f.store.set('studentIdCorrectionLocks/student', {});
+    if (kind === 'leased') f.store.set('passwordResets/student', {leaseUntil:Date.parse('2026-10-27T08:02:00Z')});
+    await assert.rejects(f.service.completeFirstLogin(f.claims('student'), {newPassword:'Personal!first-login42'}));
+    assert.equal(f.passwords.length, 0); assert.equal(f.store.get('students/student').mustChangePassword, true);
+  }
+});
+
+test('uncertain first-login Auth/finalization failure keeps restrictions and supports a later safe retry', async () => {
+  for (const failAt of ['auth', 'finalize']) {
+    const f = await fixture(); f.store.get('students/student').mustChangePassword = true;
+    if (failAt === 'auth') f.failPassword();
+    else { const transaction = f.db.transaction; f.db.transaction = async fn => transaction(async get => {
+      const writes = await fn(get); if (writes.some(w => w.data.mustChangePassword === false)) throw Error('offline'); return writes;
+    }); }
+    await assert.rejects(f.service.completeFirstLogin(f.claims('student'), {newPassword:'Personal!first-login42'}), /unconfirmed/);
+    assert.equal(f.store.get('students/student').mustChangePassword, true);
+    assert.ok(!JSON.stringify([...f.store]).includes('Personal!first-login42'));
+    if (failAt === 'finalize') {
+      f.advance(121000);
+      f.db.transaction = async fn => {const writes=await fn(async path=>structuredClone(f.store.get(path)||null)); for(const {path,data,options} of writes) f.store.set(path,{...(options.merge?f.store.get(path):{}),...data});};
+      await f.service.completeFirstLogin(f.claims('student'), {newPassword:'Another!first-login42'});
+      assert.equal(f.store.get('students/student').mustChangePassword, false);
+    }
+  }
 });

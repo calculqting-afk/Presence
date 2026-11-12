@@ -17,7 +17,7 @@ function write(path, data, mask) {
 }
 async function commit(writes, uid, allowed=true) {
   const response=await fetch(base+':commit',{method:'POST',headers:{Authorization:`Bearer ${uid==='owner'?'owner':token(uid)}`,'Content-Type':'application/json'},body:JSON.stringify({writes})});
-  assert.equal(response.ok,allowed,await response.text());
+  assert.equal(response.ok,allowed,uid+' '+writes.map(w=>w.update.name).join(',')+' '+await response.text());
 }
 const profile = id => ({ uid:id,accountId:id,accountIdKey:id,authEmail:`${id}@example.test`,firstName:'Test',lastName:'Student',birthday:'2005-01-01',section:'2A',course:'BS Info Tech',active:true,role:'student',mustChangePassword:true,createdAt:SERVER,updatedAt:SERVER });
 (async()=>{
@@ -40,12 +40,12 @@ const profile = id => ({ uid:id,accountId:id,accountIdKey:id,authEmail:`${id}@ex
     assert.equal(saved.fields.status.stringValue,'approved');
   }
   for (const gender of ['', 'Male', 'Female', 'invalid']) {
-    const id = 'gender-' + (gender || 'blank');
+    const id = 'gender-' + (gender || 'blank').toLowerCase();
     await commit([write('students/'+id, { ...profile(id), gender })], 'head', gender !== 'invalid');
     const request = { uid:id, accountId:id, accountIdKey:id, birthday:'2005-01-01', firstName:'Test', lastName:'Student', course:'BS Info Tech', section:'2A', gender, status:'pending', requestedAt:SERVER, updatedAt:SERVER };
     await commit([write('registrationRequests/'+id, request)], id, gender !== 'invalid');
   }
-  await commit([write('students/gender-self',profile('gender-self'))], 'owner');
+  await commit([write('students/gender-self',{...profile('gender-self'),mustChangePassword:false})], 'owner');
   await commit([write('students/gender-self',{gender:'Female',updatedAt:SERVER},['gender','updatedAt'])], 'gender-self');
   await commit([write('students/gender-self',{gender:'invalid',updatedAt:SERVER},['gender','updatedAt'])], 'gender-self',false);
   await commit([write('students/gender-self',{gender:'Male',updatedAt:SERVER},['gender','updatedAt'])], 'student',false);
@@ -57,7 +57,7 @@ const profile = id => ({ uid:id,accountId:id,accountIdKey:id,authEmail:`${id}@ex
   await commit([write('students/gender-self',{photoDataUrl:'',firstName:'Edited',updatedAt:SERVER},['photoDataUrl','firstName','updatedAt'])], 'manager');
   await commit([write('students/gender-self',{photoDataUrl:'javascript:invalid'},['photoDataUrl'])], 'gender-self',false);
   const home={hometownBarangay:'San Juan',hometownCity:'Bontoc',hometownProvince:'Southern Leyte'};
-  await commit([write('students/home-self',profile('home-self'))],'owner');
+  await commit([write('students/home-self',{...profile('home-self'),mustChangePassword:false})],'owner');
   await commit([write('students/home-self',{...home,updatedAt:SERVER},[...Object.keys(home),'updatedAt'])],'home-self');
   await commit([write('students/home-self',{hometownBarangay:'Other'},['hometownBarangay'])],'student',false);
   await commit([write('students/home-self',{hometownProvince:'Leyte'},['hometownProvince'])],'manager');

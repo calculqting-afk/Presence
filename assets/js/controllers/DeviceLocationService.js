@@ -1,3 +1,13 @@
+// Shared by attendance preparation and its server proof. This validates the
+// reported reading; coordinates supplied by a device are not location attestation.
+export function attendanceLocationIssue(point, sampledAt, now = Date.now()) {
+  if (!point || ![point.latitude, point.longitude, point.accuracy].every(Number.isFinite)
+    || Math.abs(point.latitude) > 90 || Math.abs(point.longitude) > 180 || point.accuracy < 0) return 'GPS returned invalid coordinates or accuracy. Enable precise location and retry, or ask an administrator to scan your attendance QR.';
+  if (!Number.isFinite(sampledAt) || sampledAt > now + 5000 || now - sampledAt > 30000) return 'The GPS reading is stale or its time is invalid. Retry for a fresh reading, or ask an administrator to scan your attendance QR.';
+  if (point.accuracy > 50) return `GPS accuracy is ±${Math.ceil(point.accuracy)} m. A reading within 50 m is required. Enable precise location and retry, or ask an administrator to scan your attendance QR.`;
+  return '';
+}
+
 export class DeviceLocationService {
   constructor({ native = () => globalThis.PresenceNative, browser = () => globalThis.navigator?.geolocation,
     document = globalThis.document } = {}) {

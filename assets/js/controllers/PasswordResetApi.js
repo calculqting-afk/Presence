@@ -10,4 +10,5 @@ export class PasswordResetApi {
   }
   reset(user, studentUid, reason) { return this.call('/v1/admin/password-reset', user, { studentUid, reason, operationId: crypto.randomUUID() }); }
   complete(user, newPassword) { return this.call('/v1/student/password-change', user, { newPassword }); }
+  completeFirstLogin(user, newPassword) { return this.call('/v1/student/first-login-password', user, { newPassword }); }
 }

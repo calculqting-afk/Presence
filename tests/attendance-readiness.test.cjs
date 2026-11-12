@@ -9,7 +9,7 @@ async function fixture(options = {}) {
   const window = Object.assign(new EventTarget(), { navigator: { onLine: true, permissions: { query: async () => ({ state: 'prompt' }) } }, setInterval: () => 1, clearInterval() {} });
   const document = { body: { append() {}, setAttribute() {}, removeAttribute() {} }, createElement: () => dialog };
   const controller = new AttendanceReadinessController({ document, window, readFace: async () => true,
-    location: { read: async () => ({ coords: { latitude: 10, longitude: 124, accuracy: 5 } }) }, ...options });
+    location: { read: async () => ({ timestamp: Date.now(), coords: { latitude: 10, longitude: 124, accuracy: 5 } }) }, ...options });
   const pending = controller.require({ requiresGeofence: options.geofence !== false });
   await new Promise(resolve => setImmediate(resolve));
   return { controller, pending, window, dialog, field };
@@ -62,6 +62,23 @@ test('closing during a location request ignores its late result', async () => {
   f.controller.close(false); assert.equal(await f.pending, false);
   resolveLocation({ coords: { latitude: 10, longitude: 124, accuracy: 5 } });
   await location; assert.equal(f.controller.locationAt, 0); assert.equal(f.controller.dialog, null);
+});
+
+test('readiness rejects coarse and stale readings and offers the admin QR fallback', async () => {
+  const f = await fixture();
+  for (const position of [
+    { timestamp: Date.now(), coords: { latitude: 10, longitude: 124, accuracy: 500 } },
+    { timestamp: Date.now() - 31000, coords: { latitude: 10, longitude: 124, accuracy: 5 } },
+    { coords: { latitude: 10, longitude: 124, accuracy: 5 } }
+  ]) {
+    f.controller.location = { read: async () => position };
+    await f.controller.checkLocation(f.dialog);
+    assert.equal(f.controller.ready(), false);
+    assert.match(f.field('[data-state="gps"]').textContent, /administrator.*QR/);
+  }
+  f.controller.location = { read: async () => ({ timestamp: Date.now(), coords: { latitude: 10, longitude: 124, accuracy: 5 } }) };
+  await f.controller.checkLocation(f.dialog); assert.equal(f.controller.ready(), true);
+  f.controller.dispose();
 });
 
 test('Android Back cancels preparation without allowing late checks to proceed', async () => {

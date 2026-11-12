@@ -18,8 +18,10 @@ import { StudentHistoryPresenter } from '../controllers/StudentHistoryPresenter.
 import { SurveyConfirmationController } from '../controllers/SurveyConfirmationController.js';
 import { StudentIdentityController } from '../controllers/StudentIdentityController.js';
 import { StudentAttendanceController } from '../controllers/StudentAttendanceController.js?v=20261011-optimized';
-import { currentUser, currentUserProfile, escapeHtml, formatBirthday, FineModalController, showDashboardToast, createNotification, uploadFacePhotoToDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineTimestamp, getFineHistory, updateDashboardGreeting, createDeviceSessionToken, auth, db, signOut, updatePassword, collection, deleteField, doc, getDoc, getDocFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch, sessionState } from '../dashboard.js?v=20261011-optimized';
+import { currentUser, currentUserProfile, escapeHtml, formatBirthday, FineModalController, showDashboardToast, createNotification, uploadFacePhotoToDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isCheckoutAvailable, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, formatFineTimestamp, getFineHistory, updateDashboardGreeting, createDeviceSessionToken, auth, db, signOut, collection, deleteField, doc, getDoc, getDocFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch, sessionState } from '../dashboard.js?v=20261011-optimized';
 import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
+import { ROLE_VIEWS } from '../core/permissions.js?v=20261011-optimized';
+import { DailyAttendanceClock } from '../controllers/DailyAttendanceClock.js';
 import { AttendancePolicy, LateCheckInModal, AttendanceCheckInController, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261011-optimized';
 import { AttendanceSummaryService } from '../controllers/AttendanceSummaryService.js';
 import { StudentAttendanceListController } from '../controllers/StudentAttendanceListController.js?v=20261011-optimized';
@@ -30,6 +32,9 @@ import { AttendanceAlertsController } from '../controllers/AttendanceAlertsContr
 import { onAuthStateChanged } from '../dashboard.js?v=20261011-optimized';
 import { StudentAttendanceSummaryController } from '../controllers/StudentAttendanceSummaryController.js';
 import { PushAttendanceNotifications, stopAttendancePush } from '../controllers/PushAttendanceNotifications.js';
+const requiresPasswordChange = profile => profile?.passwordResetRequired === true || profile?.mustChangePassword === true;
+const historicalEventViews = ['dashboard', 'attendances', 'history', 'fines', 'profile'];
+
 export class StudentDashboard {
   constructor({
     document = globalThis.document,
@@ -125,7 +130,7 @@ export class StudentDashboard {
     this.scope.addCleanup(() => this.studentSummary.dispose());
     this.attendanceAlerts = new AttendanceAlertsController({ uid: currentUser.uid, document: this.document, window: this.window,
       getState: () => ({ student: { ...this.studentProfile, uid: currentUser.uid }, events: this.events, attendance: this.attendance,
-        ready: this.studentProfile?.passwordResetRequired !== true && this.eventsConfirmed && this.attendanceConfirmed }) });
+        ready: !requiresPasswordChange(this.studentProfile) && this.eventsConfirmed && this.attendanceConfirmed }) });
     this.attendanceAlerts.initialize();
     this.scope.addCleanup(() => this.attendanceAlerts.dispose());
     this.attendancePush = new PushAttendanceNotifications({getUser:()=>auth.currentUser,getStudent:()=>this.studentProfile,
@@ -142,9 +147,9 @@ export class StudentDashboard {
     void this.initializeCorrectionRequests().catch(() => {});
   }
   async initializeCorrectionRequests() {
-    if ((this.studentProfile || currentUserProfile)?.passwordResetRequired === true) return;
+    if (requiresPasswordChange((this.studentProfile || currentUserProfile))) return;
     const { CorrectionRequestsController } = await import('../controllers/CorrectionRequestsController.js');
-    if (!this.scope.initialized || this.correctionRequests || this.studentProfile?.passwordResetRequired === true) return;
+    if (!this.scope.initialized || this.correctionRequests || requiresPasswordChange(this.studentProfile)) return;
     this.correctionRequests = new CorrectionRequestsController({ root: this.document.querySelector('#studentCorrectionRequests'),
       db, user: currentUser, window: this.window, getView: () => this.view, getEvents: () => this.events, getStudent: () => ({ ...this.studentProfile, uid: currentUser.uid }), escapeHtml, notify: showDashboardToast });
     this.correctionRequests.initialize();
@@ -153,10 +158,14 @@ export class StudentDashboard {
   initializeState() {
     const dashboard = this;
     dashboard.subscriptions = new ScopedSubscriptions({
-      isEnabled: key => key === 'profile' || (dashboard.studentProfile || currentUserProfile)?.passwordResetRequired !== true,
+      isEnabled: key => key === 'profile' || !requiresPasswordChange((dashboard.studentProfile || currentUserProfile)),
       onError: (error, key) => {
         dashboard.loading?.settle(key);
-        if (key === 'events') dashboard.eventsConfirmed = false;
+        if (['events', 'event-history'].includes(key)) {
+          dashboard.eventsConfirmed = false;
+          const source = dashboard.eventSources.get(key === 'events' ? 'current' : 'history');
+          if (source) source.confirmed = false;
+        }
         if (key === 'attendance') dashboard.attendanceConfirmed = false;
         dashboard.studentSummary?.render();
         console.error(key, error);
@@ -173,6 +182,7 @@ export class StudentDashboard {
       dashboard.window.removeEventListener('presence:viewchange', dashboard.changeSubscriptions);
     });
     dashboard.events = [];
+    dashboard.eventSources = new Map();
     dashboard.eventsById = new Map();
     dashboard.attendance = [];
     dashboard.attendanceConfirmed = false;
@@ -352,22 +362,13 @@ export class StudentDashboard {
       }
       dashboard.applyProfile(snapshot.data());
     });
-    dashboard.listen('events', ["*"], query(collection(db, "events"), orderBy("openAt", "asc")), snapshot => {
-      dashboard.eventsConfirmed = !snapshot.metadata?.fromCache && !snapshot.metadata?.hasPendingWrites;
-      dashboard.events = snapshot.docs.map(item => ({
-        id: item.id,
-        ...item.data()
-      }));
-      dashboard.eventsById = new Map(dashboard.events.map(event => [event.id, event]));
-      dashboard.openPushEvent?.();
-      dashboard.correctionRequests?.render();
-      dashboard.metrics?.finish('events-first-data');
-      dashboard.scheduleEventRender();
-      dashboard.renderMyAttendances();
-      dashboard.scheduleEventStatusRefresh();
-      dashboard.attendanceAlerts?.update();
-    });
-    dashboard.listen('attendance', ["*"], query(collection(db, "attendance"), where("studentUid", "==", currentUser.uid)), snapshot => {
+    // Alerts need current/upcoming schedules, not every past event at sign-in.
+    // History/summary views retain the complete query and existing behavior.
+    const currentViews = ROLE_VIEWS.student.filter(view => !historicalEventViews.includes(view));
+    dashboard.listen('events', currentViews, () => query(collection(db, 'events'), where('checkOutClosesAt', '>=',
+      new Date(`${DailyAttendanceClock.dateKey()}T00:00:00+08:00`))), snapshot => dashboard.receiveEvents('current', snapshot));
+    dashboard.listen('event-history', historicalEventViews, query(collection(db, 'events'), orderBy('openAt', 'asc')), snapshot => dashboard.receiveEvents('history', snapshot));
+    dashboard.listen('attendance', ROLE_VIEWS.student, query(collection(db, "attendance"), where("studentUid", "==", currentUser.uid)), snapshot => {
       dashboard.attendanceConfirmed = !snapshot.metadata?.fromCache;
       dashboard.attendanceHasPendingWrites = Boolean(snapshot.metadata?.hasPendingWrites);
       dashboard.attendance = snapshot.docs.map(item => ({
@@ -400,13 +401,32 @@ export class StudentDashboard {
       }
     });
   }
+  receiveEvents(source, snapshot) {
+    this.eventSources.set(source, { events: snapshot.docs.map(item => ({ id: item.id, ...item.data() })),
+      confirmed: !snapshot.metadata?.fromCache && !snapshot.metadata?.hasPendingWrites });
+    this.refreshEventSource();
+    this.loading?.settle('events');
+    this.metrics?.finish('events-first-data');
+  }
+  refreshEventSource() {
+    const source = this.eventSources.get(historicalEventViews.includes(this.view) ? 'history' : 'current');
+    this.events = (source?.events || []).slice().sort((a, b) => eventOpenDate(a) - eventOpenDate(b));
+    this.eventsConfirmed = source?.confirmed === true;
+    this.eventsById = new Map(this.events.map(event => [event.id, event]));
+    this.openPushEvent?.();
+    this.correctionRequests?.refreshEvents();
+    this.scheduleEventRender();
+    this.renderMyAttendances();
+    this.scheduleEventStatusRefresh();
+    this.attendanceAlerts?.update();
+  }
   applyProfile(profile) {
     if (!this.scope.initialized || !profile || !Object.keys(profile).length) return;
     this.studentProfile = CoursePolicy.profile(profile);
-    if (this.studentProfile.passwordResetRequired === true) void stopAttendancePush(auth.currentUser).catch(()=>{});
+    if (requiresPasswordChange(this.studentProfile)) void stopAttendancePush(auth.currentUser).catch(()=>{});
     // Keep only the readable profile listener while the reset lock is active.
     if (this.subscriptions?.view != null) this.subscriptions.setView(this.subscriptions.view);
-    if (this.studentProfile.passwordResetRequired === true && this.correctionRequests) {
+    if (requiresPasswordChange(this.studentProfile) && this.correctionRequests) {
       this.correctionRequests.dispose();
       this.correctionRequests = undefined;
     }
@@ -426,21 +446,30 @@ export class StudentDashboard {
       if (key === 'profile' || !snapshot.metadata?.fromCache) dashboard.loading?.settle(key);
       return result;
     };
-    return dashboard.subscriptions.register(key, views, (guard, onError) => ['attendance', 'events'].includes(key)
-      ? onSnapshot(reference, { includeMetadataChanges: true }, guard(receive), onError)
-      : onSnapshot(reference, guard(receive), onError));
+    return dashboard.subscriptions.register(key, views, (guard, onError) => {
+      if (['events', 'event-history'].includes(key)) {
+        const source = dashboard.eventSources.get(key === 'events' ? 'current' : 'history');
+        if (source) source.confirmed = false;
+        dashboard.eventsConfirmed = false;
+      }
+      const source = typeof reference === 'function' ? reference() : reference;
+      return ['attendance', 'events', 'event-history'].includes(key)
+        ? onSnapshot(source, { includeMetadataChanges: true }, guard(receive), onError)
+        : onSnapshot(source, guard(receive), onError);
+    });
   }
   changeSubscriptions(event) {
     const dashboard = this;
     dashboard.view = event.detail.viewName;
     if (dashboard.view !== 'history') dashboard.historyRemovalConfirmation?.finish(false);
     dashboard.subscriptions.setView(dashboard.view);
+    dashboard.refreshEventSource();
     dashboard.scheduleEventRender();
     dashboard.renderMyAttendances();
     if (dashboard.view === 'fines') dashboard.renderFines();
   }
   updatePresence(status = "online", silent = false) {
-    if ((this.studentProfile || currentUserProfile)?.passwordResetRequired === true) return Promise.resolve();
+    if (requiresPasswordChange((this.studentProfile || currentUserProfile))) return Promise.resolve();
     if (this.presenceDisposed || sessionState.studentLoggedOut || !currentUser?.uid || auth.currentUser?.uid !== currentUser.uid || !sessionState.presenceSessionId) return Promise.resolve();
     const pending = Promise.resolve(sessionState.presenceWrite).catch(() => {}).then(() => {
       if (this.presenceDisposed || sessionState.studentLoggedOut || auth.currentUser?.uid !== currentUser.uid) return;
@@ -451,7 +480,7 @@ export class StudentDashboard {
   }
   async writePresence(status = "online", silent = false) {
     const dashboard = this;
-    if ((dashboard.studentProfile || currentUserProfile)?.passwordResetRequired === true) return;
+    if (requiresPasswordChange((dashboard.studentProfile || currentUserProfile))) return;
     if (D1_PRESENCE_ENABLED) {
       try {
         this.presenceClient ||= new PresenceClient();
@@ -563,6 +592,11 @@ export class StudentDashboard {
   }
   openPushEvent() {
     const event=this.eventsById?.get(this.pushEventId);
+    // Resolve older notification targets through the history view only when needed.
+    if (!event && this.pushEventId && this.view === 'events' && this.eventsConfirmed) {
+      openView('attendances');
+      return;
+    }
     if (!event || !AttendanceViews.state(AttendanceViews.related(event,this.events)).closed) return;
     this.pushEventId=undefined;
     openView('attendances');
@@ -1085,16 +1119,16 @@ export class StudentDashboard {
       } else {
         const user = auth.currentUser || currentUser;
         const email = user.email;
-        await updatePassword(user, newPassword);
+        dashboard.passwordResetApi ||= new PasswordResetApi();
+        const result = await dashboard.passwordResetApi.completeFirstLogin(user, newPassword);
         passwordUpdated = true;
+        await new Promise(resolve => dashboard.window.setTimeout(resolve, Math.max(0, result.signInAfter * 1000 + 200 - Date.now())));
         if (dashboard.document.body.hasAttribute?.('data-device-session-enabled')) {
           await dashboard.restorePasswordSession(email, newPassword);
-        }
-        await setDoc(doc(db, "students", user.uid), { mustChangePassword: false, updatedAt: serverTimestamp() }, { merge: true });
+        } else await signInAfterPasswordReset(auth, email, newPassword);
+        dashboard.window.location.reload();
+        return;
       }
-      dashboard.closeRequiredPasswordChangeModal();
-      showDashboardToast("Password changed", "Your new password is now active.");
-      if (dashboard.document.body.hasAttribute?.('data-device-session-enabled')) dashboard.window.location.reload();
     } catch (error) {
       const message = passwordUpdated ? "Your password was changed, but Presence could not finish setup. Sign in with the new password and retry after checking your connection and Firestore rules." : error.code === "auth/requires-recent-login" ? "Please sign out and sign in again, then create your new password immediately." : error.code === "auth/weak-password" ? "Use a stronger password with at least 8 characters." : error.message || "Your password could not be changed.";
       showDashboardToast("Unable to finish password change", message);

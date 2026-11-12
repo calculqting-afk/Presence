@@ -60,6 +60,38 @@ export class ResetService {
     }
     return { temporaryPassword: password, operationId: body.operationId, requiresPasswordChange: true, expiresAt: new Date(now + TEMPORARY_PASSWORD_TTL_MS).toISOString() };
   }
+  async completeFirstLogin(claims, body) {
+    const user = await this.authenticate(claims);
+    if (authHasSuperAdmin(user)) throw new SafeError(403, 'Student first-login setup is required.');
+    const uid = claims.sub, path = 'passwordResets/' + uid, now = this.now();
+    const operationId = crypto.randomUUID();
+    await this.db.transaction(async get => {
+      const profile = await get('students/' + uid), ledger = await get(path);
+      const correction = await get('studentIdCorrectionLocks/' + uid);
+      if (profile?.active !== true || profile.mustChangePassword !== true || profile.passwordResetRequired === true
+        || (profile.uid && profile.uid !== uid)) throw new SafeError(409, 'There is no first-login password change awaiting completion.');
+      if (correction) throw new SafeError(409, 'Finish the pending Student ID correction before changing this password.');
+      if ((ledger?.leaseUntil || 0) > now) throw new SafeError(409, 'A password change is in progress. Wait two minutes before retrying.');
+      const error = StudentPasswordPolicy.newPasswordError(body.newPassword, profile);
+      if (error) throw new SafeError(400, error);
+      // Share the existing password-operation lease with admin resets.
+      return [this.db.write(path, { operationId, state: 'first-login-completing', startedAt: now, leaseUntil: now + 120000 })];
+    });
+    try {
+      const validAfter = Math.floor(this.now() / 1000);
+      await this.db.password(uid, body.newPassword, validAfter);
+      await this.db.transaction(async get => {
+        const profile = await get('students/' + uid), ledger = await get(path);
+        if (profile?.active !== true || profile.passwordResetRequired === true || profile.mustChangePassword !== true
+          || ledger?.operationId !== operationId || ledger.state !== 'first-login-completing') throw new SafeError(409, 'Account state changed.');
+        return [this.db.write('students/' + uid, { mustChangePassword: false, passwordResetValidAfter: validAfter, updatedAt: new Date(this.now()) }, { merge: true, exists: true }),
+          this.db.write(path, { state: 'resolved', leaseUntil: 0, completedAt: this.now() }, { merge: true, exists: true })];
+      });
+      return { requiresSignIn: true, signInAfter: validAfter + 1 };
+    } catch {
+      throw new SafeError(503, 'Password change is unconfirmed. Your chosen password may already be active. Sign in again, wait two minutes and retry if still restricted.');
+    }
+  }
   async complete(claims, body) {
     await this.authenticate(claims);
     const uid = claims.sub, now = this.now(); let operationId;

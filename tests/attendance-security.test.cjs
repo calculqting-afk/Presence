@@ -16,8 +16,30 @@ async function fixture() {
     }
   };
   return { service: new AttendanceSecurityService(db, () => now), store, writes,
-    claims: { sub: 'student', auth_time: now/1000-100 }, body: { eventId: 'event', action: 'in', location: { latitude: 10, longitude: 124, accuracy: 5, distanceMeters: 0 } } };
+    claims: { sub: 'student', auth_time: now/1000-100 }, body: { eventId: 'event', action: 'in', sampledAt: now, location: { latitude: 10, longitude: 124, accuracy: 5, distanceMeters: 0 } } };
 }
+
+test('GPS rejects stale, future, missing and coarse samples before Firebase reads; boundary allowance remains capped', async () => {
+  for (const sampledAt of [undefined, null, '123', now - 30001, now + 5001]) {
+    const f = await fixture(); f.service.db.user = async () => { throw Error('unexpected Firebase read'); };
+    await assert.rejects(f.service.location(f.claims, { ...f.body, sampledAt }), /GPS reading/);
+    assert.equal(f.writes.length, 0);
+  }
+  for (const accuracy of [undefined, null, '5', NaN, -1, 50.01, 100000]) {
+    const f = await fixture(); f.service.db.user = async () => { throw Error('unexpected Firebase read'); };
+    await assert.rejects(f.service.location(f.claims, { ...f.body, location: { ...f.body.location, accuracy } }), /GPS/);
+    assert.equal(f.writes.length, 0);
+  }
+  const f = await fixture();
+  await f.service.location(f.claims, { ...f.body, sampledAt: now - 30000, location: { ...f.body.location, accuracy: 50 } });
+  assert.equal(f.store.get('attendanceLocationProofs/student_event_in').expiresAt.getTime(), now);
+  await assert.rejects(f.service.location(f.claims, { ...f.body, location: { ...f.body.location, latitude: 10.001, accuracy: 50 } }), /outside/);
+  const g = await fixture(); g.service.db.transaction = async fn => {
+    g.service.now = () => now + 30001;
+    return fn(async path => g.store.get(path));
+  };
+  await assert.rejects(g.service.location(g.claims, g.body), /GPS reading/);
+});
 test('GPS proof uses server geometry, current boundary, exact location and a 30-second deadline', async () => {
   const f=await fixture(); await f.service.location(f.claims,f.body);
   const proof=f.store.get('attendanceLocationProofs/student_event_in');
@@ -25,11 +47,18 @@ test('GPS proof uses server geometry, current boundary, exact location and a 30-
   assert.deepEqual(proof.location,f.body.location);assert.equal(proof.geofence._updateTime,undefined);
   assert.equal(f.writes.length,2);
 });
+test('GPS proof never extends the sample freshness deadline or future clock allowance', async () => {
+  for (const offset of [-29000, 5000]) {
+    const f = await fixture();
+    await f.service.location(f.claims, { ...f.body, sampledAt: now + offset });
+    assert.equal(f.store.get('attendanceLocationProofs/student_event_in').expiresAt.getTime(), now + Math.min(offset, 0) + 30000);
+  }
+});
 test('GPS rejects forged outside positions, large accuracy allowance, invalid coordinates, stale sessions and closed windows',async()=>{
   for(const location of [{latitude:11,longitude:124,accuracy:100000,distanceMeters:0},{latitude:NaN,longitude:124,accuracy:0},{latitude:10,longitude:124,accuracy:-1}]) {
     const f=await fixture();await assert.rejects(f.service.location(f.claims,{...f.body,location}));assert.equal(f.writes.length,0);
   }
-  for(const patch of [{active:false},{passwordResetRequired:true},{passwordResetValidAfter:now/1000}]){
+  for(const patch of [{active:false},{mustChangePassword:true},{passwordResetRequired:true},{passwordResetValidAfter:now/1000}]){
     const f=await fixture();Object.assign(f.store.get('students/student'),patch);await assert.rejects(f.service.location(f.claims,f.body),/unrestricted/);
   }
   const f=await fixture();f.store.get('events/event').checkOutClosesAt=new Date(now-1);await assert.rejects(f.service.location(f.claims,f.body),/closed/);

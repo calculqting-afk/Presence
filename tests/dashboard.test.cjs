@@ -751,7 +751,7 @@ test('student polygon verification uses capped accuracy and checks malformed bou
   const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks({ getDocFromServer: async () => ({ exists: () => true, data: () => area }) }), { document: gridDocument });
   const controller = new StudentAttendanceController({});
   let gps = 0, longitude = 121.0005;
-  controller.getCurrentCheckInLocation = async () => { gps++; return { coords: { latitude: 14.0005, longitude, accuracy: 500 } }; };
+  controller.getCurrentCheckInLocation = async () => { gps++; return { timestamp: Date.now(), coords: { latitude: 14.0005, longitude, accuracy: 50 } }; };
   assert.equal((await controller.verifiedGeofenceLocation({ id: 'event' })).distanceMeters, 0);
   longitude = 121.002;
   await assert.rejects(controller.verifiedGeofenceLocation({ id: 'event' }), error => error.geofenceIssue === 'outside' && error.boundaryType === 'polygon');
@@ -760,7 +760,7 @@ test('student polygon verification uses capped accuracy and checks malformed bou
   assert.equal(gps, 4);
   area = polygonArea;
   let samples = 0;
-  controller.getCurrentCheckInLocation = async () => ({ coords: samples++ === 0
+  controller.getCurrentCheckInLocation = async () => ({ timestamp: Date.now(), coords: samples++ === 0
     ? { latitude: 14.0005, longitude: 121.002, accuracy: 100 }
     : { latitude: 14.0005, longitude: 121.0005, accuracy: 5 } });
   assert.equal((await controller.verifiedGeofenceLocation({ id: 'event' })).accuracy, 5);
@@ -798,10 +798,41 @@ test('student geofence rejects missing configuration before requesting GPS', asy
 test('student geofence accepts inside location and caps GPS allowance outside', async () => {
   const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js', attendanceMocks(), { document: gridDocument });
   const controller = new StudentAttendanceController({});
-  controller.getCurrentCheckInLocation = async () => ({ coords: { latitude: 14, longitude: 121, accuracy: 5 } });
+  controller.getCurrentCheckInLocation = async () => ({ timestamp: Date.now(), coords: { latitude: 14, longitude: 121, accuracy: 5 } });
   assert.equal((await controller.verifiedGeofenceLocation({ id: 'event' })).distanceMeters, 0);
-  controller.getCurrentCheckInLocation = async () => ({ coords: { latitude: 15, longitude: 121, accuracy: 1000000 } });
+  controller.getCurrentCheckInLocation = async () => ({ timestamp: Date.now(), coords: { latitude: 15, longitude: 121, accuracy: 50 } });
   await assert.rejects(controller.verifiedGeofenceLocation({ id: 'event' }), error => error.geofenceIssue === 'outside');
+});
+
+test('attendance rejects stale/coarse GPS, retries an improving fix, and sends sample time only to the Worker', async () => {
+  const writes = [], requests = [];
+  const { StudentAttendanceController } = await isolatedModule('assets/js/controllers/StudentAttendanceController.js',
+    attendanceMocks({ setDoc: async (...args) => writes.push(args) }), { document: gridDocument });
+  const controller = new StudentAttendanceController({});
+  for (const sample of [
+    { timestamp: Date.now(), coords: { latitude: 14, longitude: 121, accuracy: 500 } },
+    { timestamp: Date.now() - 31000, coords: { latitude: 14, longitude: 121, accuracy: 1 } },
+    { timestamp: Date.now(), coords: { latitude: 14, longitude: 121 } }
+  ]) {
+    let calls = 0;
+    controller.getCurrentCheckInLocation = async () => { calls++; return sample; };
+    await assert.rejects(controller.verifiedGeofenceLocation({ id: 'event' }), /administrator.*QR/);
+    assert.equal(calls, 3, 'GPS retries are bounded and do not perform more boundary reads');
+  }
+  let calls = 0;
+  const sampledAt = Date.now();
+  controller.getCurrentCheckInLocation = async () => ({ timestamp: sampledAt, coords: { latitude: 14, longitude: 121, accuracy: calls++ ? 5.25 : 500 } });
+  const location = await controller.verifiedGeofenceLocation({ id: 'event' });
+  assert.equal(calls, 2); assert.equal(location.accuracy, 5.25);
+  controller.securityApi = { call: async (...args) => requests.push(args) };
+  const reference = { id: 'student-1_event' }, payload = { eventId: 'event', checkInLocation: location };
+  await controller.submission.write(reference, payload, {});
+  assert.equal(requests[0][2].sampledAt, sampledAt);
+  assert.equal(requests[0][2].location, location);
+  assert.equal(writes[0][1].checkInLocation, location);
+  assert.equal(Object.hasOwn(location, 'timestamp'), false);
+  assert.equal(Object.hasOwn(payload, 'sampledAt'), false);
+  controller.dispose();
 });
 
 test('checkout rejects a closed window without writing any record', async () => {
@@ -991,6 +1022,11 @@ for (const role of ['Student', 'Admin']) {
     const shared = Object.fromEntries(names.map(name => [name, () => '']));
     const active = new Map(); const started = [];
     Object.assign(shared, { currentUser: { uid: 'student-1', email: 'test@example.com' }, currentUserProfile: {}, currentUserRole: role === 'Student' ? 'student' : 'super_admin', activeView: 'dashboard', ASSIGNABLE_ROLE_LABELS: {}, sessionState: {}, db: {}, collection: (_, name) => name, doc: (_, name, id) => `${name}/${id}`, query: value => value, onAuthStateChanged: () => () => {}, onSnapshot: (reference, optionsOrCallback, next) => { const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : next; started.push(reference); active.set(reference, callback); return () => active.delete(reference); }, setDoc: async () => {}, createDeviceSessionToken: () => 'test-session', FineModalController: class {}, Timestamp: { now: () => new Date(), fromMillis: value => new Date(value) } });
+    if (role === 'Student') {
+      shared.where = (field, operation, value) => ({ field, operation, value });
+      shared.query = (value, ...filters) => value === 'events'
+        ? (filters.some(filter => filter?.field === 'checkOutClosesAt' && filter.operation === '>=' && Number.isFinite(+filter.value)) ? 'events-current' : 'events-history') : value;
+    }
     const browser = fakeBrowser();
     const module = await isolatedModule(`assets/js/${role.toLowerCase()}/${role}Dashboard.js`, shared, browser);
     const dashboard = new module[`${role}Dashboard`]();
@@ -1005,6 +1041,8 @@ for (const role of ['Student', 'Admin']) {
       browser.window.emit('dashboard'); assert.equal(active.has('presenceSessions'), false);
       browser.window.emit('geofence'); assert.equal(active.has('students'), false); // D1 directory does not retain a whole-roster listener.
       browser.window.emit('create'); assert.equal(active.has('students'), true);
+      browser.window.emit('modify-events'); assert.equal(active.has('students'), false);
+      browser.window.emit('past-events'); assert.equal(active.has('students'), false);
       const queued = new Map(); let token = 0, filtered = 0;
       browser.window.setTimeout = (handler, delay) => { assert.equal(delay, 200); queued.set(++token, handler); return token; };
       browser.window.clearTimeout = id => queued.delete(id);
@@ -1016,8 +1054,13 @@ for (const role of ['Student', 'Admin']) {
       assert.equal(active.has('dismissedHistory'), false);
       browser.window.emit('history'); assert.equal(active.has('dismissedHistory'), true);
       browser.window.emit('dashboard'); assert.equal(active.has('dismissedHistory'), false);
-      browser.window.emit('surveys'); assert.equal(active.has('events'), true); assert.equal(active.has('attendance'), true);
-      browser.window.emit('attendances'); assert.equal(active.has('events'), true); assert.equal(active.has('attendance'), true);
+      browser.window.emit('surveys'); assert.equal(active.has('events-current'), true); assert.equal(active.has('events-history'), false); assert.equal(active.has('attendance'), true);
+      browser.window.emit('attendance-qr'); assert.equal(active.has('events-current'), true); assert.equal(active.has('events-history'), false);
+      browser.window.emit('attendances'); assert.equal(active.has('events-history'), true); assert.equal(active.has('events-current'), false); assert.equal(active.has('attendance'), true);
+      browser.document.hidden = true; dashboard.subscriptions.setVisible(false);
+      assert.equal(active.has('events-history'), false); assert.equal(active.has('attendance'), false);
+      browser.document.hidden = false; dashboard.subscriptions.setVisible(true);
+      assert.equal(active.has('events-history'), true); assert.equal(active.has('attendance'), true);
       const grid = browser.document.querySelector('#studentEventGrid'); let markup = '', writes = 0;
       Object.defineProperty(grid, 'innerHTML', { get: () => markup, set: value => { markup = value; writes++; } });
       browser.window.emit('events'); dashboard.renderEvents(); dashboard.renderEvents();
@@ -2393,7 +2436,7 @@ test('failed history save keeps the entry visible and permits retry without clai
 test('leaving the history view cancels its pending confirmation', async () => {
   const browser=fakeBrowser(),shared=birthdayOnboardingShared();let cancelled;
   const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
-  const state={historyRemovalConfirmation:{finish:value=>cancelled=value},subscriptions:{setView(){}},scheduleEventRender(){},renderMyAttendances(){}};
+  const state={historyRemovalConfirmation:{finish:value=>cancelled=value},subscriptions:{setView(){}},refreshEventSource(){},scheduleEventRender(){},renderMyAttendances(){}};
   StudentDashboard.prototype.changeSubscriptions.call(state,{detail:{viewName:'events'}});
   assert.equal(cancelled,false);
 });
@@ -2484,34 +2527,27 @@ test('protected student completion uses the Worker and fresh sign-in instead of 
   assert.equal(authChanges,0);assert.equal(profileWrites,0);assert.equal(signedIn[1],actor.email);assert.equal(signedIn[2],'Personal!test-password');assert.equal(reloaded,1);
 });
 
-test('first-login password change rejects reuse, updates Auth before profile and handles duplicate submits', async () => {
-  const browser=fakeBrowser(), steps=[], toasts=[];let finish;
-  const shared=birthdayOnboardingShared({showDashboardToast:(...args)=>toasts.push(args),
-    updatePassword:async(_,password)=>{steps.push(['auth',password]);await new Promise(resolve=>finish=resolve);},
-    setDoc:async(_,data)=>steps.push(['profile',data]),doc:()=> 'students/student-1',serverTimestamp:()=> 'server'});
+test('first-login password change rejects reuse and duplicate submits, then signs in after server completion', async () => {
+  const browser=fakeBrowser(),steps=[],toasts=[];let finish;
+  const shared=birthdayOnboardingShared({showDashboardToast:(...args)=>toasts.push(args),updatePassword:async()=>{throw Error('Client must not change Auth');},setDoc:async()=>{throw Error('Client must not clear flags');},signInWithEmailAndPassword:async()=>steps.push('signin')});
   const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
-  let closed=0;
-  const state={document:browser.document,studentProfile:shared.currentUserProfile,completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),closeRequiredPasswordChangeModal:()=>closed++};
+  const state={document:browser.document,window:{setTimeout:fn=>fn(),location:{reload:()=>steps.push('reload')}},studentProfile:shared.currentUserProfile,completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),passwordResetApi:{completeFirstLogin:async()=>{steps.push('server');return new Promise(resolve=>finish=resolve);}}};
   const set=(a,b=a)=>{browser.document.querySelector('#requiredNewPassword').value=a;browser.document.querySelector('#requiredConfirmPassword').value=b;};
   set('01022005');await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});assert.equal(steps.length,0);assert.match(toasts.at(-1)[1],/birthday/);
   set('Student!42','different');await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});assert.equal(steps.length,0);
   set('Student!42');const pending=StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});
-  await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});assert.equal(steps.length,1);
-  finish();await pending;assert.equal(steps[1][0],'profile');assert.equal(steps[1][1].mustChangePassword,false);assert.equal(closed,1);assert.equal(state.requiredPasswordChangeBusy,false);
+  await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});assert.deepEqual(steps,['server']);
+  finish({signInAfter:0});await pending;assert.deepEqual(steps,['server','signin','reload']);assert.equal(state.requiredPasswordChangeBusy,false);
 });
 
-test('failed Auth password change does not clear setup; failed profile save explains the new password', async () => {
-  for(const failAt of ['auth','profile']) {
-    const browser=fakeBrowser(),toasts=[];let profileWrites=0,closed=0;
-    const shared=birthdayOnboardingShared({showDashboardToast:(...args)=>toasts.push(args),updatePassword:async()=>{if(failAt==='auth')throw Error('offline');},
-      setDoc:async()=>{profileWrites++;throw Error('offline');}});
-    const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
-    browser.document.querySelector('#requiredNewPassword').value='Student!42';browser.document.querySelector('#requiredConfirmPassword').value='Student!42';
-    const state={document:browser.document,studentProfile:shared.currentUserProfile,completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),closeRequiredPasswordChangeModal:()=>closed++};
-    await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});
-    assert.equal(profileWrites,failAt==='auth'?0:1);assert.equal(closed,0);assert.equal(state.completeRequiredPasswordChange.disabled,false);
-    if(failAt==='profile')assert.match(toasts.at(-1)[1],/Sign in with the new password/);
-  }
+test('failed server first-login completion keeps the modal open and never writes a profile flag', async () => {
+  const browser=fakeBrowser(),toasts=[];let writes=0;
+  const shared=birthdayOnboardingShared({showDashboardToast:(...args)=>toasts.push(args),setDoc:async()=>writes++});
+  const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
+  browser.document.querySelector('#requiredNewPassword').value='Student!42';browser.document.querySelector('#requiredConfirmPassword').value='Student!42';
+  const state={document:browser.document,studentProfile:shared.currentUserProfile,completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),passwordResetApi:{completeFirstLogin:async()=>{throw Error('Password change is unconfirmed. Sign in again and retry.');}},closeRequiredPasswordChangeModal(){throw Error('Must remain open');}};
+  await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});
+  assert.equal(writes,0);assert.equal(state.completeRequiredPasswordChange.disabled,false);assert.match(toasts.at(-1)[1],/unconfirmed/);
 });
 
 test('presence logout drains an in-flight heartbeat and closes only the current user device', async () => {
@@ -2528,6 +2564,22 @@ test('presence logout drains an in-flight heartbeat and closes only the current 
   await endPresenceSession({ user: { uid: 'other-user' }, state, window: { clearInterval() {} },
     storage: { getItem: () => 'student-1_device' }, write: async (...args) => writes.push(args) });
   assert.equal(writes.length, 0);
+});
+
+test('older push targets resolve through history after the current event query completes', async () => {
+  const browser = fakeBrowser(), opened = [];
+  const shared = birthdayOnboardingShared({ openView: view => opened.push(view) });
+  const { StudentDashboard } = await isolatedModule('assets/js/student/StudentDashboard.js', shared, browser);
+  const state = { pushEventId: 'yesterday', eventsById: new Map(), view: 'events', eventsConfirmed: false };
+  StudentDashboard.prototype.openPushEvent.call(state);
+  assert.equal(opened.length, 0);
+  state.eventsConfirmed = true;
+  StudentDashboard.prototype.openPushEvent.call(state);
+  assert.deepEqual(opened, ['attendances']);
+  assert.equal(state.pushEventId, 'yesterday');
+  state.view = 'attendances';
+  StudentDashboard.prototype.openPushEvent.call(state);
+  assert.equal(opened.length, 1);
 });
 
 test('student focus cannot resurrect presence after logout, auth loss or disposal', async () => {
@@ -2743,31 +2795,22 @@ test('unavailable session storage never breaks authentication feedback', async (
 });
 
 
-test('first-login setup restores the device session before clearing its flag and reloads stale dashboard references', async () => {
-  const browser=fakeBrowser(),steps=[],toasts=[];
-  browser.document.body.hasAttribute=name=>name==='data-device-session-enabled';
-  const actor={uid:'student-1',email:'student-1@students.presence.local'};
-  const shared=birthdayOnboardingShared({auth:{currentUser:actor},currentUser:actor,
-    updatePassword:async(user)=>{assert.equal(user,actor);steps.push('password');},
-    setDoc:async()=>{assert.equal(steps.at(-1),'rebind');steps.push('profile');},showDashboardToast:(...args)=>toasts.push(args)});
+test('first-login setup completes on the server then restores the device session and reloads', async () => {
+  const browser=fakeBrowser(),steps=[];browser.document.body.hasAttribute=()=>true;
+  const shared=birthdayOnboardingShared({setDoc:async()=>{throw Error('No direct flag writes');}});
   const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
   browser.document.querySelector('#requiredNewPassword').value='Personal!new42';browser.document.querySelector('#requiredConfirmPassword').value='Personal!new42';
-  const state={document:browser.document,window:{location:{reload:()=>steps.push('reload')}},studentProfile:shared.currentUserProfile,
-    completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),closeRequiredPasswordChangeModal:()=>steps.push('close'),
-    restorePasswordSession:async(email,password)=>{assert.equal(email,actor.email);assert.equal(password,'Personal!new42');steps.push('rebind');}};
+  const state={document:browser.document,window:{setTimeout:fn=>fn(),location:{reload:()=>steps.push('reload')}},studentProfile:shared.currentUserProfile,completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),passwordResetApi:{completeFirstLogin:async()=>{steps.push('server');return {signInAfter:0};}},restorePasswordSession:async()=>steps.push('rebind')};
   await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});
-  assert.deepEqual(steps,['password','rebind','profile','close','reload']);assert.equal(toasts.at(-1)[0],'Password changed');
+  assert.deepEqual(steps,['server','rebind','reload']);
 });
 
-test('failed first-login session restoration keeps setup required and never writes its completion flag', async () => {
-  const browser=fakeBrowser(),toasts=[];let writes=0;
-  browser.document.body.hasAttribute=()=>true;
-  const actor={uid:'student-1',email:'student-1@students.presence.local'};
-  const shared=birthdayOnboardingShared({auth:{currentUser:actor},updatePassword:async()=>{},setDoc:async()=>writes++,showDashboardToast:(...args)=>toasts.push(args)});
+test('failed first-login session restoration offers recovery with the new password and never writes flags', async () => {
+  const browser=fakeBrowser(),toasts=[];let writes=0;browser.document.body.hasAttribute=()=>true;
+  const shared=birthdayOnboardingShared({setDoc:async()=>writes++,showDashboardToast:(...args)=>toasts.push(args)});
   const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
   browser.document.querySelector('#requiredNewPassword').value='Personal!new42';browser.document.querySelector('#requiredConfirmPassword').value='Personal!new42';
-  const state={document:browser.document,studentProfile:shared.currentUserProfile,completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),
-    restorePasswordSession:async()=>{throw Error('device transferred');},closeRequiredPasswordChangeModal(){throw Error('must stay open');}};
+  const state={document:browser.document,window:{setTimeout:fn=>fn()},studentProfile:shared.currentUserProfile,completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),passwordResetApi:{completeFirstLogin:async()=>({signInAfter:0})},restorePasswordSession:async()=>{throw Error('device transferred');}};
   await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});
   assert.equal(writes,0);assert.equal(state.requiredPasswordChangeBusy,false);assert.match(toasts.at(-1)[1],/Sign in with the new password/);
 });

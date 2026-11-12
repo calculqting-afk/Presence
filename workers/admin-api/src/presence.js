@@ -3,6 +3,30 @@ import { ResetService, isSuperAuthority } from './service.js';
 
 export const PRESENCE_TTL_MS = 11 * 60 * 1000;
 
+/** Consume a shared D1 budget before any Firebase reads, including denied attempts. */
+export async function consumeApiBudget(sql, uid, path, now = Date.now()) {
+  if (path === '/v1/presence/heartbeat') return; // Already D1-only and write-coalesced.
+  if (!sql) throw new SafeError(503, 'Request protection is unavailable. Please retry later.');
+  const [group, minute, hour] = path.startsWith('/v1/session/') ? ['session', 20, 120]
+    : path === '/v1/directory/sync' ? ['directory-sync', 10, 60]
+      : path === '/v1/student/attendance-location' ? ['location', 20, 120]
+        : path === '/v1/student/attendance-qr' ? ['student-qr', 10, 60]
+          : path.startsWith('/v1/student/') ? ['password', 5, 20]
+            : ['admin', 120, 2400];
+  const windows = [[60000, minute], [3600000, hour]];
+  const results = await sql.batch(windows.map(([duration, limit]) => {
+    const start = Math.floor(now / duration) * duration;
+    return sql.prepare(`INSERT INTO api_budgets (uid, budget, window_start, count, expires_at)
+      VALUES (?1, ?2, ?3, 1, ?4)
+      ON CONFLICT(uid, budget) DO UPDATE SET window_start=excluded.window_start,
+        count=CASE WHEN api_budgets.window_start=excluded.window_start THEN api_budgets.count+1 ELSE 1 END,
+        expires_at=excluded.expires_at
+      WHERE api_budgets.window_start!=excluded.window_start OR api_budgets.count < ?5
+      RETURNING count`).bind(uid, group + ':' + duration, start, start + duration, limit);
+  }));
+  if (results.some(result => !result.results?.length)) throw new SafeError(429, 'Too many requests. Please wait before trying again.');
+}
+
 /** D1 owns ephemeral online status; Firestore continues to own device authority. */
 export class PresenceService {
   constructor(sql, now = () => Date.now()) { Object.assign(this, { sql, now }); }

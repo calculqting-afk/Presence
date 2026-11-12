@@ -98,3 +98,39 @@ test('client enrolls once, throttles focus heartbeats, and logout never writes F
   assert.equal(calls.at(-1).body.online, false);
   assert.equal(state.studentLoggedOut, true);
 });
+
+async function budgetFixture() {
+  const f = await fixture();
+  f.sql.batch = async statements => {
+    f.database.exec('BEGIN');
+    try { const results=[]; for (const statement of statements) results.push(await statement.all()); f.database.exec('COMMIT'); return results; }
+    catch(error) { f.database.exec('ROLLBACK'); throw error; }
+  };
+  return f;
+}
+
+test('shared request budgets enforce minute and hour limits across instances, isolate users and recover by time', async () => {
+  const {consumeApiBudget} = await import('../workers/admin-api/src/presence.js');
+  const f = await budgetFixture(); f.database.exec(fs.readFileSync('workers/admin-api/migrations/0004_api_budgets.sql','utf8'));
+  const path='/v1/session/status', start=1800000000000;
+  for(let i=0;i<20;i++) await consumeApiBudget(f.sql,'one',path,start);
+  await assert.rejects(consumeApiBudget(f.sql,'one','/v1/session/acquire',start),e=>e.status===429);
+  await consumeApiBudget(f.sql,'two',path,start);
+  // The denied minute-limit attempt also consumes the hourly abuse budget.
+  for(let minute=1;minute<6;minute++) for(let i=0;i<(minute===5?19:20);i++) await consumeApiBudget(f.sql,'one',path,start+minute*60000);
+  await assert.rejects(consumeApiBudget(f.sql,'one',path,start+6*60000),e=>e.status===429);
+  await consumeApiBudget(f.sql,'one',path,start+3600000);
+  await consumeApiBudget(null,'one','/v1/presence/heartbeat',start);
+  await assert.rejects(consumeApiBudget(null,'one',path,start),e=>e.status===503);
+});
+
+test('Worker rejects excess authenticated requests before constructing the Firebase gateway', async () => {
+  const {handler} = await import('../workers/admin-api/src/index.js');
+  const f=await budgetFixture();f.database.exec(fs.readFileSync('workers/admin-api/migrations/0004_api_budgets.sql','utf8'));
+  let firebaseCalls=0;
+  const run=()=>handler({verify:async()=>({sub:'one'}),gateway:()=>{firebaseCalls++;throw Error('Do not call Firebase');}});
+  const request=()=>new Request('https://worker.test/v1/session/status',{method:'POST',headers:{Authorization:'Bearer test','Content-Type':'application/json'},body:'{}'});
+  for(let i=0;i<20;i++) assert.equal((await run()(request(),{PRESENCE_DB:f.sql})).status,503);
+  assert.equal((await run()(request(),{PRESENCE_DB:f.sql})).status,429);
+  assert.equal(firebaseCalls,20);
+});

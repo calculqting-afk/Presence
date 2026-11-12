@@ -43,7 +43,9 @@ async function read(path,token,allowed){const result=await fetch(base+'/'+path,{
  await write('students/'+setupUid,setup);await write('accountSessions/'+setupUid,{sessionId:old});
  const completed={...setup,mustChangePassword:false,updatedAt:new Date()};
  await write('students/'+setupUid,completed,jwt(setupUid),false);
- await write('students/'+setupUid,completed,jwt(setupUid,{presenceSession:old,presenceAuthTime:now,firebase:{sign_in_provider:'custom'}}),true);
+ await write('students/'+setupUid,completed,jwt(setupUid,{presenceSession:old,presenceAuthTime:now,firebase:{sign_in_provider:'custom'}}),false);
+ await read('events/device-demo',jwt(setupUid,{presenceSession:old}),false);
+ await read('students/'+setupUid,jwt(setupUid,{presenceSession:old}),true);
  const full={...completed,accountId:setupUid,accountIdKey:setupUid,authEmail:'dummy@example.test',middleName:'Middle',birthday:'2005-01-01',gender:'Male',course:'BS Info Tech',section:'2A',email:'dummy@example.test',phone:'09999999999',hometownBarangay:'San Pedro',hometownCity:'Matalom',hometownProvince:'Leyte',photoDataUrl:'data:image/jpeg;base64,YWJj',createdAt:new Date()};
  await write('students/'+setupUid,full);
  await write('students/'+setupUid,{...full,firstName:'Updated',updatedAt:new Date()},jwt(setupUid,{presenceSession:old,presenceAuthTime:now,firebase:{sign_in_provider:'custom'}}),true);

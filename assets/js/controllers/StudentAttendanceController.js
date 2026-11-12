@@ -4,20 +4,21 @@ const GEOFENCE_GPS_ALLOWANCE_CAP_METERS = 20;
 import { AttendanceSubmissionService } from './AttendanceSubmissionService.js?v=20261011-optimized';
 import { GeofenceBoundary } from './GeofenceBoundary.js';
 import { ButtonLoadingController } from './ButtonLoadingController.js';
-import { deviceLocation } from './DeviceLocationService.js';
+import { deviceLocation, attendanceLocationIssue } from './DeviceLocationService.js';
 import { EventAudiencePolicy } from './EventAudiencePolicy.js';
 import { PasswordResetApi } from './PasswordResetApi.js';
 
 export class StudentAttendanceController {
   constructor({ getState, setFaceRegistration, showError, bridge, checkIn, readiness }) {
     Object.assign(this, { getState, setFaceRegistration, showError, bridge, checkIn, readiness });
+    this.locationSamples = new WeakMap();
     this.submission = new AttendanceSubmissionService({ read: getDocFromServer, write: async (reference, payload, options) => {
       const location = payload.checkInLocation || payload.checkOutLocation;
       if (location) {
         this.securityApi ||= new PasswordResetApi();
         const eventId = payload.eventId || reference.id.slice(currentUser.uid.length + 1);
         await this.securityApi.call('/v1/student/attendance-location', currentUser, {
-          eventId, action: payload.checkInLocation ? 'in' : 'out', location
+          eventId, action: payload.checkInLocation ? 'in' : 'out', location, sampledAt: this.locationSamples.get(location)
         });
       }
       return setDoc(reference, payload, options);
@@ -83,20 +84,15 @@ export class StudentAttendanceController {
     // accepting whichever coordinate happens to fall inside the boundary.
     for (let attempt = 0; attempt < 2; attempt++) {
       const coords = position.coords || {};
-      if (![coords.latitude, coords.longitude, coords.accuracy].every(Number.isFinite)) break;
-      if (boundary.evaluate(coords, Math.min(coords.accuracy, GEOFENCE_GPS_ALLOWANCE_CAP_METERS)).inside) break;
+      const issue = attendanceLocationIssue(coords, position.timestamp);
+      if (!issue && boundary.evaluate(coords, Math.min(coords.accuracy, GEOFENCE_GPS_ALLOWANCE_CAP_METERS)).inside) break;
       const candidate = await this.getCurrentCheckInLocation();
-      if (Number.isFinite(candidate?.coords?.accuracy) && candidate.coords.accuracy >= 0
-        && candidate.coords.accuracy < coords.accuracy) position = candidate;
+      if (issue || (!attendanceLocationIssue(candidate?.coords, candidate?.timestamp)
+        && candidate.coords.accuracy < coords.accuracy)) position = candidate;
     }
-    const { latitude, longitude } = position.coords || {};
-    if (!Number.isFinite(latitude) || Math.abs(latitude) > 90 || !Number.isFinite(longitude) || Math.abs(longitude) > 180) {
-      const error = new Error('Your browser returned an invalid GPS location. Enable precise location and try again.');
-      error.geofenceIssue = 'location';
-      throw error;
-    }
-    const reportedAccuracy = Number(position.coords.accuracy);
-    const accuracyMeters = Number.isFinite(reportedAccuracy) && reportedAccuracy >= 0 ? Math.round(reportedAccuracy) : 0;
+    const readingIssue = attendanceLocationIssue(position.coords, position.timestamp);
+    if (readingIssue) throw Object.assign(new Error(readingIssue), { geofenceIssue: 'location' });
+    const { latitude, longitude, accuracy: accuracyMeters } = position.coords;
     const allowanceMeters = Math.min(accuracyMeters, GEOFENCE_GPS_ALLOWANCE_CAP_METERS);
     const result = boundary.evaluate({ latitude, longitude }, allowanceMeters);
     const { distanceMeters } = result;
@@ -110,7 +106,9 @@ export class StudentAttendanceController {
       throw locationError;
     }
 
-    return { latitude, longitude, accuracy: Math.min(accuracyMeters, 100000), distanceMeters: Math.round(distanceMeters) };
+    const location = { latitude, longitude, accuracy: accuracyMeters, distanceMeters: Math.round(distanceMeters) };
+    this.locationSamples.set(location, position.timestamp);
+    return location;
   }
 
   submissionErrorMessage(error, action = 'check-in') {

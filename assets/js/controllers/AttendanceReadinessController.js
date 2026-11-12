@@ -1,4 +1,4 @@
-import { deviceLocation } from './DeviceLocationService.js';
+import { deviceLocation, attendanceLocationIssue } from './DeviceLocationService.js';
 
 // Preparation only: never writes attendance or replaces final server/geofence checks.
 export class AttendanceReadinessController {
@@ -95,8 +95,9 @@ export class AttendanceReadinessController {
       const position = await this.location.read();
       if (this.dialog !== dialog) return;
       const { latitude, longitude, accuracy } = position.coords || {};
-      if (!Number.isFinite(latitude) || Math.abs(latitude) > 90 || !Number.isFinite(longitude) || Math.abs(longitude) > 180 || !Number.isFinite(accuracy) || accuracy < 0) throw new Error('GPS returned an invalid location. Enable precise location and retry.');
-      this.locationAt = Date.now();
+      const issue = attendanceLocationIssue({ latitude, longitude, accuracy }, position.timestamp);
+      if (issue) throw new Error(issue);
+      this.locationAt = position.timestamp;
       this.state('permission', 'Allowed');
       this.state('gps', `Location received (accuracy ±${Math.round(accuracy)} m). Final boundary verification follows.`);
     } catch (error) {

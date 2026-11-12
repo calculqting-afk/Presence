@@ -177,7 +177,7 @@ export class FirebaseGateway {
   async transaction(fn) {
     const { transaction } = await this.call(this.base + ':beginTransaction', { options: { readWrite: {} } });
     try {
-      const get=path=>this.get(path,transaction);
+      const get=path=>this.get(path,transaction, ['mustChangePassword']);
       get.qrStudent=uid=>this.get('students/'+uid,transaction,['course','photoDataUrl','mustChangePassword']);
       get.matches=(field,value)=>this.matches(field,value,transaction);
       const writes = await fn(get);

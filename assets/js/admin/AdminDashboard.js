@@ -669,7 +669,7 @@ export class AdminDashboard {
       dashboard.scheduleAdminEventStatusRefresh();
       dashboard.correctionRequests?.render();
     });
-    dashboard.listen('students', ["dashboard", "create", "modify-events", "past-events", ...(!D1_DIRECTORY_ENABLED ? ['modify-students'] : []), "assign-fine", "attendance-line", "correction-requests", "profile"], collection(db, "students"), snapshot => {
+    dashboard.listen('students', ["dashboard", "create", ...(!D1_DIRECTORY_ENABLED ? ['modify-students'] : []), "assign-fine", "attendance-line", "correction-requests", "profile"], collection(db, "students"), snapshot => {
       dashboard.studentsLoaded = !snapshot.metadata?.fromCache && !snapshot.metadata?.hasPendingWrites;
       dashboard.students = snapshot.docs.map(item => CoursePolicy.profile({
         uid: item.id,

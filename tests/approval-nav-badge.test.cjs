@@ -82,3 +82,12 @@ test('closed request pages use aggregate counts, visibility stops detail reads, 
   document.visibilityState = 'visible'; events.get('visibilitychange')(); assert.equal(opened, 2);
   watch.dispose(); assert.equal(events.size, 0); assert.equal(closed, 3);
 });
+
+test('approval identifiers and applicant text cannot break out into HTML', async () => {
+  const f = await fixture(); f.instance.initialize(); f.instance.canApprove = () => true;
+  f.instance.requests = [{ id: 'x"><img src=x onerror=alert(1)>', firstName: '<script>bad</script>', lastName: '" onclick=bad', accountId: 'test', course: 'BSA', section: '1A', birthday: '2005-01-01' }];
+  f.instance.render();
+  assert.ok(!f.list.innerHTML.includes('<img'));
+  assert.ok(!f.list.innerHTML.includes('<script>'));
+  assert.ok(f.list.innerHTML.includes('data-request-id="x&quot;&gt;&lt;img'));
+});

@@ -3,7 +3,7 @@ import { FirebaseGateway, SafeError, verifyToken } from './firebase.js';
 import { ResetService } from './service.js';
 import { StudentIdService } from './student-id.js';
 import { AttendanceSecurityService } from './attendance-security.js';
-import { PresenceService } from './presence.js';
+import { PresenceService, consumeApiBudget } from './presence.js';
 import { DirectoryService } from './directory.js';
 import { FeatureReadsService } from './feature-reads.js';
 import { AttendanceQrService } from './attendance-qr.js';
@@ -27,7 +27,7 @@ export function handler({ verify = verifyToken, gateway = secret => new Firebase
       const qrRoute = ['/v1/student/attendance-qr', '/v1/admin/attendance-qr/preview', '/v1/admin/attendance-qr/confirm'].includes(url.pathname);
       const idRoute=['/v1/admin/student-id/status','/v1/admin/student-id/preview','/v1/admin/student-id/confirm'].includes(url.pathname);
       const locationRoute = url.pathname === '/v1/student/attendance-location', faceRoute = url.pathname === '/v1/internal/face-registration';
-      if ((!qrRoute && !featureRoute && !directoryRoute && !presenceRoute && !sessionRoute && !idRoute && !locationRoute && !faceRoute && !['/v1/admin/password-reset', '/v1/student/password-change'].includes(url.pathname)) || url.search) throw new SafeError(404, 'Not found.');
+      if ((!qrRoute && !featureRoute && !directoryRoute && !presenceRoute && !sessionRoute && !idRoute && !locationRoute && !faceRoute && !['/v1/admin/password-reset', '/v1/student/password-change', '/v1/student/first-login-password'].includes(url.pathname)) || url.search) throw new SafeError(404, 'Not found.');
       if (request.method !== 'POST') throw new SafeError(405, 'POST required.');
       if (!qrRoute && !featureRoute && !directoryRoute && !presenceRoute && !sessionRoute && !locationRoute && !faceRoute && (idRoute?env.ID_CORRECTION_ENABLED!=='true':env.RESET_ENABLED !== 'true')) throw new SafeError(503, idRoute?'Student ID correction is awaiting backend permission setup.':'Password reset service is not enabled yet.');
       const token = /^Bearer ([^\s]+)$/.exec(request.headers.get('Authorization') || '')?.[1];
@@ -41,6 +41,7 @@ export function handler({ verify = verifyToken, gateway = secret => new Firebase
       let body; try { body = JSON.parse(new TextDecoder().decode(data)); } catch { throw new SafeError(400, 'Invalid JSON.'); }
       if (!body || typeof body !== 'object' || Array.isArray(body)) throw new SafeError(400, 'Invalid request.');
       const claims = await verify(token);
+      await consumeApiBudget(env.PRESENCE_DB, claims.sub, url.pathname);
       const presence = env.PRESENCE_ENABLED === 'true' && env.PRESENCE_DB ? new PresenceService(env.PRESENCE_DB) : null;
       if (presenceRoute && !presence) throw new SafeError(503, 'Online status is awaiting D1 activation.');
       // Heartbeats need a verified JWT and SQL device authority, not Firestore.
@@ -83,12 +84,14 @@ export function handler({ verify = verifyToken, gateway = secret => new Firebase
         return response(url.pathname.endsWith('/status')?await service.status(claims,body):url.pathname.endsWith('/preview')?await service.preview(claims,body):await service.execute(claims,body));
       }
       const service = new ResetService(db);
+      if (url.pathname === '/v1/student/first-login-password') return response(await service.completeFirstLogin(claims, body));
       return response(url.pathname.startsWith('/v1/admin/') ? await service.reset(claims, body) : await service.complete(claims, body));
     } catch (error) { return response({ error: error instanceof SafeError ? error.message : 'Presence service is temporarily unavailable.' }, error instanceof SafeError ? error.status : 503); }
   };
 }
 export default { fetch: handler(), async scheduled(_event, env) {
   if (env.PRESENCE_DB) await env.PRESENCE_DB.prepare('DELETE FROM feature_reads WHERE expires_at < ?1 AND lease_until < ?2').bind(Date.now(), Date.now()).run();
+  if (env.PRESENCE_DB) await env.PRESENCE_DB.prepare('DELETE FROM api_budgets WHERE expires_at < ?1').bind(Date.now()).run();
   if (env.RESET_ENABLED !== 'true') return;
   const db = new FirebaseGateway(env.FIREBASE_SERVICE_ACCOUNT), service = new ResetService(db);
   const uids = await db.expiredResets(Date.now());

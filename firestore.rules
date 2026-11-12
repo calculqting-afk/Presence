@@ -65,7 +65,7 @@ service cloud.firestore {
     }
 
     function canManageAttendance() {
-      return isSuperAdmin() || (signedIn() && hasAttendanceManagementRole());
+      return signedIn() && (request.auth.token.get("superAdmin", false) == true || hasAttendanceManagementRole());
     }
     function hasAttendanceManagementRole() {
       let profile = get(/databases/$(database)/documents/students/$(request.auth.uid)).data;
@@ -91,6 +91,7 @@ service cloud.firestore {
     }
     function unrestrictedStudent(profile) {
       return profile.active == true && profile.get("passwordResetRequired", false) == false
+        && profile.get("mustChangePassword", false) == false
         && (!("passwordResetValidAfter" in profile) || sessionAuthTime() > profile.passwordResetValidAfter);
     }
 
@@ -315,6 +316,8 @@ service cloud.firestore {
       return data.keys().hasOnly(["uid", "accountId", "accountIdKey", "birthday", "firstName", "lastName", "gender", "hometownBarangay", "hometownCity", "hometownProvince", "course", "section", "status", "requestedAt", "updatedAt", "reviewedAt", "reviewedBy"])
         && data.keys().hasAll(["uid", "accountId", "accountIdKey", "birthday", "firstName", "lastName", "course", "section", "status", "requestedAt", "updatedAt"])
         && request.auth.uid == data.uid && requestId == data.accountIdKey
+        && data.accountId.matches('^[A-Za-z0-9_-]{1,64}$')
+        && data.accountIdKey == data.accountId.lower()
         && shortText(data.accountId, 64) && shortText(data.accountIdKey, 64) && shortText(data.birthday, 10)
         && shortText(data.firstName, 80) && shortText(data.lastName, 80) && shortText(data.course, 120)
         && (!("gender" in data) || data.gender in ["", "Male", "Female"])
@@ -434,7 +437,8 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/eventGeofences/$(eventId))
         && get(/databases/$(database)/documents/eventGeofences/$(eventId)).data.enabled == true
         && data.keys().hasAll(["checkInLocation"])
-        && validLocation(data.checkInLocation)
+        // Each attendance create/checkout caller already validates this location.
+        // Avoid evaluating it twice inside Firestore's expression budget.
         && trustedLocationProof(data.checkInLocation, eventId, data.get("proofAction", "in"))
       );
     }
@@ -576,16 +580,8 @@ service cloud.firestore {
       allow update: if !protectedSuperAdminUid(studentUid)
         && !exists(/databases/$(database)/documents/studentIdCorrectionLocks/$(studentUid))
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["accountId", "accountIdKey", "authEmail", "uid"])
-        // Complete first-login setup before evaluating the larger role/profile
-        // validators. Otherwise enrolled students can exhaust the expression
-        // budget before reaching this narrowly scoped owner-only permission.
+        // Password completion is server-controlled after the Auth update succeeds.
         && ((request.auth != null && request.auth.uid == studentUid
-          && resource.data.get("mustChangePassword", false) == true
-          && request.resource.data.mustChangePassword == false
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["mustChangePassword", "updatedAt"])
-          && request.resource.data.updatedAt is timestamp
-          && isStudent())
-        || (request.auth != null && request.auth.uid == studentUid
           && isStudent()
           && validStudent(request.resource.data)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -605,7 +601,7 @@ service cloud.firestore {
           && request.resource.data.roleUpdatedAt is timestamp
           && (!("updatedAt" in request.resource.data) || request.resource.data.updatedAt is timestamp)
           && request.resource.data.roleUpdatedBy == request.auth.uid)
-        || (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy", "passwordResetRequired", "passwordResetValidAfter"])
+        || (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "roleUpdatedAt", "roleUpdatedBy", "mustChangePassword", "passwordResetRequired", "passwordResetValidAfter"])
           && canManageStudents()
           && validStudent(request.resource.data)
           && (!isStudentManager() || request.resource.data.diff(resource.data).affectedKeys().hasOnly([

@@ -22,6 +22,14 @@ async function read(path,who,allowed){const response=await fetch(base+'/'+path,{
 (async()=>{
   const profile={uid,accountId:'SECURE-STUDENT',accountIdKey:'secure-student',firstName:'Dummy',lastName:'Student',birthday:'2005-01-01',course:'BS Info Tech',section:'2A',active:true,role:'student',passwordResetRequired:false,passwordResetValidAfter:Math.floor(now/1000)-3600,createdAt:new Date(now-86400000)};
   await write('accountSessions/'+uid,{sessionId:'secure-session'});await write('students/'+uid,profile);await write('students/secure-manager',{active:true,role:'student_manager'});
+  const pending={uid,accountId:'SAFE-ID',accountIdKey:'safe-id',birthday:'2005-01-01',firstName:'Dummy',lastName:'Student',course:'BS Info Tech',section:'2A',status:'pending',requestedAt:server,updatedAt:server};
+  await write('registrationRequests/safe-id',pending,uid,true);
+  const injected='x"><img src=x onerror=alert(1)>';
+  await write('registrationRequests/'+injected,{...pending,accountId:injected,accountIdKey:injected},uid,false);
+  await write('registrationRequests/wrong-key',{...pending,accountIdKey:'wrong-key'},uid,false);
+  await write('students/'+uid,{mustChangePassword:true},'owner',true,['mustChangePassword']);
+  await write('students/'+uid,{mustChangePassword:false,updatedAt:server},uid,false,['mustChangePassword','updatedAt']);
+  await write('students/'+uid,{mustChangePassword:false},'owner',true,['mustChangePassword']);
   await write('faceRegistrations/'+uid,{registered:true},uid,false);
   await write('faceRegistrations/'+uid,{registered:true,driveFileId:'forged'},uid,false);
   await write('faceRegistrations/'+uid,{registered:true,confirmationSource:'server-upload'});
