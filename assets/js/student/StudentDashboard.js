@@ -436,7 +436,7 @@ export class StudentDashboard {
     this.identity.save(currentUser.uid, profile);
     this.renderProfile();
     this.scheduleEventRender();
-    if (this.studentProfile.mustChangePassword === true || this.studentProfile.passwordResetRequired === true) this.openRequiredPasswordChangeModal();
+    if (this.studentProfile.mustChangePassword === true || this.studentProfile.passwordResetRequired === true || this.requiredPasswordChangeBusy) this.openRequiredPasswordChangeModal();
     else this.closeRequiredPasswordChangeModal();
   }
   listen(key, views, reference, callback) {
@@ -469,6 +469,7 @@ export class StudentDashboard {
     if (dashboard.view === 'fines') dashboard.renderFines();
   }
   updatePresence(status = "online", silent = false) {
+    if (this.requiredPasswordChangeBusy || this.subscriptions?.paused) return Promise.resolve();
     if (requiresPasswordChange((this.studentProfile || currentUserProfile))) return Promise.resolve();
     if (this.presenceDisposed || sessionState.studentLoggedOut || !currentUser?.uid || auth.currentUser?.uid !== currentUser.uid || !sessionState.presenceSessionId) return Promise.resolve();
     const pending = Promise.resolve(sessionState.presenceWrite).catch(() => {}).then(() => {
@@ -1104,6 +1105,7 @@ export class StudentDashboard {
     dashboard.completeRequiredPasswordChange.disabled = true;
     dashboard.document.querySelector('#requiredPasswordSignOut').disabled = true;
     dashboard.completeRequiredPasswordChange.textContent = "Saving password…";
+    const finishSync = DeviceSessionController.pausePasswordSync(dashboard.subscriptions, dashboard.window);
     let passwordUpdated = false;
     try {
       if (dashboard.studentProfile.passwordResetRequired === true) {
@@ -1130,7 +1132,12 @@ export class StudentDashboard {
         return;
       }
     } catch (error) {
-      const message = passwordUpdated ? "Your password was changed, but Presence could not finish setup. Sign in with the new password and retry after checking your connection and Firestore rules." : error.code === "auth/requires-recent-login" ? "Please sign out and sign in again, then create your new password immediately." : error.code === "auth/weak-password" ? "Use a stronger password with at least 8 characters." : error.message || "Your password could not be changed.";
+      if (!passwordUpdated) {
+        // A failed request can be ambiguous after a password update. Resume
+        // only if the backend confirms this device session still has authority.
+        try { const status = await dashboard.passwordResetApi.call('/v1/session/status', auth.currentUser, {}); finishSync(status.current === true); } catch {}
+      }
+      const message = passwordUpdated ? "Password changed. Sign in with the new password to continue." : error.code === "auth/requires-recent-login" ? "Please sign out and sign in again, then create your new password immediately." : error.code === "auth/weak-password" ? "Use a stronger password with at least 8 characters." : error.message || "Your password could not be changed.";
       showDashboardToast("Unable to finish password change", message);
     } finally {
       dashboard.requiredPasswordChangeBusy = false;

@@ -4,7 +4,7 @@ const project = 'demo-presence-audience', host = process.env.FIRESTORE_EMULATOR_
 if (!host || !/^127\.0\.0\.1:\d+$/.test(host)) throw new Error('A local Firestore emulator is required.');
 const base = `http://${host}/v1/projects/${project}/databases/(default)/documents`;
 const SERVER = { server: true }, now = Date.now(), date = offset => new Date(now + offset);
-const token = uid => [Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url'), Buffer.from(JSON.stringify({ sub: uid, user_id: uid, superAdmin: uid === '8uEjAk72BLWKjvnQJEatBdeVAi02', email: `${uid}@example.test`, aud: project, iss: `https://securetoken.google.com/${project}`, iat: Math.floor(now / 1000), exp: Math.floor(now / 1000) + 3600, auth_time: Math.floor(now / 1000), firebase: { sign_in_provider: 'password' } })).toString('base64url'), ''].join('.');
+const token = (uid, extra = {}) => [Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url'), Buffer.from(JSON.stringify({ sub: uid, user_id: uid, superAdmin: uid === '8uEjAk72BLWKjvnQJEatBdeVAi02', ...extra, email: `${uid}@example.test`, aud: project, iss: `https://securetoken.google.com/${project}`, iat: Math.floor(now / 1000), exp: Math.floor(now / 1000) + 3600, auth_time: Math.floor(now / 1000), firebase: { sign_in_provider: 'password' } })).toString('base64url'), ''].join('.');
 function value(data, transforms, prefix = '') {
   if (data === SERVER) { transforms.push({ fieldPath: prefix, setToServerValue: 'REQUEST_TIME' }); return undefined; }
   if (data instanceof Date) return { timestampValue: data.toISOString() };
@@ -77,6 +77,30 @@ const attendance = (uid, event) => ({ studentUid: uid, studentId: uid.toUpperCas
   const polygon = { enabled:true, type:'polygon', address:'Campus', vertices:[{latitude:10,longitude:124},{latitude:10.001,longitude:124},{latitude:10.002,longitude:124.001},{latitude:10.001,longitude:124.002},{latitude:10,longitude:124.001}] };
   const superAdmin = token('8uEjAk72BLWKjvnQJEatBdeVAi02');
   await batchSave('polygon', {...all,requiresGeofence:true,createdAt:SERVER,createdBy:'8uEjAk72BLWKjvnQJEatBdeVAi02',rosterVersion:1}, polygon, superAdmin);
+  // Match the area manager: an existing all-section afternoon session and a
+  // five-point polygon saved alongside only its location flag and timestamp.
+  const areaEvent = {...all, requiresGeofence:true, sessionPeriod:'afternoon', sessionGroupId:'area_manager', sessionBaseName:'Area manager', rosterCapturedAt:date(-60000)};
+  await write('events/area_manager', areaEvent);
+  await write('eventGeofences/area_manager', {enabled:true,type:'circle',latitude:10,longitude:124,radiusMeters:100});
+  await batchSave('area_manager', {requiresGeofence:true,updatedAt:SERVER}, polygon, superAdmin, ['requiresGeofence','updatedAt']);
+  await write('accountSessions/8uEjAk72BLWKjvnQJEatBdeVAi02', {sessionId:'geofence-session'});
+  const sessionAdmin = token('8uEjAk72BLWKjvnQJEatBdeVAi02', {presenceSession:'geofence-session'});
+  await batchSave('area_manager', {requiresGeofence:true,updatedAt:SERVER}, {...polygon,address:'Updated area'}, sessionAdmin, ['requiresGeofence','updatedAt']);
+  await batchSave('area_manager', {requiresGeofence:false,updatedAt:SERVER}, {enabled:false}, sessionAdmin, ['requiresGeofence','updatedAt']);
+  await batchSave('area_manager', {requiresGeofence:true,updatedAt:SERVER}, polygon, superAdmin, ['requiresGeofence','updatedAt'], false);
+  await fetch(`${base}/accountSessions/8uEjAk72BLWKjvnQJEatBdeVAi02`, {method:'DELETE',headers:{Authorization:'Bearer owner'}});
+  const areaPolygon10 = {...polygon, vertices:[...polygon.vertices,...polygon.vertices.map(point=>({...point,latitude:point.latitude+0.0001}))]};
+  for (const uid of ['manager','head']) {
+    await write(`accountSessions/${uid}`, {sessionId:'area-session'});
+    const actor = token(uid, {presenceSession:'area-session'});
+    await batchSave('area_manager', {requiresGeofence:true,updatedAt:SERVER}, areaPolygon10, actor, ['requiresGeofence','updatedAt']);
+    await batchSave('area_manager', {requiresGeofence:false,updatedAt:SERVER}, {enabled:false}, actor, ['requiresGeofence','updatedAt']);
+    await fetch(`${base}/accountSessions/${uid}`, {method:'DELETE',headers:{Authorization:'Bearer owner'}});
+  }
+  await batchSave('area_manager', {requiresGeofence:true,updatedAt:SERVER}, polygon, token('a'), ['requiresGeofence','updatedAt'], false);
+  await batchSave('area_manager', {requiresGeofence:true,updatedAt:SERVER}, {...polygon,vertices:[{latitude:91,longitude:124},...polygon.vertices.slice(1)]}, superAdmin, ['requiresGeofence','updatedAt'], false);
+  assert.equal((await raw('events/area_manager')).fields.requiresGeofence.booleanValue, false, 'rejected boundary saves must be atomic');
+  console.log('Area manager rules passed: device-bound administrators can save polygons and toggle location; students, stale sessions and invalid boundaries remain denied.');
   // A recursive map merge leaves old section keys behind and must be rejected.
   const shrink = {...smaller,requiresGeofence:true,rosterVersion:2};
   const leafMask = Object.keys(shrink).filter(key=>!['attendanceRoster','sectionAssignedAt','rosterCapturedAt'].includes(key)).map(key=>`\`${key}\``).concat(['attendanceRoster.a','sectionAssignedAt.`2A`']);

@@ -105,29 +105,29 @@ service cloud.firestore {
 
     function validBoundaryPoint(point) {
       return point is map && point.keys().hasOnly(["latitude", "longitude"])
-        && point.keys().hasAll(["latitude", "longitude"])
+        // Required coordinates are type/range checked below; no second key scan.
         && point.latitude is number && point.latitude >= -85 && point.latitude <= 85
         && point.longitude is number && point.longitude >= -180 && point.longitude <= 180;
     }
 
     function validBoundaryVertices(points) {
-      return points is list && points.size() >= 3 && points.size() <= 10
+      let count = points.size();
+      return points is list && count >= 3 && count <= 10
         && validBoundaryPoint(points[0]) && validBoundaryPoint(points[1]) && validBoundaryPoint(points[2])
-        && (points.size() < 4 || validBoundaryPoint(points[3]))
-        && (points.size() < 5 || validBoundaryPoint(points[4]))
-        && (points.size() < 6 || validBoundaryPoint(points[5]))
-        && (points.size() < 7 || validBoundaryPoint(points[6]))
-        && (points.size() < 8 || validBoundaryPoint(points[7]))
-        && (points.size() < 9 || validBoundaryPoint(points[8]))
-        && (points.size() < 10 || validBoundaryPoint(points[9]));
+        && (count < 4 || validBoundaryPoint(points[3]))
+        && (count < 5 || validBoundaryPoint(points[4]))
+        && (count < 6 || validBoundaryPoint(points[5]))
+        && (count < 7 || validBoundaryPoint(points[6]))
+        && (count < 8 || validBoundaryPoint(points[7]))
+        && (count < 9 || validBoundaryPoint(points[8]))
+        && (count < 10 || validBoundaryPoint(points[9]));
     }
 
     function validGeofence(geofence) {
       return geofence is map
         && geofence.keys().hasOnly(["enabled", "type", "vertices", "latitude", "longitude", "radiusMeters", "address"])
-        && geofence.keys().hasAll(["enabled"])
         && geofence.enabled is bool
-        && optionalShortText(geofence, "address", 500)
+        && shortText(geofence.get("address", ""), 500)
         && (!("type" in geofence) || geofence.type in ["circle", "polygon"])
         && (!geofence.enabled || (("type" in geofence && geofence.type == "polygon") ? (
           geofence.keys().hasAll(["vertices"]) && validBoundaryVertices(geofence.vertices)
@@ -195,12 +195,12 @@ service cloud.firestore {
         ])
         // Every required field is read and type-checked below. Missing fields
         // therefore deny the write without a duplicate required-key scan.
-        && shortText(data.name, 160) && shortText(data.type, 60) && shortText(data.date, 10)
-        && shortText(data.location, 240) && shortText(data.timeIn, 5) && shortText(data.checkInCutoff, 5) && optionalShortText(data, "checkInClose", 5)
-        && shortText(data.timeOut, 5) && shortText(data.checkOutCutoff, 5)
+        && (data.name is string && data.name.size() <= 160) && (data.type is string && data.type.size() <= 60) && (data.date is string && data.date.size() <= 10)
+        && (data.location is string && data.location.size() <= 240) && (data.timeIn is string && data.timeIn.size() <= 5) && (data.checkInCutoff is string && data.checkInCutoff.size() <= 5) && shortText(data.get("checkInClose", ""), 5)
+        && (data.timeOut is string && data.timeOut.size() <= 5) && (data.checkOutCutoff is string && data.checkOutCutoff.size() <= 5)
         && data.audience in ["All students", "Selected sections", "Section 1A", "Section 1B", "Section 2A", "Section 2B", "Section 3A", "Section 3B", "Section 4A", "Section 4B"]
         && validEventAudience(data)
-        && shortText(data.description, 4000) && optionalShortText(data, "notes", 4000)
+        && (data.description is string && data.description.size() <= 4000) && shortText(data.get("notes", ""), 4000)
         && data.requiresGeofence is bool
         && (!("hasSurvey" in data) || data.hasSurvey is bool)
         && (!("surveyArchived" in data) || data.surveyArchived is bool)
@@ -210,7 +210,7 @@ service cloud.firestore {
         && data.openAt is timestamp && (!('lateAfterAt' in data) || data.lateAfterAt is timestamp) && data.checkInClosesAt is timestamp && data.closeAt is timestamp && data.checkOutClosesAt is timestamp
         && (!('checkoutOnlyReopened' in data) || data.checkoutOnlyReopened == true)
         && (!('createdAt' in data) || data.createdAt is timestamp)
-        && optionalShortText(data, "createdBy", 128)
+        && shortText(data.get("createdBy", ""), 128)
         && (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
@@ -243,7 +243,9 @@ service cloud.firestore {
       let before = existing ? resource.data : data;
       let fields = ["sessionPeriod", "sessionGroupId", "sessionBaseName"];
       let hasSession = data.keys().hasAny(fields);
-      return ((!existing && !('checkoutOnlyReopened' in data)) || (existing && validScheduleEdit(data, before)
+      // A roster revision alone cannot change the session or its schedule.
+      return (existing && data.diff(before).affectedKeys().hasOnly(["rosterVersion", "rosterCapturedAt", "sectionAssignedAt", "updatedAt"]))
+        || (((!existing && !('checkoutOnlyReopened' in data)) || (existing && validScheduleEdit(data, before)
           && (!before.keys().hasAny(fields) || (hasSession && data.sessionGroupId == before.sessionGroupId
             && (data.sessionPeriod == before.sessionPeriod || (before.openAt > request.time && before.sessionGroupId == eventId))))))
         && (!hasSession || (data.keys().hasAll(fields)
@@ -261,7 +263,7 @@ service cloud.firestore {
               && (existing || data.openAt > request.time)
               && getAfter(/databases/$(database)/documents/events/$(data.sessionGroupId)).data.sessionPeriod == "morning"
               && getAfter(/databases/$(database)/documents/events/$(data.sessionGroupId)).data.date == data.date
-              && getAfter(/databases/$(database)/documents/events/$(data.sessionGroupId)).data.checkOutClosesAt <= data.openAt)))));
+              && getAfter(/databases/$(database)/documents/events/$(data.sessionGroupId)).data.checkOutClosesAt <= data.openAt))))));
     }
 
     function validHometown(data) {
@@ -691,15 +693,22 @@ service cloud.firestore {
       allow read: if isSuperAdmin() || isHeadAdmin() || isAttendanceAdmin() || isStudentManager()
         || (isStudent() && !resource.data.keys().hasAll(["geofence"]));
       allow create, update: if canManageAttendance()
-        && validEvent(request.resource.data)
-        && validSession(request.resource.data, eventId)
-        && request.resource.data.openAt < request.resource.data.checkInClosesAt
-        && request.resource.data.checkInClosesAt <= request.resource.data.closeAt
-        && request.resource.data.closeAt < request.resource.data.checkOutClosesAt
-        && (!exists(/databases/$(database)/documents/events/$(eventId))
-          ? (request.resource.data.keys().hasAll(["attendanceRoster", "rosterCapturedAt"])
-            && request.resource.data.rosterCapturedAt == request.time)
-          : validRosterUpdate(request.resource.data, resource.data));
+        // Boundary-only saves must not revalidate an unchanged schedule/roster
+        // in the same batch as the polygon and device-session checks.
+        && (request.method == 'update'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["requiresGeofence", "updatedAt"])
+          ? (request.resource.data.requiresGeofence is bool
+            && request.resource.data.updatedAt == request.time
+            && request.resource.data.requiresGeofence == getAfter(/databases/$(database)/documents/eventGeofences/$(eventId)).data.enabled)
+          : (validEvent(request.resource.data)
+            && validSession(request.resource.data, eventId)
+            && request.resource.data.openAt < request.resource.data.checkInClosesAt
+            && request.resource.data.checkInClosesAt <= request.resource.data.closeAt
+            && request.resource.data.closeAt < request.resource.data.checkOutClosesAt
+            && (request.method == 'create'
+              ? (request.resource.data.keys().hasAll(["attendanceRoster", "rosterCapturedAt"])
+                && request.resource.data.rosterCapturedAt == request.time)
+              : validRosterUpdate(request.resource.data, resource.data))));
       // Deletion is deliberately stricter than event editing. This protects
       // the operational-data reset from being triggered by other admin roles.
       allow delete: if isSuperAdmin() && recentAdminLogin();

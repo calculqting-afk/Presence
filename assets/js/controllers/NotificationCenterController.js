@@ -147,9 +147,21 @@ export class NotificationCenterController {
       if (event.key === "Escape" && !dashboard.panel.hidden) dashboard.close();
     });
     const resume = () => {
+      if (dashboard.passwordSessionPaused) return;
       if (dashboard.notificationsBlocked || dashboard.unsubscribeNotifications || dashboard.retryNotificationsTimer != null) return;
       dashboard.subscribeToNotifications();
     };
+    dashboard.scope.listen(dashboard.window, 'presence:password-session-start', () => {
+      dashboard.passwordSessionPaused = true;
+      dashboard.subscriptionGeneration = (dashboard.subscriptionGeneration || 0) + 1;
+      dashboard.window.clearTimeout(dashboard.retryNotificationsTimer);
+      dashboard.retryNotificationsTimer = undefined;
+      dashboard.unsubscribeNotifications?.(); dashboard.unsubscribeNotifications = null;
+    });
+    dashboard.scope.listen(dashboard.window, 'presence:password-session-ready', () => {
+      dashboard.passwordSessionPaused = false;
+      resume();
+    });
     dashboard.scope.listen(dashboard.window, "online", resume);
     dashboard.scope.listen(dashboard.document, "visibilitychange", () => {
       if (dashboard.document.visibilityState === "visible") resume();
@@ -182,6 +194,7 @@ export class NotificationCenterController {
   }
   subscribeToNotifications() {
     const dashboard = this;
+    if (dashboard.passwordSessionPaused) return;
     if (!dashboard.scope.initialized || dashboard.notificationsBlocked || dashboard.unsubscribeNotifications) return;
     const generation = dashboard.subscriptionGeneration = (dashboard.subscriptionGeneration || 0) + 1;
     dashboard.window.clearTimeout(dashboard.retryNotificationsTimer);

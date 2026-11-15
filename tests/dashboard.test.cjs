@@ -51,6 +51,29 @@ test('student action presentation omits forbidden controls for every role and pr
   assert.match(fs.readFileSync(path.join(root, 'assets/js/controllers/DashboardNavigationController.js'), 'utf8'), /Manage student details and face registration/);
 });
 
+test('mobile profile role control uses the permitted role list and existing confirmation flow', async () => {
+  const browser=fakeBrowser(),roles={student:'Student',head_admin:'Head admin',attendance_admin:'Attendance admin',student_manager:'Student manager'};
+  const shared=birthdayOnboardingShared({ASSIGNABLE_ROLE_LABELS:roles,escapeHtml:String});
+  const {AdminDashboard}=await isolatedModule('assets/js/admin/AdminDashboard.js',shared,browser);
+  const student={uid:'student',accountId:'123',role:'student'},opened=[];
+  const state={can:()=>true,students:[student],pendingRoleWrites:new Map(),adminStudentDetail:browser.document.querySelector('#detail'),
+    openRoleChangeModal:(...args)=>opened.push(args)};
+  state.handleStudentTableBodyChange=event=>AdminDashboard.prototype.handleStudentTableBodyChange.call(state,event);
+  const html=AdminDashboard.prototype.profileRoleControl.call(state,student);
+  assert.match(html,/for="profileStudentRole"/);assert.match(html,/type="button" data-change-profile-role>Change role/);
+  assert.match(html,/<option value="student" selected>/);
+  for(const role of Object.keys(roles))assert.ok(html.includes(`value="${role}"`));
+  assert.doesNotMatch(html,/super_admin/);
+  const selector=state.adminStudentDetail.querySelector('#profileStudentRole');
+  Object.assign(selector,{dataset:{roleSelect:'student'},value:'attendance_admin',closest:()=>selector});
+  AdminDashboard.prototype.handleAdminStudentDetailClick.call(state,{target:{closest:name=>name==='[data-change-profile-role]'?{}:null}});
+  assert.equal(opened.length,1);assert.equal(opened[0][0],student);assert.equal(opened[0][1],'attendance_admin');assert.equal(opened[0][2],selector);
+  selector.value='student';await state.handleStudentTableBodyChange({target:selector});assert.equal(opened.length,1);
+  state.can=()=>false;
+  assert.equal(AdminDashboard.prototype.profileRoleControl.call(state,student),'');
+  selector.value='head_admin';await state.handleStudentTableBodyChange({target:selector});assert.equal(opened.length,1);
+});
+
 test('activity history normalizes legacy reset entries and searches actor, student IDs, event and action', async()=>{
   const {normalizeActivity,filterActivity}=await isolatedModule('assets/js/controllers/ActivityHistoryController.js');
   const reset=normalizeActivity({action:'student-password-reset',actorUid:'head',studentUid:'a',studentId:'2510004-1',studentName:'Alex Student',createdAt:{toMillis:()=>123}},'reset','auditLogs');
@@ -267,6 +290,28 @@ test('all students see events, only selected sections can act, and removed check
   assert.doesNotMatch(html,/data-check-out-event=|data-attend-event=/);
 });
 
+test('area manager saves boundaries without redundant event writes and updates only changed location flags', async () => {
+  const names = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+  const shared = Object.fromEntries(names.map(name => [name, () => ''])), writes = [], messages = [];
+  let enabled = true, commits = 0;
+  Object.assign(shared, { doc: (_db, collection, id) => ({collection, id}), serverTimestamp: () => 'server',
+    writeBatch: () => ({set: (ref, data) => writes.push({ref, data, method:'set'}), update: (ref, data) => writes.push({ref, data, method:'update'}), commit: async () => { commits++; }}),
+    showDashboardToast: (...args) => messages.push(args) });
+  const {AdminDashboard} = await isolatedModule('assets/js/admin/AdminDashboard.js', shared, fakeBrowser());
+  const state = {can: () => true, geofenceEventSelect:{value:'morning'}, managerGeofenceEditor:{validate: () => ({enabled})},
+    events:[{id:'morning',sessionGroupId:'group',requiresGeofence:true},{id:'afternoon',sessionGroupId:'group',requiresGeofence:true},{id:'other',requiresGeofence:false}]};
+  await AdminDashboard.prototype.handleSaveManagerGeofenceClick.call(state);
+  assert.equal(commits, 1); assert.equal(writes.length, 2);
+  assert.ok(writes.every(write => write.ref.collection === 'eventGeofences'));
+  writes.length = 0; enabled = false;
+  await AdminDashboard.prototype.handleSaveManagerGeofenceClick.call(state);
+  assert.equal(commits, 2); assert.equal(writes.length, 4);
+  assert.deepEqual(JSON.parse(JSON.stringify(writes.filter(write => write.method === 'update').map(write => write.data))), [
+    {requiresGeofence:false,updatedAt:'server'}, {requiresGeofence:false,updatedAt:'server'}]);
+  assert.ok(writes.every(write => write.ref.id !== 'other'));
+  assert.equal(messages.at(-1)[0], 'Attendance area saved');
+});
+
 test('saving an ongoing event refreshes section assignment, targets matching notifications, and rejects a stale editor', async () => {
   const names=fs.readFileSync(path.join(root,'assets/js/dashboard.js'),'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
   const shared=Object.fromEntries(names.map(name=>[name,()=> ''])), browser=fakeBrowser(), writes=[], recipients=[], messages=[];
@@ -435,7 +480,7 @@ async function isolatedModule(relative, shared = {}, globals = {}) {
   };
   const module = load(path.join(root, relative));
   await module.link((specifier, referencing) => {
-    if (specifier.includes('dashboard.js')) return mock('shared', shared);
+    if (specifier.includes('dashboard.js')) return mock('shared', { sessionState: {}, ...shared });
     if (specifier.includes('firebase-config.js')) return mock('config', { db: {} });
     if (specifier.startsWith('https:')) return mock('sdk', {
       EmailAuthProvider: { credential: (email, password) => ({ email, password }) },
@@ -1244,6 +1289,30 @@ test('notifications reuse visibility subscriptions, back off transient failures 
  const [nextId,next]=[...timers.entries()][0];timers.delete(nextId);next.fn();
  failure({code:'permission-denied'});assert.equal(timers.size,0);
  controller.subscribeToNotifications();assert.equal(subscribed,3);controller.dispose();
+});
+
+test('notifications pause during password renewal and ignore stale failures before resuming', async () => {
+  const browser=fakeBrowser();let subscribed=0,stopped=0,callback,failure;
+  const events=new Map();
+  browser.window.addEventListener=(name,fn)=>events.set(name,fn);
+  browser.window.removeEventListener=name=>events.delete(name);
+  browser.window.emit=name=>events.get(name)?.({});
+  const shared={db:{},currentUser:{uid:'student'},currentUserRole:'student',dashboardRole:'student',escapeHtml:String,
+    formatNotificationTime:()=>'',query:x=>x,collection:()=> 'notifications',where(){},
+    onSnapshot:(_,next,error)=>{subscribed++;callback=next;failure=error;return()=>stopped++;},
+    setDoc(){},doc(){},serverTimestamp(){},writeBatch(){},showDashboardToast(){},openView(){},canReceiveNotification:()=>true};
+  const {NotificationCenterController}=await isolatedModule('assets/js/controllers/NotificationCenterController.js',shared,browser);
+  const controller=new NotificationCenterController(browser);controller.initialize();
+  const staleData=callback,staleFailure=failure;
+  await browser.window.emit('presence:password-session-start',{});
+  staleData({docs:[{id:'stale',data:()=>({})}]});staleFailure({code:'permission-denied'});
+  await browser.window.emit('online',{});controller.subscribeToNotifications();
+  assert.equal(stopped,1);assert.equal(subscribed,1);assert.equal(controller.notificationRecords.length,0);
+  assert.equal(Boolean(controller.notificationsBlocked),false);
+  await browser.window.emit('presence:password-session-ready',{});
+  assert.equal(subscribed,2);
+  callback({docs:[{id:'fresh',data:()=>({title:'Current',category:'attendance'})}]});
+  assert.equal(controller.notificationRecords[0].id,'fresh');controller.dispose();
 });
 
 test('shared navigation history is idempotent and cleans up modal and popstate listeners', async () => {
@@ -2800,9 +2869,79 @@ test('first-login setup completes on the server then restores the device session
   const shared=birthdayOnboardingShared({setDoc:async()=>{throw Error('No direct flag writes');}});
   const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
   browser.document.querySelector('#requiredNewPassword').value='Personal!new42';browser.document.querySelector('#requiredConfirmPassword').value='Personal!new42';
-  const state={document:browser.document,window:{setTimeout:fn=>fn(),location:{reload:()=>steps.push('reload')}},studentProfile:shared.currentUserProfile,completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),passwordResetApi:{completeFirstLogin:async()=>{steps.push('server');return {signInAfter:0};}},restorePasswordSession:async()=>steps.push('rebind')};
+  const state={document:browser.document,subscriptions:{pause:()=>steps.push('pause'),resume:()=>steps.push('resume')},window:{setTimeout:fn=>fn(),location:{reload:()=>steps.push('reload')}},studentProfile:shared.currentUserProfile,completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),passwordResetApi:{completeFirstLogin:async()=>{steps.push('server');return {signInAfter:0};}},restorePasswordSession:async()=>steps.push('rebind')};
   await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});
-  assert.deepEqual(steps,['server','rebind','reload']);
+  assert.deepEqual(steps,['pause','server','rebind','reload']);
+});
+
+test('password transitions invalidate late sync callbacks, resume only on verified success, and allow recovery after failed renewal', async () => {
+  const {DeviceSessionController} = await isolatedModule('assets/js/controllers/DeviceSessionController.js');
+  const {ScopedSubscriptions} = await import('../assets/js/core/ScopedSubscriptions.js');
+  let data = 0, errors = 0, callback, failure;
+  const subscriptions = new ScopedSubscriptions({onError:()=>errors++});
+  subscriptions.register('data',['*'],(guard,onError)=>{callback=guard(()=>data++);failure=onError;return ()=>{};});
+  subscriptions.setView('profile');
+  const staleData=callback, staleError=failure;
+  const finish=DeviceSessionController.pausePasswordSync(subscriptions, {});
+  staleData(); staleError(Error('session temporarily missing'));
+  subscriptions.setView('dashboard'); assert.equal(data,0);assert.equal(errors,0);
+  finish(false); assert.equal(subscriptions.paused,true);
+  const retry=DeviceSessionController.pausePasswordSync(subscriptions, {});
+  retry(true);assert.equal(subscriptions.paused,false);
+  callback();failure(Error('actual access failure'));
+  assert.equal(data,1);assert.equal(errors,1);
+  subscriptions.pause();DeviceSessionController.pausePasswordSync(subscriptions, {})(true);
+  assert.equal(subscriptions.paused,true,'must preserve an unrelated existing pause');
+});
+
+test('admin reset pauses syncing before password confirmation and resumes after a failed password check', async () => {
+  const browser=fakeBrowser(),steps=[];
+  const shared=birthdayOnboardingShared({auth:{currentUser:{uid:'head',email:'head@example.test'}},reauthenticateWithCredential:async()=>{steps.push('verify');throw Error('wrong password');}});
+  const {AdminDashboard}=await isolatedModule('assets/js/admin/AdminDashboard.js',shared,browser);
+  browser.document.querySelector('#temporaryPasswordResult').hidden=true;
+  browser.document.querySelector('#currentStudentPassword').value='WrongPassword!';
+  browser.document.querySelector('#studentPasswordResetReason').value='Student forgot password';
+  const state={document:browser.document,can:()=>true,selectedPasswordStudent:{uid:'student'},subscriptions:{pause:()=>steps.push('pause'),resume:()=>steps.push('resume')}};
+  await AdminDashboard.prototype.handlePasswordChangeFormSubmit.call(state,{preventDefault(){}});
+  assert.deepEqual(steps,['pause','verify','resume']);
+  steps.length=0;state.subscriptions.passwordSyncPaused=true;
+  await AdminDashboard.prototype.handlePasswordChangeFormSubmit.call(state,{preventDefault(){}});
+  assert.deepEqual(steps,['pause','verify'],'failed verification must not resume an earlier unconfirmed session');
+});
+
+test('admin password renewal replaces the shared user and directory reads use the current bound session', async () => {
+  const oldUser={uid:'head',getIdToken:()=>{throw Error('stale password token');}}, renewed={uid:'head',getIdToken:async()=> 'device-token'};
+  const auth={currentUser:renewed},saved=[];
+  const shared=birthdayOnboardingShared({auth,currentUser:oldUser,sessionState:{setSession:session=>saved.push(session.user)}});
+  const {AdminDashboard}=await isolatedModule('assets/js/admin/AdminDashboard.js',shared,fakeBrowser());
+  const result=await AdminDashboard.prototype.restoreAdminPasswordSession.call({},oldUser,{rebind:async user=>{assert.equal(user,oldUser);return renewed;}});
+  assert.equal(result,renewed);assert.deepEqual(saved,[renewed]);
+  let reads=0;
+  const state={directoryClient:{list:async user=>{reads++;assert.equal(user,renewed);assert.equal(await user.getIdToken(),'device-token');return {students:[]};}},scheduleStudentsRender(){}};
+  await AdminDashboard.prototype.refreshDirectory.call(state);
+  assert.equal(reads,1);
+  auth.currentUser={uid:'other'};
+  await assert.rejects(AdminDashboard.prototype.refreshDirectory.call(state),/Sign in again/);
+  await assert.rejects(AdminDashboard.prototype.restoreAdminPasswordSession.call({},oldUser,{rebind:async()=>auth.currentUser}),/account changed/);
+  assert.equal(reads,1);assert.equal(saved.length,1);
+});
+
+test('successful admin password reset renews shared authority before directory syncing resumes', async () => {
+  const browser=fakeBrowser(),steps=[],oldUser={uid:'head',email:'admin@example.test'},renewed={...oldUser};
+  const auth={currentUser:oldUser},sessionState={setSession:({user})=>{assert.equal(user,renewed);steps.push('shared-session');}};
+  const shared=birthdayOnboardingShared({auth,currentUser:oldUser,sessionState,reauthenticateWithCredential:async()=>steps.push('verify')});
+  const {AdminDashboard}=await isolatedModule('assets/js/admin/AdminDashboard.js',shared,browser);
+  browser.document.body.hasAttribute=()=>true;
+  browser.document.querySelector('#temporaryPasswordResult').hidden=true;
+  browser.document.querySelector('#currentStudentPassword').value='TestOnlyPassword';
+  browser.document.querySelector('#studentPasswordResetReason').value='Student requested reset';
+  const state={document:browser.document,can:()=>true,scope:{initialized:true},selectedPasswordStudent:{uid:'student'},
+    subscriptions:{pause:()=>steps.push('pause'),resume:()=>steps.push('resume')},
+    restoreAdminPasswordSession:user=>AdminDashboard.prototype.restoreAdminPasswordSession.call({},user,{rebind:async()=>{steps.push('rebind');auth.currentUser=renewed;return renewed;}}),
+    passwordResetApi:{reset:async user=>{assert.equal(user,renewed);steps.push('reset');return {temporaryPassword:'TEST-ONLY'};}}};
+  await AdminDashboard.prototype.handlePasswordChangeFormSubmit.call(state,{preventDefault(){}});
+  assert.deepEqual(steps,['pause','verify','rebind','shared-session','reset','resume']);
+  assert.equal(browser.document.querySelector('#temporaryPasswordResult').hidden,false);
 });
 
 test('failed first-login session restoration offers recovery with the new password and never writes flags', async () => {

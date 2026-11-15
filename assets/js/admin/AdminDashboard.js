@@ -34,7 +34,7 @@ import { hasPermission } from '../core/permissions.js?v=20261011-optimized';
 import { AttendanceCorrectionController } from '../controllers/AttendanceCorrectionController.js?v=20261011-optimized';
 import { AttendanceSummaryService } from '../controllers/AttendanceSummaryService.js';
 import { FineEligibilityService } from '../controllers/FineEligibilityService.js';
-import { getDocFromServer } from '../dashboard.js?v=20261011-optimized';
+import { getDocFromServer, sessionState } from '../dashboard.js?v=20261011-optimized';
 import { AttendanceHistoryController, AttendanceRepository } from '../controllers/AttendanceHistoryController.js?v=20261011-optimized';
 import { AttendanceToolbarController } from '../controllers/AttendanceToolbarController.js';
 import { AttendanceRecordProjectionService } from '../controllers/AttendanceRecordProjectionService.js';
@@ -834,7 +834,11 @@ export class AdminDashboard {
     this.directoryAttendanceSyncService.stop(); this.directoryAttendanceSyncService.start();
   }
   async refreshDirectory(refresh = false, guard = callback => callback) {
-    const result = await this.directoryClient.list(currentUser, refresh);
+    // Password confirmation replaces the Firebase User instance. Never reuse
+    // the dashboard's earlier password-token instance after device rebind.
+    const user = auth.currentUser;
+    if (!user || user.uid !== currentUser?.uid) throw Error('Sign in again to refresh the student directory.');
+    const result = await this.directoryClient.list(user, refresh);
     guard(() => {
       this.students = result.students.map(student => CoursePolicy.profile(student));
       this.studentsLoaded = false; // A D1 display cache is never a publishable event roster.
@@ -1541,6 +1545,11 @@ export class AdminDashboard {
     dashboard.renderSelectedStudent();
     dashboard.renderAdminAttendance();
   }
+  profileRoleControl(student) {
+    if (!this.can('changeRoles')) return '';
+    const role = student.role === 'viewer' ? 'student' : student.role || 'student';
+    return `<div class="field student-profile-role"><label for="profileStudentRole">Account role</label><select id="profileStudentRole" data-role-select="${escapeHtml(student.uid)}">${Object.entries(ASSIGNABLE_ROLE_LABELS).map(([value, label]) => `<option value="${escapeHtml(value)}"${value === role ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')}</select><button class="outline-button" type="button" data-change-profile-role>Change role</button></div>`;
+  }
   renderSelectedStudent() {
     const dashboard = this;
     const student = dashboard.studentDetailProfile?.uid === dashboard.selectedManagedStudentUid ? dashboard.studentDetailProfile
@@ -1564,6 +1573,7 @@ export class AdminDashboard {
     })}</div></article><article class="panel admin-student-information"><div class="panel-head"><div><h3>Student information</h3><p>Profile details and recorded attendance.</p></div><span class="badge blue">${studentAttendance.length} attended</span></div><div class="student-info-boxes"><div class="student-info-box"><span>Student ID</span><strong>${escapeHtml(student.accountId)}</strong></div><div class="student-info-box"><span>Course Registered</span><strong>${escapeHtml(student.course || "Not assigned")}</strong></div><div class="student-info-box"><span>Section</span><strong>${escapeHtml(student.section)}</strong></div><div class="student-info-box"><span>Face registration</span><strong>${hasFaceRegistration ? "Registered" : "Not registered"}</strong></div><div class="student-info-box"><span>Email address</span><strong>${escapeHtml(student.email || "Not provided")}</strong></div><div class="student-info-box"><span>Phone number</span><strong>${escapeHtml(student.phone || "Not provided")}</strong></div><div class="student-info-box"><span>Live status</span><strong>${presence.label}</strong><small>${escapeHtml(presence.detail)}</small></div><div class="student-info-box"><span>Account access</span><strong>${student.active === false ? "Inactive" : "Active"}</strong></div></div><div class="panel-head"><div><h3>Attended events</h3><p>Attendance loads in pages of 50 records.</p></div></div><div class="attended-event-grid">${attendedCards}</div></article>`;
     const fineCount = dashboard.fines.filter(fine => fine.studentUid === student.uid).length;
     const profileActions = dashboard.adminStudentDetail.querySelector(".admin-student-actions");
+    profileActions?.insertAdjacentHTML('afterbegin', dashboard.profileRoleControl(student));
     if (dashboard.can("viewFines")) profileActions?.insertAdjacentHTML("afterbegin", `<button class="outline-button" type="button" data-check-student-fines="${escapeHtml(student.uid)}">Check attendance fines${fineCount ? ` (${fineCount})` : ""}</button>`);
     if (dashboard.can('viewAbsences')) profileActions?.insertAdjacentHTML("afterbegin", `<button class="outline-button" type="button" data-view-student-absences="${escapeHtml(student.uid)}">View absences${absenceCount ? ` (${absenceCount})` : ""}</button>`);
     dashboard.adminStudentDetail.querySelector(".student-info-boxes")?.insertAdjacentHTML("afterbegin", `<div class="student-info-box"><span>Birthday</span><strong>${escapeHtml(formatBirthday(student.birthday))}</strong></div>`);
@@ -2006,7 +2016,9 @@ export class AdminDashboard {
       const sessions = group ? dashboard.events.filter(event => event.sessionGroupId === group) : [selectedEvent];
       for (const session of sessions) {
         batch.set(doc(db, "eventGeofences", session.id), geofence);
-        batch.set(doc(db, "events", session.id), { requiresGeofence: geofence.enabled, updatedAt: serverTimestamp() }, { merge: true });
+        if (session.requiresGeofence !== geofence.enabled) {
+          batch.update(doc(db, "events", session.id), { requiresGeofence: geofence.enabled, updatedAt: serverTimestamp() });
+        }
       }
       await batch.commit();
       showDashboardToast("Attendance area saved", `${selectedEvent.name} now uses the updated location rule.`);
@@ -2727,6 +2739,7 @@ export class AdminDashboard {
     }
     const previousRole = student.role || "student";
     const role = selector.value;
+    if (role === (previousRole === 'viewer' ? 'student' : previousRole)) return;
     dashboard.openRoleChangeModal(student, role, selector);
   }
   async handleConfirmRoleChangeClick() {
@@ -2811,6 +2824,11 @@ export class AdminDashboard {
   }
   handleAdminStudentDetailClick(clickEvent) {
     const dashboard = this;
+    if (clickEvent.target.closest('[data-change-profile-role]')) {
+      const selector = dashboard.adminStudentDetail.querySelector('#profileStudentRole');
+      if (selector) void dashboard.handleStudentTableBodyChange({ target: selector });
+      return;
+    }
     const close = clickEvent.target.closest("[data-close-student-detail]");
     const edit = clickEvent.target.closest("[data-edit-student]");
     const passwordButton = clickEvent.target.closest("[data-password-student]");
@@ -2851,6 +2869,12 @@ export class AdminDashboard {
     const dashboard = this;
     if (event.key === "Escape" && !dashboard.document.querySelector("#adminAbsenceModal").hidden) dashboard.adminAbsenceModalController.close();
   }
+  async restoreAdminPasswordSession(user, { rebind = DeviceSessionController.rebind } = {}) {
+    const renewed = await rebind(user);
+    if (!renewed || renewed.uid !== user.uid) throw Error('Your account changed. Sign in again before resetting a password.');
+    sessionState.setSession({ user: renewed });
+    return renewed;
+  }
   async handlePasswordChangeFormSubmit(submitEvent) {
     const dashboard = this;
     if (!dashboard.can('changePasswords')) {
@@ -2866,9 +2890,13 @@ export class AdminDashboard {
     if (reason.length < 5) { showDashboardToast('Reason required', 'Enter at least 5 characters.'); return; }
     dashboard.studentPasswordResetBusy = true;
     const submit = dashboard.document.querySelector('#passwordResetSubmit'); submit.disabled = true; submit.textContent = 'Resetting…';
+    let sessionReady = !dashboard.subscriptions?.passwordSyncPaused;
+    const finishSync = DeviceSessionController.pausePasswordSync(dashboard.subscriptions, dashboard.window);
     try {
       await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(auth.currentUser.email, currentPassword));
-      if (dashboard.document.body.hasAttribute?.('data-device-session-enabled')) await DeviceSessionController.rebind(auth.currentUser);
+      sessionReady = false;
+      if (dashboard.document.body.hasAttribute?.('data-device-session-enabled')) await dashboard.restoreAdminPasswordSession(auth.currentUser);
+      sessionReady = true;
       dashboard.document.querySelector('#currentStudentPassword').value = '';
       dashboard.passwordResetApi ||= new PasswordResetApi();
       const result = await dashboard.passwordResetApi.reset(auth.currentUser, student.uid, reason);
@@ -2881,6 +2909,7 @@ export class AdminDashboard {
       submit.disabled = false;
       showDashboardToast('Unable to confirm reset', error.code?.startsWith('auth/') ? 'Your admin password could not be verified. Sign in again if needed.' : error.message || 'Retry later.');
     } finally {
+      finishSync(sessionReady);
       dashboard.studentPasswordResetBusy = false; submit.textContent = 'Generate temporary password';
       dashboard.document.querySelector('#currentStudentPassword').value = '';
     }

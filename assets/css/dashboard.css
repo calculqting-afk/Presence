@@ -593,6 +593,9 @@ body[data-dashboard="student"] .skeleton-panels > .skeleton-card:last-child { di
 .admin-student-overview > p { margin: 7px 0 20px; color: var(--muted); font-size: .75rem; }
 .admin-student-actions { display: grid; gap: 9px; margin-top: 18px; }
 .admin-student-actions button { width: 100%; }
+.student-profile-role { display: grid; gap: 9px; text-align: left; }
+.student-profile-role label { color: var(--muted); font-size: .75rem; font-weight: 700; }
+.student-profile-role select { width: 100%; min-width: 0; min-height: 44px; font: inherit; }
 .admin-student-information { display: grid; gap: 16px; }
 .student-info-boxes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .student-info-box { min-width: 0; padding: 15px 17px; background: #f7faff; border: 1px solid #e1eaf6; border-radius: 12px; }

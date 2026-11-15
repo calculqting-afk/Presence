@@ -65,7 +65,7 @@ export class DeviceSessionController {
     });
   }
   async watch(user, onLost) {
-    const claims = (await user.getIdTokenResult()).claims;
+    let claims = (await user.getIdTokenResult()).claims;
     if (this.disposed) return;
     const { db } = await import('../../../config/firebase-config.js');
     const { doc, onSnapshot } = await import('https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js');
@@ -73,10 +73,26 @@ export class DeviceSessionController {
     this.onSigningOut = () => { this.releasing = true; };
     let latestSession;
     const checkSession = () => {
-      if (this.disposed || this.releasing || latestSession === undefined) return;
+      if (this.disposed || this.releasing || this.passwordTransition || latestSession === undefined) return;
       if (latestSession !== claims.presenceSession) { this.unsubscribe?.(); onLost(); }
     };
     this.onSignOutFailed = () => { this.releasing = false; checkSession(); };
+    this.passwordGeneration = 0;
+    this.onPasswordStart = () => { this.passwordGeneration++; this.passwordTransition = true; };
+    this.onPasswordReady = async () => {
+      const generation = this.passwordGeneration;
+      try {
+        const authentication = this.authentication || (await import('../../../config/firebase-config.js')).auth;
+        if (this.disposed || authentication.currentUser?.uid !== user.uid) return;
+        const refreshedClaims = (await authentication.currentUser.getIdTokenResult()).claims;
+        if (this.disposed || generation !== this.passwordGeneration) return;
+        claims = refreshedClaims;
+        this.passwordTransition = false;
+        checkSession();
+      } catch { /* Failed renewal remains paused; fresh sign-in is required. */ }
+    };
+    this.window.addEventListener('presence:password-session-start', this.onPasswordStart);
+    this.window.addEventListener('presence:password-session-ready', this.onPasswordReady);
     this.window.addEventListener('presence:device-signing-out', this.onSigningOut);
     this.window.addEventListener('presence:device-signout-failed', this.onSignOutFailed);
     this.unsubscribe = onSnapshot(doc(db, 'accountSessions', user.uid), snapshot => {
@@ -87,6 +103,20 @@ export class DeviceSessionController {
   }
   static async rebind(user) {
     return new DeviceSessionController().bind(user);
+  }
+  static pausePasswordSync(subscriptions, window = globalThis.window) {
+    const alreadyPaused = subscriptions?.paused === true && !subscriptions.passwordSyncPaused;
+    if (subscriptions) subscriptions.passwordSyncPaused = true;
+    subscriptions?.pause();
+    window?.dispatchEvent?.(new (window.Event || globalThis.Event)('presence:password-session-start'));
+    return ready => {
+      // An uncertain/invalid session stays paused until a successful retry or
+      // fresh sign-in. Never hide genuine transfer errors by resuming blindly.
+      if (!ready) return;
+      if (subscriptions) subscriptions.passwordSyncPaused = false;
+      window?.dispatchEvent?.(new (window.Event || globalThis.Event)('presence:password-session-ready'));
+      if (!alreadyPaused) subscriptions?.resume();
+    };
   }
   static async release(user, { api = new PasswordResetApi(), window = globalThis.window } = {}) {
     if (!user) return;
@@ -99,5 +129,5 @@ export class DeviceSessionController {
       throw error;
     }
   }
-  dispose() { this.window?.removeEventListener('presence:device-signing-out', this.onSigningOut); this.window?.removeEventListener('presence:device-signout-failed', this.onSignOutFailed); this.disposed = true; this.unsubscribe?.(); this.finishTransfer?.(false); }
+  dispose() { this.window?.removeEventListener('presence:password-session-start', this.onPasswordStart); this.window?.removeEventListener('presence:password-session-ready', this.onPasswordReady); this.window?.removeEventListener('presence:device-signing-out', this.onSigningOut); this.window?.removeEventListener('presence:device-signout-failed', this.onSignOutFailed); this.disposed = true; this.unsubscribe?.(); this.finishTransfer?.(false); }
 }
