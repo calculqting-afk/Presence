@@ -7,6 +7,7 @@ import { PresenceService, consumeApiBudget } from './presence.js';
 import { DirectoryService } from './directory.js';
 import { FeatureReadsService } from './feature-reads.js';
 import { AttendanceQrService } from './attendance-qr.js';
+import { DuringAttendanceService } from './during-attendance.js';
 
 export function handler({ verify = verifyToken, gateway = secret => new FirebaseGateway(secret) } = {}) {
   return async (request, env) => {
@@ -21,15 +22,16 @@ export function handler({ verify = verifyToken, gateway = secret => new Firebase
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
       if (url.pathname === '/health' && request.method === 'GET') return response({ service: 'presence-admin-api', superAdminAuthority: 'custom-claim', enabled: env.RESET_ENABLED === 'true', configured: Boolean(env.FIREBASE_SERVICE_ACCOUNT),idCorrectionEnabled:env.ID_CORRECTION_ENABLED==='true',attendanceQrConfigured:typeof env.ID_PREVIEW_SECRET === 'string' && env.ID_PREVIEW_SECRET.length >= 32,deviceSessions:true,locationProofs:true,faceConfirmationConfigured:Boolean(env.FACE_REGISTRATION_SECRET),temporaryPasswordMinutes:30 });
       const sessionRoute = ['/v1/session/status', '/v1/session/acquire', '/v1/session/release'].includes(url.pathname);
+      const duringRoute = ['/v1/admin/during-attendance', '/v1/student/during-attendance'].includes(url.pathname);
       const presenceRoute = ['/v1/presence/heartbeat', '/v1/admin/presence'].includes(url.pathname);
       const directoryRoute = ['/v1/admin/directory', '/v1/directory/sync'].includes(url.pathname);
       const featureRoute = ['/v1/admin/activity', '/v1/surveys/read'].includes(url.pathname);
       const qrRoute = ['/v1/student/attendance-qr', '/v1/admin/attendance-qr/preview', '/v1/admin/attendance-qr/confirm'].includes(url.pathname);
       const idRoute=['/v1/admin/student-id/status','/v1/admin/student-id/preview','/v1/admin/student-id/confirm'].includes(url.pathname);
       const locationRoute = url.pathname === '/v1/student/attendance-location', faceRoute = url.pathname === '/v1/internal/face-registration';
-      if ((!qrRoute && !featureRoute && !directoryRoute && !presenceRoute && !sessionRoute && !idRoute && !locationRoute && !faceRoute && !['/v1/admin/password-reset', '/v1/student/password-change', '/v1/student/first-login-password'].includes(url.pathname)) || url.search) throw new SafeError(404, 'Not found.');
+      if ((!duringRoute && !qrRoute && !featureRoute && !directoryRoute && !presenceRoute && !sessionRoute && !idRoute && !locationRoute && !faceRoute && !['/v1/admin/password-reset', '/v1/student/password-change', '/v1/student/first-login-password'].includes(url.pathname)) || url.search) throw new SafeError(404, 'Not found.');
       if (request.method !== 'POST') throw new SafeError(405, 'POST required.');
-      if (!qrRoute && !featureRoute && !directoryRoute && !presenceRoute && !sessionRoute && !locationRoute && !faceRoute && (idRoute?env.ID_CORRECTION_ENABLED!=='true':env.RESET_ENABLED !== 'true')) throw new SafeError(503, idRoute?'Student ID correction is awaiting backend permission setup.':'Password reset service is not enabled yet.');
+      if (!duringRoute && !qrRoute && !featureRoute && !directoryRoute && !presenceRoute && !sessionRoute && !locationRoute && !faceRoute && (idRoute?env.ID_CORRECTION_ENABLED!=='true':env.RESET_ENABLED !== 'true')) throw new SafeError(503, idRoute?'Student ID correction is awaiting backend permission setup.':'Password reset service is not enabled yet.');
       const token = /^Bearer ([^\s]+)$/.exec(request.headers.get('Authorization') || '')?.[1];
       if (!token) throw new SafeError(401, 'Sign in again to continue.');
       if (!(request.headers.get('Content-Type') || '').startsWith('application/json')) throw new SafeError(415, 'JSON required.');
@@ -58,6 +60,10 @@ export function handler({ verify = verifyToken, gateway = secret => new Firebase
         return response(result);
       }
       await requireActiveDevice(db, claims);
+      if (duringRoute) {
+        const service = new DuringAttendanceService(db);
+        return response(url.pathname.startsWith('/v1/admin/') ? await service.configure(claims, body) : await service.confirm(claims, body));
+      }
       if (qrRoute) {
         const qr = new AttendanceQrService(db, env.ID_PREVIEW_SECRET);
         return response(url.pathname.startsWith('/v1/student/') ? await qr.issue(claims, body)

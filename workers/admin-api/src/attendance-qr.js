@@ -3,6 +3,7 @@ import { ResetService, isSuperAuthority } from './service.js';
 import { requireActiveDevice, sessionAuthTime } from './device-session.js';
 import { EventAudiencePolicy } from '../../../assets/js/controllers/EventAudiencePolicy.js';
 import { PolicyAgreementPolicy } from '../../../assets/js/core/PolicyAgreementPolicy.js';
+import { requireDuring } from './during-attendance.js';
 
 const DISPLAY_TTL = 30 * 60 * 1000;
 const DOWNLOAD_TTL = 15 * 60 * 1000;
@@ -47,6 +48,11 @@ export class AttendanceQrService {
       || authTime <= (profile.passwordResetValidAfter ?? -1) || !profile.accountId) throw new SafeError(403, 'An active student account with password setup completed is required.');
   }
   window(event, action) {
+    if (action === 'during') {
+      const checkpoint = event?.duringAttendance;
+      if (!checkpoint?.enabled || this.now() < +new Date(checkpoint.opensAt) || this.now() >= +new Date(checkpoint.closesAt)) throw new SafeError(409, 'During attendance is not open.');
+      return;
+    }
     const now = this.now(), start = +new Date(action === 'in' ? event?.openAt : event?.closeAt), end = +new Date(event?.checkOutClosesAt);
     if (!Number.isFinite(start) || !Number.isFinite(end) || now < start || now > end
       || (action === 'in' && event.checkoutOnlyReopened === true)) throw new SafeError(409, 'The selected attendance window is closed.');
@@ -103,7 +109,8 @@ export class AttendanceQrService {
     if (!EventAudiencePolicy.canAttend({ ...profile, uid: qr.uid }, event)) throw new SafeError(403, 'This student is not assigned to the selected session.');
     if (action === 'in' && record && !record.checkedInAt) throw new SafeError(409, 'A checkout-only record already exists. Use an audited attendance correction to add the missing check-in.');
     if (action === 'out' && (!record?.checkedInAt || record.status !== 'checked-in') && !record?.checkedOutAt) throw new SafeError(409, 'A valid check-in is required before checkout.');
-    const existing = action === 'in' ? Boolean(record) : Boolean(record?.checkedOutAt);
+    if (action === 'during') requireDuring(event, record, this.now(), qr.uid, eventId);
+    const existing = action === 'during' ? Boolean(record?.duringAttendance?.confirmedAt) : action === 'in' ? Boolean(record) : Boolean(record?.checkedOutAt);
     if (action === 'out' && !existing && !(+new Date(record.checkedInAt) < this.now())) throw new SafeError(409, 'Checkout must be later than check-in.');
     if (action === 'out' && !existing && (record.studentUid !== qr.uid || record.eventId !== eventId
       || record.eventDate !== event.date || new Date(+new Date(record.checkedInAt) + 8 * 3600000).toISOString().slice(0, 10) !== event.date)) {
@@ -112,7 +119,7 @@ export class AttendanceQrService {
     return { profile, event, record, existing, actorProfile };
   }
   async scan(claims, body, confirm = false) {
-    if (Object.keys(body).some(key => !['eventId', 'action', 'token', 'confirmation'].includes(key)) || !validEvent(body.eventId) || !['in', 'out'].includes(body.action)) throw new SafeError(400, 'Choose an event and Check-in or Check-out.');
+    if (Object.keys(body).some(key => !['eventId', 'action', 'token', 'confirmation'].includes(key)) || !validEvent(body.eventId) || !['in', 'out', 'during'].includes(body.action)) throw new SafeError(400, 'Choose an event and attendance action.');
     const actor = await this.actor(claims);
     await requireActiveDevice(this.db, claims);
     let qr, confirmation;
@@ -139,17 +146,17 @@ export class AttendanceQrService {
       }
       if (!confirm || existing) return writes;
       const checked = new Date(now), id = qr.uid + '_' + body.eventId;
-      const payload = body.action === 'in' ? {
+      const payload = body.action === 'during' ? { duringAttendance: { checkpointId: event.duringAttendance.id, confirmedAt: checked, method: 'admin-qr', confirmedBy: claims.sub, label: event.duringAttendance.label } } : body.action === 'in' ? {
         studentUid: qr.uid, studentId: profile.accountId, eventId: body.eventId, eventName: event.name, eventType: event.type || 'School Event', eventDescription: event.description || '', eventDate: event.date,
         timeIn: event.timeIn, timeOut: event.timeOut, location: event.location || '', audience: event.audience || 'All students', attendedAt: checked, checkedInAt: checked, status: 'checked-in',
         arrivalStatus: now < +new Date(event.lateAfterAt || event.checkInClosesAt) ? 'present' : 'late'
       } : { checkedOutAt: checked, status: 'completed' };
-      Object.assign(payload, body.action === 'in' ? { recordSource: 'admin-qr', qrCheckedInBy: claims.sub } : { qrCheckedOutBy: claims.sub });
+      if (body.action !== 'during') Object.assign(payload, body.action === 'in' ? { recordSource: 'admin-qr', qrCheckedInBy: claims.sub } : { qrCheckedOutBy: claims.sub });
       const auditId = 'attendance-qr_' + await digest(id + ':' + body.action);
       const audit = await get('auditLogs/' + auditId);
       if (audit) throw new SafeError(409, 'This QR attendance action was already processed. Ask an Attendance Manager to review it.');
-      writes.push(this.db.write('attendance/' + id, payload, { merge: body.action === 'out', exists: body.action === 'out' }),
-        this.db.write('auditLogs/' + auditId, { action: body.action === 'in' ? 'attendance-qr-check-in' : 'attendance-qr-check-out', actorUid: claims.sub, actorName: name(actorProfile || {}) || actor.user.displayName || 'Administrator', studentUid: qr.uid, studentId: profile.accountId, studentName: name(profile), eventId: body.eventId, eventName: event.name, createdAt: checked, method: 'admin-qr', before: record ? { status: record.status } : null, after: { status: payload.status, ...('arrivalStatus' in payload ? { arrivalStatus: payload.arrivalStatus } : {}) } }, { exists: false }));
+      writes.push(this.db.write('attendance/' + id, payload, { merge: body.action !== 'in', exists: body.action !== 'in' }),
+        this.db.write('auditLogs/' + auditId, { action: body.action === 'during' ? 'attendance-qr-during' : body.action === 'in' ? 'attendance-qr-check-in' : 'attendance-qr-check-out', actorUid: claims.sub, actorName: name(actorProfile || {}) || actor.user.displayName || 'Administrator', studentUid: qr.uid, studentId: profile.accountId, studentName: name(profile), eventId: body.eventId, eventName: event.name, createdAt: checked, method: 'admin-qr', before: record ? { status: record.status } : null, after: { status: payload.status || record?.status, ...('arrivalStatus' in payload ? { arrivalStatus: payload.arrivalStatus } : {}) } }, { exists: false }));
       result.saved = true;
       return writes;
     });

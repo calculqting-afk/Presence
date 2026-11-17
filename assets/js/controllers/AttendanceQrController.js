@@ -54,7 +54,7 @@ export class AttendanceQrController {
       ${this.admin ? '<h2 id="attendanceQrTitle">Scan student QR</h2>' : ''}
       <p>${this.admin ? 'Choose the session and action. Scan, verify the student in person, then confirm.' : 'Show your QR to an attendance administrator for verification.'}</p>
       ${this.admin ? `<div class="attendance-qr-controls"><label>Event / session<select data-qr-event>${events.length ? events.map(event => `<option value="${e(event.id)}">${e(AttendanceViews.title(event))} · ${e(AttendanceViews.label(event))} · ${e(event.date)}</option>`).join('') : '<option value="">No current eligible sessions</option>'}</select></label>
-      <label>Action<select data-qr-action><option value="in">Check-in</option><option value="out">Check-out</option></select></label></div>` : '<p class="attendance-qr-identity" data-qr-identity></p>'}
+      <label>Action<select data-qr-action><option value="in">Check-in</option><option value="out">Check-out</option><option value="during">During attendance (if enabled)</option></select></label></div>` : '<p class="attendance-qr-identity" data-qr-identity></p>'}
       <p data-qr-status role="status" aria-live="polite"></p>
       ${this.admin ? '<video data-qr-video autoplay playsinline muted hidden aria-label="QR scanner camera"></video><button class="primary-button" type="button" data-qr-camera>Start camera</button><section data-qr-confirmation hidden></section>' : '<div class="attendance-qr-display"><p data-qr-countdown class="attendance-qr-countdown" role="timer" aria-live="off"></p><div class="attendance-qr-code" data-qr-code></div></div><div class="attendance-qr-expiry"><div><span>On-screen QR</span><strong>Renews every 30 min</strong></div><div><span>Downloaded QR</span><strong>Valid for 15 min</strong></div></div><p class="attendance-qr-note">Downloads stay valid after logout until the expiry shown. Keep your QR private.</p><div class="button-row attendance-qr-actions"><button class="primary-button" type="button" data-qr-download disabled>Download QR</button><button class="outline-button" type="button" data-qr-refresh>Retry</button></div>'}`;
     this.dialog = dialog;
@@ -263,11 +263,11 @@ export class AttendanceQrController {
     try {
       const result = await this.api.call('/v1/admin/attendance-qr/preview', this.getUser(), { ...selection, token });
       if (this.dialog !== dialog || generation !== this.generation) return;
-      if (result.existing) { this.status(selection.action === 'in' ? 'Already checked in. No attendance was changed.' : 'Already checked out. No attendance was changed.'); return; }
+      if (result.existing) { this.status(selection.action === 'during' ? 'During attendance already confirmed. No attendance was changed.' : selection.action === 'in' ? 'Already checked in. No attendance was changed.' : 'Already checked out. No attendance was changed.'); return; }
       this.preview = { ...result, ...selection };
       const deadline = Date.now() + result.expiresAt - result.serverNow;
       const e = this.escapeHtml, panel = this.field('[data-qr-confirmation]'); panel.hidden = false;
-      panel.innerHTML = `<h3>Is this the student in front of you?</h3><div class="attendance-qr-person"><div data-qr-photo></div><div><strong>${e(result.student.name)}</strong><p>${e(result.student.studentId)}</p><p>${e(result.student.course)} · Section ${e(result.student.section)}</p></div></div><p><strong>${e(result.event.name)}</strong> · ${e(result.event.date)} · ${selection.action === 'in' ? 'Check-in' : 'Check-out'}</p><label class="attendance-qr-verify"><input type="checkbox" data-qr-verified> I verified this student in person.</label><p data-qr-confirm-countdown></p><div class="button-row"><button class="outline-button" type="button" data-qr-cancel>Cancel</button><button class="primary-button" type="button" data-qr-save disabled>Confirm ${selection.action === 'in' ? 'check-in' : 'check-out'}</button></div>`;
+      panel.innerHTML = `<h3>Is this the student in front of you?</h3><div class="attendance-qr-person"><div data-qr-photo></div><div><strong>${e(result.student.name)}</strong><p>${e(result.student.studentId)}</p><p>${e(result.student.course)} · Section ${e(result.student.section)}</p></div></div><p><strong>${e(result.event.name)}</strong> · ${e(result.event.date)} · ${selection.action === 'during' ? 'During attendance' : selection.action === 'in' ? 'Check-in' : 'Check-out'}</p><label class="attendance-qr-verify"><input type="checkbox" data-qr-verified> I verified this student in person.</label><p data-qr-confirm-countdown></p><div class="button-row"><button class="outline-button" type="button" data-qr-cancel>Cancel</button><button class="primary-button" type="button" data-qr-save disabled>Confirm ${selection.action === 'during' ? 'during attendance' : selection.action === 'in' ? 'check-in' : 'check-out'}</button></div>`;
       if (/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(result.student.photo)) {
         const img = this.document.createElement('img'); img.src = result.student.photo; img.alt = 'Student profile photo'; this.field('[data-qr-photo]').append(img);
       } else this.field('[data-qr-photo]').textContent = 'No photo—verify Student ID';
@@ -295,7 +295,7 @@ export class AttendanceQrController {
       const result = await this.api.call('/v1/admin/attendance-qr/confirm', this.getUser(), { eventId, action, confirmation });
       if (this.dialog !== dialog || generation !== this.generation) return;
       this.reset();
-      const message = result.saved ? `${result.student.name}: ${action === 'in' ? 'check-in' : 'check-out'} recorded.` : 'Attendance was already recorded. No duplicate was created.';
+      const message = result.saved ? `${result.student.name}: ${action === 'during' ? 'during attendance' : action === 'in' ? 'check-in' : 'check-out'} recorded.` : 'Attendance was already recorded. No duplicate was created.';
       this.status(message); this.showToast(result.saved ? 'Attendance recorded' : 'Already recorded', message);
     } catch (error) {
       if (this.dialog === dialog && generation === this.generation) {

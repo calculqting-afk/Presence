@@ -593,6 +593,47 @@ body[data-dashboard="student"] .skeleton-panels > .skeleton-card:last-child { di
 .admin-student-overview > p { margin: 7px 0 20px; color: var(--muted); font-size: .75rem; }
 .admin-student-actions { display: grid; gap: 9px; margin-top: 18px; }
 .admin-student-actions button { width: 100%; }
+.during-modal { width: min(580px, calc(100% - 32px)); overflow: hidden; font: inherit; }
+.during-modal .during-form { display: flex; flex-direction: column; max-height: calc(100dvh - 36px); padding: 0; }
+.during-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 25px 28px 20px; border-bottom: 1px solid var(--legal-line); }
+.during-eyebrow { color: var(--muted); font-size: .66rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.during-modal h2 { margin: 5px 0 8px; font-size: 1.3rem; }
+.during-modal .during-session { margin: 0; color: var(--muted); font-size: .77rem; overflow-wrap: anywhere; }
+.during-modal .during-close { display: grid; place-items: center; flex: 0 0 36px; width: 36px; min-height: 36px; padding: 0; font-size: 1.25rem; line-height: 1; }
+.during-body { overflow-y: auto; min-height: 0; padding: 20px 28px; }
+.during-modal .during-description { margin: 0 0 18px; color: var(--muted); font-size: .8rem; line-height: 1.6; }
+.during-enable { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 16px; border: 1px solid var(--legal-line); border-radius: 12px; cursor: pointer; }
+.during-enable strong, .during-enable small { display: block; }
+.during-enable strong { font-size: .8rem; }
+.during-enable small { margin-top: 3px; color: var(--muted); font-size: .7rem; }
+.during-enable input { appearance: none; flex: 0 0 44px; width: 44px; height: 26px; margin: 0; padding: 3px; border: 1px solid var(--muted); border-radius: 20px; background: var(--legal-line); cursor: pointer; }
+.during-enable input::before { content: ''; display: block; width: 18px; height: 18px; border-radius: 50%; background: white; box-shadow: 0 1px 3px #0003; transition: transform .15s ease; }
+.during-enable input:checked { border-color: var(--blue); background: var(--blue); }
+.during-enable input:checked::before { transform: translateX(18px); }
+.during-enable input:disabled { opacity: .5; cursor: default; }
+.during-details { margin-top: 22px; }
+.during-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.during-section-heading h3 { margin: 0; font-size: .84rem; }
+.during-section-heading > span { color: var(--muted); font-size: .66rem; white-space: nowrap; }
+.during-modal .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.during-modal .field { min-width: 0; }
+.during-modal .field.full { grid-column: 1 / -1; }
+.during-modal .field input { min-width: 0; font: inherit; font-size: .8rem; min-height: 46px; }
+.during-modal .field input:disabled { opacity: .5; cursor: not-allowed; }
+.during-modal .during-help { margin: 12px 0 0; color: var(--muted); font-size: .69rem; line-height: 1.65; }
+.during-notice { margin-top: 18px; padding: 12px 14px; border-left: 3px solid var(--blue); border-radius: 6px; background: var(--blue-soft); font-size: .71rem; }
+.during-modal .during-notice p { margin: 3px 0 0; color: var(--muted); line-height: 1.5; }
+.during-modal .during-status { margin: 14px 0 0; font-size: .75rem; overflow-wrap: anywhere; }
+.during-modal .during-status:empty { display: none; }
+.during-modal .during-footer { justify-content: flex-end; flex-shrink: 0; margin: 0; padding: 17px 28px; border-top: 1px solid var(--legal-line); }
+.during-modal .during-footer .primary-button { background: var(--blue); border-color: var(--blue); color: white; }
+@media (max-width: 480px) {
+  .during-header { padding: 20px 18px 16px; }
+  .during-body { padding: 18px; }
+  .during-modal .during-footer { padding: 15px 18px; }
+  .during-modal .during-footer button { flex: 1; }
+  .during-modal .form-grid { gap: 12px; }
+}
 .student-profile-role { display: grid; gap: 9px; text-align: left; }
 .student-profile-role label { color: var(--muted); font-size: .75rem; font-weight: 700; }
 .student-profile-role select { width: 100%; min-width: 0; min-height: 44px; font: inherit; }

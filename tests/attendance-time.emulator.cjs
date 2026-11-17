@@ -39,5 +39,13 @@ async function commit(entries,uid='owner',allowed=true){
   await commit([['attendance/time-student_time-live',{status:'completed',checkedOutAt:SERVER},['status','checkedOutAt']]],'time-student',false);
   await commit([['attendance/time-student_time-live',{...regular,attendedAt:new Date(now-30000),checkedInAt:new Date(now-30000)}]]);
   await commit([['attendance/time-student_time-live',{status:'completed',checkedOutAt:SERVER},['status','checkedOutAt']]],'time-student');
+  const during={checkpointId:'checkpoint',confirmedAt:new Date(now-10000),method:'student',label:'Mid-event'};
+  const withDuring={...regular,attendedAt:new Date(now-30000),checkedInAt:new Date(now-30000),duringAttendance:during};
+  await commit([['attendance/time-student_time-live',withDuring]]);
+  await commit([['attendance/time-student_time-live',{duringAttendance:{...during,label:'Forged'}},['duringAttendance']]],'time-student',false);
+  await commit([['attendance/time-student_time-live',{duringAttendance:{...during,label:'Forged'}},['duringAttendance']]],'time-admin',false);
+  await commit([['attendance/time-student_time-live',{},['duringAttendance']]],'time-admin',false);
+  await commit([['attendance/time-student_time-live',{status:'completed',checkedOutAt:SERVER},['status','checkedOutAt']]],'time-student');
+  console.log('During Rules passed: student/admin cannot forge or erase a checkpoint confirmation; normal checkout preserves it.');
   console.log('Attendance time Rules passed: equal/reversed and wrong-day corrections rejected; sub-minute correction and regular checkout accepted; future check-in cannot be checked out.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

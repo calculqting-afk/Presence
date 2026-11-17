@@ -34,6 +34,17 @@ async function fixture() {
   return { service, store, users, db, student, admin, issue, preview, confirm, advance: milliseconds => { now += milliseconds; }, Policy };
 }
 
+test('admin QR During confirmation requires checked-in student and preserves original attendance',async()=>{
+ const f=await fixture(),qr=await f.issue(),first=await f.preview(qr.token);await f.confirm(first.confirmation);
+ const now=qr.serverNow,event=f.store.get('events/morning');
+ event.duringAttendance={id:'checkpoint',enabled:true,label:'Mid-event',opensAt:new Date(now),closesAt:new Date(now+600000)};
+ const before=structuredClone(f.store.get('attendance/student_morning'));
+ const preview=await f.preview(qr.token,'during');assert.equal(preview.action,'during');await f.confirm(preview.confirmation,'during');
+ const saved=f.store.get('attendance/student_morning');assert.deepEqual(saved.checkedInAt,before.checkedInAt);assert.equal(saved.arrivalStatus,before.arrivalStatus);assert.equal(saved.checkedOutAt,undefined);assert.equal(saved.status,'checked-in');assert.equal(saved.duringAttendance.method,'admin-qr');
+ assert.equal((await f.preview(qr.token,'during')).existing,true);
+ f.store.get('attendance/student_morning').checkedOutAt=new Date(now);await assert.rejects(f.preview(qr.token,'during'),/saved check-in/);
+});
+
 test('event QR is opaque, round-trips through the bundled camera decoder, and expires after 30 minutes', async () => {
   const f = await fixture(), qr = await f.issue();
   assert.doesNotMatch(qr.token, /2510004|Student|student-session|password/);
@@ -191,6 +202,20 @@ test('scanner attaches its dialog and always releases camera and timers on close
   f.controller.close();
   assert.equal(stopped, 1); assert.equal(f.intervals.size, 0); assert.equal(f.controller.dialog, null);
   assert.equal(f.calls.length, 0);
+});
+
+test('scanner preview and success messages name all three attendance actions correctly',async()=>{
+ for(const [action,label] of [['in','check-in'],['out','check-out'],['during','during attendance']]){
+  const f=await browserFixture();await f.controller.open();f.controller.field('[data-qr-action]').value=action;
+  f.controller.api.call=async path=>path.endsWith('/preview')?{
+    student:{name:'Test Student',studentId:'123',section:'2A',course:'Course'},event:{name:'Session',date:'2026-11-17'},
+    confirmation:'opaque',serverNow:Date.now(),expiresAt:Date.now()+120000
+  }:{saved:true,student:{name:'Test Student'}};
+  await f.controller.scan('opaque-student-qr');
+  assert.ok(f.controller.field('[data-qr-confirmation]').innerHTML.includes('Confirm '+label));
+  f.controller.field('[data-qr-verified]').checked=true;await f.controller.confirm();
+  assert.ok(f.notifications.at(-1)[1].includes(label+' recorded'));f.controller.dispose();
+ }
 });
 
 test('scanner never confirms without physical identity verification, and repeated clicks cannot duplicate a pending save', async () => {

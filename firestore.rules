@@ -168,7 +168,7 @@ service cloud.firestore {
     function validEventAudience(data) {
       let sections = eventSections(data);
       return !data.keys().hasAny(["audienceSections", "sectionAssignedAt", "rosterVersion"])
-        ? data.audience != "Selected sections"
+        ? data.audience in ["All students", "Section 1A", "Section 1B", "Section 2A", "Section 2B", "Section 3A", "Section 3B", "Section 4A", "Section 4B"]
         : (data.keys().hasAll(["audienceSections", "sectionAssignedAt", "rosterVersion", "attendanceRoster", "rosterCapturedAt"])
           && data.audienceSections is list && data.audienceSections.size() <= 8
           && data.audienceSections.hasOnly(["1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B"])
@@ -191,16 +191,17 @@ service cloud.firestore {
       return data.keys().hasOnly([
           "name", "type", "date", "location", "timeIn", "checkInCutoff", "checkInClose", "timeOut", "checkOutCutoff",
           "audience", "description", "notes", "requiresGeofence", "openAt", "checkInClosesAt", "closeAt",
-          "lateAfterAt", "checkOutClosesAt", "checkoutOnlyReopened", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt", "hasSurvey", "surveyArchived", "audienceSections", "sectionAssignedAt", "rosterVersion", "sessionPeriod", "sessionGroupId", "sessionBaseName"
+          "lateAfterAt", "checkOutClosesAt", "checkoutOnlyReopened", "createdAt", "createdBy", "updatedAt", "attendanceRoster", "rosterCapturedAt", "hasSurvey", "surveyArchived", "audienceSections", "sectionAssignedAt", "rosterVersion", "sessionPeriod", "sessionGroupId", "sessionBaseName", "duringAttendance"
         ])
         // Every required field is read and type-checked below. Missing fields
         // therefore deny the write without a duplicate required-key scan.
         && (data.name is string && data.name.size() <= 160) && (data.type is string && data.type.size() <= 60) && (data.date is string && data.date.size() <= 10)
-        && (data.location is string && data.location.size() <= 240) && (data.timeIn is string && data.timeIn.size() <= 5) && (data.checkInCutoff is string && data.checkInCutoff.size() <= 5) && shortText(data.get("checkInClose", ""), 5)
+        && (data.location is string && data.location.size() <= 240) && (data.timeIn is string && data.timeIn.size() <= 5) && (data.checkInCutoff is string && data.checkInCutoff.size() <= 5) && (!("checkInClose" in data) || (data.checkInClose is string && data.checkInClose.size() <= 5))
         && (data.timeOut is string && data.timeOut.size() <= 5) && (data.checkOutCutoff is string && data.checkOutCutoff.size() <= 5)
-        && data.audience in ["All students", "Selected sections", "Section 1A", "Section 1B", "Section 2A", "Section 2B", "Section 3A", "Section 3B", "Section 4A", "Section 4B"]
+        // Structured audiences below already derive their exact label from
+        // validated sections; only legacy audiences need the label allowlist.
         && validEventAudience(data)
-        && (data.description is string && data.description.size() <= 4000) && shortText(data.get("notes", ""), 4000)
+        && (data.description is string && data.description.size() <= 4000) && (!("notes" in data) || (data.notes is string && data.notes.size() <= 4000))
         && data.requiresGeofence is bool
         && (!("hasSurvey" in data) || data.hasSurvey is bool)
         && (!("surveyArchived" in data) || data.surveyArchived is bool)
@@ -210,7 +211,7 @@ service cloud.firestore {
         && data.openAt is timestamp && (!('lateAfterAt' in data) || data.lateAfterAt is timestamp) && data.checkInClosesAt is timestamp && data.closeAt is timestamp && data.checkOutClosesAt is timestamp
         && (!('checkoutOnlyReopened' in data) || data.checkoutOnlyReopened == true)
         && (!('createdAt' in data) || data.createdAt is timestamp)
-        && shortText(data.get("createdBy", ""), 128)
+        && (!("createdBy" in data) || (data.createdBy is string && data.createdBy.size() <= 128))
         && (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
@@ -229,7 +230,9 @@ service cloud.firestore {
         && (!('checkInClose' in data) || data.checkInClose == data.checkInCutoff));
     }
     function validScheduleEdit(data, before) {
-      return (before.openAt > request.time || data.date == before.date)
+      return (!("duringAttendance" in before) || !before.duringAttendance.enabled
+          || (data.date == before.date && data.openAt <= before.duringAttendance.opensAt && data.closeAt >= before.duringAttendance.closesAt))
+        && (before.openAt > request.time || data.date == before.date)
         && ('checkoutOnlyReopened' in before ? validCheckoutExtension(data, before)
           : before.checkOutClosesAt > request.time ? !('checkoutOnlyReopened' in data)
           : ('checkoutOnlyReopened' in data ? validCheckoutExtension(data, before)
@@ -250,8 +253,8 @@ service cloud.firestore {
             && (data.sessionPeriod == before.sessionPeriod || (before.openAt > request.time && before.sessionGroupId == eventId))))))
         && (!hasSession || (data.keys().hasAll(fields)
           && data.sessionPeriod in ["morning", "afternoon"]
-          && shortText(data.sessionBaseName, 145)
-          && shortText(data.sessionGroupId, 128) && data.sessionGroupId.matches('^[A-Za-z0-9_-]+$')
+          && data.sessionBaseName is string && data.sessionBaseName.size() <= 145
+          && data.sessionGroupId is string && data.sessionGroupId.size() <= 128 && data.sessionGroupId.matches('^[A-Za-z0-9_-]+$')
           && (data.sessionPeriod == "morning"
             ? (data.sessionGroupId == eventId
               && (!exists(/databases/$(database)/documents/events/$(eventId + '_afternoon'))
@@ -392,7 +395,7 @@ service cloud.firestore {
           "studentUid", "studentId", "eventId", "eventName", "eventType", "eventDescription", "eventDate",
           "timeIn", "timeOut", "location", "audience", "checkInLocation", "checkOutLocation", "attendedAt", "arrivalStatus",
           "checkedInAt", "checkedOutAt", "status", "recordSource", "correctionId", "correctedBy", "correctedAt", "correctionReason",
-          "arrivalRecalculatedAt", "arrivalRecalculatedBy", "arrivalRecalculationId", "arrivalRecalculationReason", "qrCheckedInBy", "qrCheckedOutBy"
+          "arrivalRecalculatedAt", "arrivalRecalculatedBy", "arrivalRecalculationId", "arrivalRecalculationReason", "qrCheckedInBy", "qrCheckedOutBy", "duringAttendance"
         ])
         // Direct type checks and status branches below require each of these fields.
         && shortText(data.studentUid, 128) && shortText(data.studentId, 64) && shortText(data.eventId, 128)
@@ -695,6 +698,8 @@ service cloud.firestore {
       allow create, update: if canManageAttendance()
         // Boundary-only saves must not revalidate an unchanged schedule/roster
         // in the same batch as the polygon and device-session checks.
+        && (request.method == 'create' ? !request.resource.data.keys().hasAny(['duringAttendance'])
+          : request.resource.data.get('duringAttendance', null) == resource.data.get('duringAttendance', null))
         && (request.method == 'update'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["requiresGeofence", "updatedAt"])
           ? (request.resource.data.requiresGeofence is bool
@@ -1013,13 +1018,14 @@ service cloud.firestore {
       // Queries must still be constrained to the student's own records.
       allow list: if canViewAttendanceReports()
         || (isStudent() && resource.data.studentUid == request.auth.uid);
-      allow create: if (request.resource.data.keys().hasAll(["correctionId", "recordSource", "correctedBy", "correctedAt", "correctionReason"])
+      allow create: if !request.resource.data.keys().hasAny(['duringAttendance']) && ((request.resource.data.keys().hasAll(["correctionId", "recordSource", "correctedBy", "correctedAt", "correctionReason"])
           && canManageAttendance()
           && validAdminCorrection(attendanceId, request.resource.data, null))
         || (validAttendance(request.resource.data) && (
           (request.resource.data.status == "checked-in" && studentCanCheckIn(attendanceId, request.resource.data))
-          || (request.resource.data.status == "checkout-only" && studentCanRecordCheckoutOnly(attendanceId, request.resource.data))));
-      allow update: if (request.resource.data.keys().hasAll(["arrivalRecalculatedAt","arrivalRecalculatedBy","arrivalRecalculationId","arrivalRecalculationReason"])
+          || (request.resource.data.status == "checkout-only" && studentCanRecordCheckoutOnly(attendanceId, request.resource.data)))));
+      allow update: if request.resource.data.get('duringAttendance', null) == resource.data.get('duringAttendance', null)
+        && ((request.resource.data.keys().hasAll(["arrivalRecalculatedAt","arrivalRecalculatedBy","arrivalRecalculationId","arrivalRecalculationReason"])
           && canManageAttendance()
           && validArrivalRecalculation(attendanceId,request.resource.data,resource.data))
         || (request.resource.data.keys().hasAll(["correctionId", "recordSource", "correctedBy", "correctedAt", "correctionReason"])
@@ -1032,7 +1038,7 @@ service cloud.firestore {
           && attendanceMatchesEvent(request.resource.data, get(/databases/$(database)/documents/events/$(resource.data.eventId)).data))
         // Validate the checkout patch, not unrelated legacy check-in metadata.
         // studentCanCheckOut keeps every original check-in field immutable.
-        || studentCanCheckOut(attendanceId, request.resource.data, resource.data);
+        || studentCanCheckOut(attendanceId, request.resource.data, resource.data));
       allow delete: if recentAdminLogin() && (isSuperAdmin() || (canManageAttendance()
         && validRevocation(attendanceId, getAfter(/databases/$(database)/documents/attendanceRevocations/$(attendanceId)).data)));
 

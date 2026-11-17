@@ -497,6 +497,84 @@ async function isolatedModule(relative, shared = {}, globals = {}) {
   return module.namespace;
 }
 
+test('During settings default off, save PH times through the backend, and make no request until Save',async()=>{
+  const browser=fakeBrowser();let calls=0,rendered=0,allowed=true;
+  const event={id:'morning',name:'Morning session',date:'2099-11-17'};
+  const make=browser.document.createElement;
+  browser.document.createElement=tag=>{const node=make(tag);node.showModal=()=>{};node.close=()=>{};return node;};
+  const {DuringAttendanceController}=await isolatedModule('assets/js/controllers/DuringAttendanceController.js',{},browser);
+  const controller=new DuringAttendanceController({...browser,getEvents:()=>[event],getUser:()=>({uid:'admin'}),can:()=>allowed,notify(){},onSaved:()=>rendered++,api:{call:async(path,user,body)=>{
+    calls++;assert.equal(path,'/v1/admin/during-attendance');assert.equal(user.uid,'admin');assert.equal(body.enabled,true);
+    assert.equal(body.opensAt,Date.parse('2099-11-17T10:00:00+08:00'));assert.equal(body.closesAt,Date.parse('2099-11-17T10:10:00+08:00'));
+    return {checkpoint:{id:'checkpoint',enabled:true,label:body.label,opensAt:body.opensAt,closesAt:body.closesAt}};
+  }}});
+  controller.open('morning');const dialog=controller.dialog;assert.equal(calls,0);
+  assert.equal(dialog.querySelector('[name="enabled"]').checked,false);assert.equal(dialog.querySelector('[name="opens"]').disabled,true);
+  const enabled=dialog.querySelector('[name="enabled"]');enabled.checked=true;enabled.onchange();
+  assert.equal(dialog.querySelector('[name="opens"]').disabled,false);
+  dialog.querySelector('[name="opens"]').value='10:00';dialog.querySelector('[name="closes"]').value='10:10';
+  await dialog.querySelector('form').onsubmit({preventDefault(){}});
+  assert.equal(calls,1);assert.equal(rendered,1);assert.equal(event.duringAttendance.id,'checkpoint');assert.equal(controller.dialog,null);
+  allowed=false;controller.open('morning');assert.equal(controller.dialog,null);
+});
+
+test('During presentation keeps disabled sessions unchanged and exposes the optional middle checkpoint when enabled',async()=>{
+  const {EventSchedulePresenter}=await import('../assets/js/controllers/EventSchedulePresenter.js');
+  const presenter=new EventSchedulePresenter({formatTime:value=>value,escapeHtml:String,addMinutes:value=>value});
+  const event={id:'event',name:'Morning',date:'2099-11-17',timeIn:'09:00',timeOut:'11:00',checkInCutoff:'09:30',checkOutCutoff:'11:15'};
+  assert.doesNotMatch(presenter.render(event),/Mid-event|During ·/);
+  event.duringAttendance={enabled:true,label:'Mid-event',opensAt:Date.parse('2099-11-17T10:00:00+08:00'),closesAt:Date.parse('2099-11-17T10:10:00+08:00')};
+  const html=presenter.render(event);assert.match(html,/During · Mid-event/);assert.match(html,/10:00/);assert.match(html,/10:10/);
+  assert.ok(html.indexOf('Check-in')<html.indexOf('During ·'));assert.ok(html.indexOf('During ·')<html.indexOf('Check-out'));
+});
+
+test('During verification cancels on navigation, identity, session or checkpoint changes and still saves on Events',async()=>{
+ for(const change of ['none','leave','away-return','account','session','checkpoint','signout','password','hidden-return','dispose']){
+  const browser=fakeBrowser(),events=new Map(),documentEvents=new Map(),toasts=[];let finish,writes=0,reads=0;
+  browser.window.addEventListener=(type,fn)=>events.set(type,fn);browser.window.removeEventListener=type=>events.delete(type);
+  browser.document.addEventListener=(type,fn)=>documentEvents.set(type,fn);browser.document.removeEventListener=type=>documentEvents.delete(type);
+  const shared=birthdayOnboardingShared({showDashboardToast:(...args)=>toasts.push(args),getDocFromServer:async()=>{reads++;return {exists:()=>false};}});
+  const {StudentAttendanceController:C}=await isolatedModule('assets/js/controllers/StudentAttendanceController.js',shared,browser);
+  const now=Date.now(),event={id:'event',openAt:now-60000,closeAt:now+120000,duringAttendance:{id:'checkpoint',enabled:true,opensAt:now-10000,closesAt:now+60000}};
+  const state={events:[event],attendance:[{studentUid:'student-1',eventId:'event',checkedInAt:now-30000,status:'checked-in'}],view:'events',userUid:'student-1',sessionId:'session'};
+  const controller=new C({getState:()=>state,setFaceRegistration(){},showError(){},bridge:{publish(){}},checkIn:{}});
+  controller.requireFaceRegistration=()=>new Promise(resolve=>finish=resolve);
+  controller.securityApi={call:async()=>{writes++;return {saved:true};}};
+  const button={dataset:{duringAttendance:'event'},disabled:false};
+  const pending=controller.handleEventClick({target:{closest:name=>name==='[data-during-attendance]'?button:null}});
+  if(change==='leave')state.view='profile';
+  if(change==='away-return'){state.view='profile';events.get('presence:viewchange')();state.view='events';events.get('presence:viewchange')();}
+  if(change==='account')state.userUid='other';
+  if(change==='session')state.sessionId='new-session';
+  if(change==='checkpoint')state.events=[{...event,duringAttendance:{...event.duringAttendance,id:'replacement'}}];
+  if(change==='signout')events.get('presence:device-signing-out')();
+  if(change==='password')events.get('presence:password-session-start')();
+  if(change==='hidden-return'){browser.document.hidden=true;documentEvents.get('visibilitychange')();browser.document.hidden=false;documentEvents.get('visibilitychange')();}
+  if(change==='dispose')controller.dispose();
+  finish();await pending;
+  assert.equal(writes,change==='none'?1:0,change);assert.equal(reads,change==='none'?1:0,change);assert.equal(toasts.length,change==='none'?1:0,change);
+  assert.equal(button.disabled,false);controller.dispose();assert.equal(events.size,0);assert.equal(documentEvents.size,0);
+ }
+});
+
+test('During cancels after GPS navigation and lets an already sent confirmation reconcile without extra reads',async()=>{
+ for(const stage of ['gps','sent']){
+  const browser=fakeBrowser(),toasts=[];let finish,writes=0,reads=0;
+  const shared=birthdayOnboardingShared({showDashboardToast:(...args)=>toasts.push(args),getDocFromServer:async()=>{reads++;return {exists:()=>false};}});
+  const {StudentAttendanceController:C}=await isolatedModule('assets/js/controllers/StudentAttendanceController.js',shared,browser);
+  const now=Date.now(),event={id:'event',requiresGeofence:stage==='gps',openAt:now-60000,closeAt:now+120000,duringAttendance:{id:'checkpoint',enabled:true,opensAt:now-10000,closesAt:now+60000}};
+  const state={events:[event],attendance:[{studentUid:'student-1',eventId:'event',checkedInAt:now-30000,status:'checked-in'}],view:'events',userUid:'student-1',sessionId:'session'};
+  const controller=new C({getState:()=>state,setFaceRegistration(){},showError(){},bridge:{publish(){}},checkIn:{}});
+  controller.requireFaceRegistration=async()=>{};
+  controller.verifiedGeofenceLocation=()=>new Promise(resolve=>finish=resolve);
+  controller.securityApi={call:()=>{writes++;return new Promise(resolve=>finish=resolve);}};
+  const button={dataset:{duringAttendance:'event'},disabled:false};
+  const pending=controller.handleEventClick({target:{closest:name=>name==='[data-during-attendance]'?button:null}});
+  await new Promise(resolve=>setImmediate(resolve));state.view='profile';finish(stage==='gps'?{}:{saved:true});await pending;
+  assert.equal(writes,stage==='sent'?1:0);assert.equal(reads,0);assert.equal(toasts.length,0);assert.equal(button.disabled,false);controller.dispose();
+ }
+});
+
 test('the complete static module graph links with matching exports', async () => {
   const context = vm.createContext({});
   const modules = new Map();

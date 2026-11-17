@@ -204,6 +204,19 @@ const attendance = (uid, event) => ({ studentUid: uid, studentId: uid.toUpperCas
   await write('eventGeofences/large_circle',{...wideCircle,radiusMeters:0},superAdmin,false);
   await write('eventGeofences/large_circle',wideCircle,token('a'),false);
   console.log('Circle rules passed: 100,000 m accepted for attendance admins; larger/zero radii and student edits denied.');
+  const checkpoint={id:'checkpoint',enabled:true,label:'Mid-event',opensAt:date(10860000),closesAt:date(10920000)};
+  const duringEvent={...solo,sessionGroupId:'during-session',duringAttendance:checkpoint};
+  await write('events/during-session',duringEvent);
+  await write('events/during-session',{...duringEvent,name:'Renamed with checkpoint',rosterVersion:2},token('manager'));
+  await write('events/during-session',{...duringEvent,rosterVersion:3,duringAttendance:{...checkpoint,enabled:false}},token('manager'),false);
+  const erased={...duringEvent,rosterVersion:3};delete erased.duringAttendance;
+  await write('events/during-session',erased,token('manager'),false);
+  await write('events/forged-during',{...duringEvent,sessionGroupId:'forged-during'},token('manager'),false);
+  await write('events/during-session',{...duringEvent,rosterVersion:3,closeAt:date(10900000)},token('manager'),false);
+  await write('events/during-session',{...duringEvent,rosterVersion:3,openAt:date(11000000),checkInClosesAt:date(11100000)},token('manager'),false);
+  await write('events/during-session',{...duringEvent,rosterVersion:3,date:'2099-01-01'},token('manager'),false);
+  await write('events/during-session',{...duringEvent,rosterVersion:3,closeAt:date(15000000)},token('manager'));
+  console.log('During config Rules passed: event edits preserve the server checkpoint; clients cannot create, modify or erase it.');
   for (const key of ['name','type','date','location','timeIn','checkInCutoff','timeOut','checkOutCutoff','audience','description','requiresGeofence','openAt','checkInClosesAt','closeAt','checkOutClosesAt']) {
     const invalid={...solo,sessionGroupId:`missing_${key}`};delete invalid[key];
     await write(`events/missing_${key}`,invalid,token('manager'),false);

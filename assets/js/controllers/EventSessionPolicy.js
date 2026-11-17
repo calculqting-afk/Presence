@@ -1,4 +1,5 @@
 import { EventAudiencePolicy } from './EventAudiencePolicy.js';
+import { DuringAttendancePolicy, duringTime } from '../core/DuringAttendancePolicy.js';
 
 // Sessions use distinct event IDs, so the existing uid_event attendance key,
 // timing rules, reports and corrections remain isolated for each session.
@@ -23,6 +24,12 @@ export class EventSessionPolicy {
   static opened(event, now = new Date()) { const date = EventAudiencePolicy.date(event?.openAt); return Boolean(date && date <= now); }
   static assertSchedule(record, previous, now = new Date()) {
     if (!previous) return;
+    if (previous.duringAttendance?.enabled && (record.date !== previous.date
+      || !DuringAttendancePolicy.validWindow({ ...previous, ...record }, previous.duringAttendance))) {
+      throw new Error(+now >= duringTime(previous.duringAttendance.opensAt)
+        ? 'During attendance has started. Keep its checkpoint window inside this session.'
+        : 'This schedule would exclude the During attendance checkpoint. Adjust or disable the checkpoint first.');
+    }
     if (previous.checkoutOnlyReopened === true) record.checkoutOnlyReopened = true;
     if (this.opened(previous, now) && record.date !== previous.date) throw new Error('Keep the event date unchanged after attendance opens. You can still edit its time windows.');
     const end = EventAudiencePolicy.date(previous.checkOutClosesAt);

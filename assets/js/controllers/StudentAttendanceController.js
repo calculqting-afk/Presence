@@ -7,6 +7,7 @@ import { ButtonLoadingController } from './ButtonLoadingController.js';
 import { deviceLocation, attendanceLocationIssue } from './DeviceLocationService.js';
 import { EventAudiencePolicy } from './EventAudiencePolicy.js';
 import { PasswordResetApi } from './PasswordResetApi.js';
+import { DuringAttendancePolicy } from '../core/DuringAttendancePolicy.js';
 
 export class StudentAttendanceController {
   constructor({ getState, setFaceRegistration, showError, bridge, checkIn, readiness }) {
@@ -35,9 +36,19 @@ export class StudentAttendanceController {
         .finally(() => { this.busy = false; });
     };
     this.grid.addEventListener('click', this.listener);
+    this.duringGeneration = 0;
+    this.ownerWindow = document.defaultView || globalThis.window;
+    this.invalidateDuring = () => { this.duringGeneration++; };
+    for (const type of ['presence:viewchange', 'presence:device-signing-out', 'presence:password-session-start']) this.ownerWindow?.addEventListener?.(type, this.invalidateDuring);
+    document.addEventListener?.('visibilitychange', this.invalidateDuring);
   }
 
-  dispose() { this.grid.removeEventListener('click', this.listener); this.loading.dispose(); }
+  dispose() {
+    this.disposed = true;
+    for (const type of ['presence:viewchange', 'presence:device-signing-out', 'presence:password-session-start']) this.ownerWindow?.removeEventListener?.(type, this.invalidateDuring);
+    document.removeEventListener?.('visibilitychange', this.invalidateDuring);
+    this.grid.removeEventListener('click', this.listener); this.loading.dispose();
+  }
 
   syncLoadingButtons() {
     for (const button of document.querySelectorAll?.('[data-attend-event], [data-check-out-event], [data-check-out-attendance]') || []) {
@@ -228,7 +239,47 @@ export class StudentAttendanceController {
     }
   }
   async handleEventClick(clickEvent) {
-    const { events, attendance } = this.getState();
+    const initialState = this.getState();
+    const { events, attendance } = initialState;
+    const duringButton = clickEvent.target.closest('[data-during-attendance]');
+    if (duringButton) {
+      const event = events.find(item => item.id === duringButton.dataset.duringAttendance);
+      const record = attendance.find(item => item.eventId === event?.id && item.studentUid === currentUser.uid);
+      if (DuringAttendancePolicy.state(event, record) !== 'open') return;
+      const generation = this.duringGeneration, checkpointId = event.duringAttendance.id;
+      const ownerUid = initialState.userUid, ownerSessionId = initialState.sessionId;
+      const active = () => {
+        const state = this.getState();
+        return !this.disposed && !document.hidden && this.duringGeneration === generation && state.view === 'events'
+          && state.userUid === currentUser.uid && state.userUid === ownerUid && state.sessionId === ownerSessionId;
+      };
+      const canSubmit = () => {
+        const state = this.getState(), latest = state.events.find(item => item.id === event.id);
+        const saved = state.attendance.find(item => item.eventId === event.id && item.studentUid === currentUser.uid);
+        return active() && latest?.duringAttendance?.id === checkpointId && DuringAttendancePolicy.state(latest, saved) === 'open';
+      };
+      if (!canSubmit()) return;
+      duringButton.disabled = true;
+      try {
+        await this.requireFaceRegistration();
+        if (!canSubmit()) return;
+        const location = event.requiresGeofence ? await this.verifiedGeofenceLocation(event) : undefined;
+        if (!canSubmit()) return;
+        this.securityApi ||= new PasswordResetApi();
+        const result = await this.securityApi.call('/v1/student/during-attendance', currentUser, {
+          eventId: event.id, checkpointId,
+          ...(location ? { location, sampledAt: this.locationSamples.get(location) } : {})
+        });
+        if (!active()) return; // A sent request still reconciles through the attendance listener.
+        showDashboardToast('During attendance confirmed', result.existing ? 'Your confirmation was already saved.' : 'Your presence checkpoint was saved. Check-in and checkout are unchanged.');
+        try {
+          const snapshot = await getDocFromServer(doc(db, 'attendance', `${currentUser.uid}_${event.id}`));
+          if (snapshot.exists()) this.bridge.publish(snapshot.id, snapshot.data());
+        } catch { /* The acknowledged write reconciles through the attendance listener. */ }
+      } catch (error) { if (active()) showDashboardToast('During attendance unavailable', error.message || 'Please retry or ask an administrator to scan your QR.'); }
+      finally { duringButton.disabled = false; }
+      return;
+    }
     const checkOutButton = clickEvent.target.closest("[data-check-out-event]");
     if (checkOutButton) {
       const event = events.find((item) => item.id === checkOutButton.dataset.checkOutEvent);

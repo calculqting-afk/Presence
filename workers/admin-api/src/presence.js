@@ -11,6 +11,7 @@ export async function consumeApiBudget(sql, uid, path, now = Date.now()) {
     : path === '/v1/directory/sync' ? ['directory-sync', 10, 60]
       : path === '/v1/student/attendance-location' ? ['location', 20, 120]
         : path === '/v1/student/attendance-qr' ? ['student-qr', 10, 60]
+          : path === '/v1/student/during-attendance' ? ['during', 10, 60]
           : path.startsWith('/v1/student/') ? ['password', 5, 20]
             : ['admin', 120, 2400];
   const windows = [[60000, minute], [3600000, hour]];
