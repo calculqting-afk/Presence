@@ -5,6 +5,17 @@ const crypto = require('node:crypto');
 class AndroidUpdateArtifactService {
   constructor(root = path.resolve(__dirname, '..')) { this.root = root; }
 
+  highlights(version) {
+    const file = path.join(this.root, 'config/update-highlights.json');
+    if (!fs.existsSync(file)) return '';
+    const entries = JSON.parse(fs.readFileSync(file, 'utf8'))[version] || [];
+    if (!Array.isArray(entries) || entries.length > 3
+        || entries.some(text => typeof text !== 'string' || !text.trim() || text.length > 140 || /[\r\n]/.test(text))) {
+      throw new Error('Update highlights must contain up to three short, single-line changes');
+    }
+    return entries.map(text => '• ' + text.trim()).join('\n');
+  }
+
   create(variant = 'debug') {
     if (!['debug', 'beta'].includes(variant)) throw new Error('Unsupported APK variant');
     const directory = path.join(this.root, 'android/app/build/outputs/apk', variant);
@@ -23,8 +34,7 @@ class AndroidUpdateArtifactService {
       sha256: crypto.createHash('sha256').update(fs.readFileSync(destination)).digest('hex'),
       apkUrl: `https://github.com/calculqting-afk/Presence/releases/download/v${element.versionName}/Presence.apk`,
       sizeBytes: fs.statSync(destination).size,
-      notes: fs.existsSync(path.join(this.root, `RELEASE_NOTES_v${element.versionName}.md`))
-        ? fs.readFileSync(path.join(this.root, `RELEASE_NOTES_v${element.versionName}.md`), 'utf8').slice(0, 3000) : '',
+      notes: this.highlights(element.versionName),
     };
     fs.writeFileSync(path.join(directory, 'presence-update.json'), JSON.stringify(manifest, null, 2) + '\n');
     console.log(`GitHub release assets ready: ${destination} and presence-update.json`);

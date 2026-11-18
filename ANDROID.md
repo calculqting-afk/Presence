@@ -38,7 +38,7 @@ Run `npm run android:apk` (debug) or `npm run android:beta` (beta). After a succ
 
 ### Publish each update
 
-1. Increase `versionCode` and `versionName` in `android/app/build.gradle` before every new build (current: 35 / 1.8.26; next versionCode: 36).
+1. Increase `versionCode` and `versionName` in `android/app/build.gradle` before every new build (current: 36 / 1.8.27; next versionCode: 37).
 2. Build using one of the commands above.
 3. Create a GitHub release in **calculqting-afk/Presence**, for example tag `v1.7`, title `Presence v1.7 — Morning and Afternoon Attendance`.
 4. Upload **both files from the same build**: `Presence.apk` and `presence-update.json`. Keep those exact asset names. Publish after both uploads complete, then mark the complete stable release as latest. Older APKs also scan public prereleases, so do not use this repository for private test-only updates. The new manifest checker follows only the latest stable release.
@@ -48,7 +48,7 @@ The app reads one bounded manifest from `https://github.com/calculqting-afk/Pres
 
 Automatic checks run on launch/resume, with a five-minute interval after success. Failures allow retry after 60 seconds, or later if the server supplies Retry-After or a rate-limit reset. While foregrounded, failed checks retry after that delay; backgrounding cancels the retry timer, and returning checks or schedules the remaining delay. In-flight results are retained. Login shows the installed version, a Check for updates button, and check results. Manual checks bypass the successful-check interval, but respect failure/server delays and an in-flight check. Automatic failures update the login status without repeatedly interrupting students with dialogs. Login and attendance remain usable. No credentials or GitHub token are shipped in the app. The repository and release downloads must be public.
 
-The automatic updater uses a dark, scrollable Presence dialog showing installed/new versions, release notes as plain text, and the APK asset size when available. Download progress updates while the app stays usable; verification finishes before installation is offered. Returning to the foreground retains an in-progress download or verified installer. Failed downloads offer Retry; package/signature/version failures and checksum failures have separate guidance. After Android installs the update, reopen Presence to continue.
+The automatic updater uses a dark, scrollable Presence dialog showing installed/new versions, up to three short change highlights, and the APK asset size when available. Add each version's user-facing highlights to `config/update-highlights.json` (at most three single-line entries, 140 characters each); the update manifest includes only those highlights. Full release notes remain on GitHub. Older manifests containing full notes are reduced to three feature bullets, excluding installation and validation sections. Download progress updates while the app stays usable; verification finishes before installation is offered. Returning to the foreground retains an in-progress download or verified installer. Failed downloads offer Retry; package/signature/version failures and checksum failures have separate guidance. After Android installs the update, reopen Presence to continue.
 
 ### One-time switch from the old Firebase APK
 

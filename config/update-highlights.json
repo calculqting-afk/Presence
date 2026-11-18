@@ -1,0 +1,12 @@
+{
+  "1.8.27": [
+    "Short, clear highlights show only the important changes.",
+    "Centered update controls on the login page.",
+    "Larger, bolder installed version for easier reading."
+  ],
+  "1.8.26": [
+    "Check for updates directly from the login page.",
+    "Clearer update results and automatic retries when checks fail.",
+    "Update prompts stay available when you return to the app."
+  ]
+}

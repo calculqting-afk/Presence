@@ -56,11 +56,7 @@ final class UpdateDialog {
         if (release.sizeBytes > 0) text("Download size: " + size(release.sizeBytes), 14, MUTED, false);
         if (notes) {
             text("What’s new", 18, WHITE, true);
-            String body = release.notes == null ? "" : release.notes.trim();
-            if (body.isEmpty()) body = "Release notes are not available for this update.";
-            // Bound long GitHub bodies and show as text, without opening links automatically.
-            if (body.length() > 3000) body = body.substring(0, 3000) + "…";
-            text(body, 14, MUTED, false);
+            text(UpdateHighlights.format(release.notes), 14, MUTED, false);
         }
     }
 

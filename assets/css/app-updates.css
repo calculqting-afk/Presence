@@ -3,12 +3,20 @@
   padding-top: 18px;
   border-top: 1px solid var(--border, #8295ae55);
   display: grid;
-  justify-items: start;
-  gap: 8px;
-  font-size: 13px;
+  justify-items: center;
+  text-align: center;
+  gap: 12px;
+  font-size: 14px;
 }
 .app-update-controls[hidden] { display: none; }
+.app-update-controls [data-installed-version] {
+  color: var(--ink, #10213e);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
 .app-update-controls p { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
-.app-update-controls button { min-height: 44px; text-align: left; }
+.app-update-controls button { min-height: 44px; text-align: center; }
 .app-update-controls button:disabled { opacity: .65; cursor: wait; }
 .app-update-controls a { color: inherit; text-underline-offset: 3px; }
