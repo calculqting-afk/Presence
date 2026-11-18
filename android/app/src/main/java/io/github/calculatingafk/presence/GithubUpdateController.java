@@ -173,7 +173,7 @@ public final class GithubUpdateController {
     }
 
     private void showProgress() {
-        progressDialog = new UpdateDialog(activity, "Downloading update", "You can continue using Presence while the update downloads.");
+        progressDialog = new UpdateDialog(activity, "Downloading update", "Presence " + downloadingRelease.versionName);
         progressDialog.downloading(receivedBytes, totalBytes, verifying);
         progressDialog.button("Continue using app", false, () -> {});
         show(progressDialog.dialog);

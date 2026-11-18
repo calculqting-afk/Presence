@@ -1,4 +1,9 @@
 {
+  "1.8.28": [
+    "Refreshed updater with clear installed and new version cards.",
+    "Circular download progress and easy-to-follow update stages.",
+    "Cleaner highlights, download details and action buttons."
+  ],
   "1.8.27": [
     "Short, clear highlights show only the important changes.",
     "Centered update controls on the login page.",

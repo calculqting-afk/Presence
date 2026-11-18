@@ -38,7 +38,7 @@ Run `npm run android:apk` (debug) or `npm run android:beta` (beta). After a succ
 
 ### Publish each update
 
-1. Increase `versionCode` and `versionName` in `android/app/build.gradle` before every new build (current: 36 / 1.8.27; next versionCode: 37).
+1. Increase `versionCode` and `versionName` in `android/app/build.gradle` before every new build (current: 37 / 1.8.28; next versionCode: 38).
 2. Build using one of the commands above.
 3. Create a GitHub release in **calculqting-afk/Presence**, for example tag `v1.7`, title `Presence v1.7 — Morning and Afternoon Attendance`.
 4. Upload **both files from the same build**: `Presence.apk` and `presence-update.json`. Keep those exact asset names. Publish after both uploads complete, then mark the complete stable release as latest. Older APKs also scan public prereleases, so do not use this repository for private test-only updates. The new manifest checker follows only the latest stable release.
