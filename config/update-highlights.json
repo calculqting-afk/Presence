@@ -1,4 +1,8 @@
 {
+  "1.8.29": [
+    "Shorter, clearer password-reset instructions.",
+    "Simpler Message admin button for password help."
+  ],
   "1.8.28": [
     "Refreshed updater with clear installed and new version cards.",
     "Circular download progress and easy-to-follow update stages.",
