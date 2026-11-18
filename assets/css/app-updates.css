@@ -1,0 +1,14 @@
+.app-update-controls {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border, #8295ae55);
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  font-size: 13px;
+}
+.app-update-controls[hidden] { display: none; }
+.app-update-controls p { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.app-update-controls button { min-height: 44px; text-align: left; }
+.app-update-controls button:disabled { opacity: .65; cursor: wait; }
+.app-update-controls a { color: inherit; text-underline-offset: 3px; }

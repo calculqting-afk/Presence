@@ -13,6 +13,7 @@ class AndroidUpdateArtifactService {
     if (!element || !Number.isInteger(element.versionCode) || element.versionCode < 1
         || path.basename(element.outputFile) !== element.outputFile) throw new Error('Invalid APK build metadata');
     const source = path.join(directory, element.outputFile);
+    if (!/^[0-9]+(?:\.[0-9]+){1,3}$/.test(element.versionName)) throw new Error('Invalid APK version name');
     const destination = path.join(directory, 'Presence.apk');
     fs.copyFileSync(source, destination);
     const manifest = {
@@ -20,6 +21,10 @@ class AndroidUpdateArtifactService {
       versionCode: element.versionCode,
       versionName: element.versionName,
       sha256: crypto.createHash('sha256').update(fs.readFileSync(destination)).digest('hex'),
+      apkUrl: `https://github.com/calculqting-afk/Presence/releases/download/v${element.versionName}/Presence.apk`,
+      sizeBytes: fs.statSync(destination).size,
+      notes: fs.existsSync(path.join(this.root, `RELEASE_NOTES_v${element.versionName}.md`))
+        ? fs.readFileSync(path.join(this.root, `RELEASE_NOTES_v${element.versionName}.md`), 'utf8').slice(0, 3000) : '',
     };
     fs.writeFileSync(path.join(directory, 'presence-update.json'), JSON.stringify(manifest, null, 2) + '\n');
     console.log(`GitHub release assets ready: ${destination} and presence-update.json`);

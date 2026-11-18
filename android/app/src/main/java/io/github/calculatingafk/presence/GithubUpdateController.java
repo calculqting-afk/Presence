@@ -9,6 +9,8 @@ import android.content.pm.Signature;
 import android.net.Uri;
 import android.os.Build;
 import android.os.SystemClock;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
 import androidx.core.content.FileProvider;
@@ -23,7 +25,13 @@ public final class GithubUpdateController {
     private final GithubReleaseService releases;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private boolean disposed, busy, permissionPending, foreground;
-    private long lastCheck = -1;
+    private final UpdateCheckPolicy checkPolicy = new UpdateCheckPolicy();
+    private final Handler retryHandler = new Handler(Looper.getMainLooper());
+    private final Runnable retryCheck = () -> check(false);
+    private String checkState = "idle", checkMessage = "Updates have not been checked yet.";
+    private Runnable statusListener;
+    private boolean manualResultPending;
+    private Exception checkFailure;
     private File pendingApk;
     private GithubReleaseService.Release pendingRelease;
     private GithubReleaseService.Release availableRelease, downloadingRelease;
@@ -53,33 +61,115 @@ public final class GithubUpdateController {
         if (failedRelease != null) { showDownloadFailure(failedRelease, downloadFailure); return; }
         if (pendingApk != null && pendingRelease != null) { ready(); return; }
         if (availableRelease != null) { prompt(availableRelease); return; }
-        if (busy || dialog != null) return;
+        if (manualResultPending && !busy) { showCheckResult(); return; }
+        check(false);
+    }
+
+    public void setStatusListener(Runnable listener) { statusListener = listener; }
+    public String getCheckState() { return checkState; }
+    public String getCheckMessage() { return checkMessage; }
+    public long getRetrySeconds() {
+        long remaining = checkPolicy.remaining(SystemClock.elapsedRealtime(), true);
+        return remaining / 1000 + (remaining % 1000 > 0 ? 1 : 0);
+    }
+    private void status(String state, String message) {
+        checkState = state; checkMessage = message;
+        if (statusListener != null) statusListener.run();
+    }
+    public void checkManually() {
+        if (!BuildConfig.DISTRIBUTION_UPDATES) {
+            status("unsupported", "This app version does not support direct updates."); return;
+        }
+        if (!active()) return;
+        if (downloadingRelease != null) { showProgress(); return; }
+        if (pendingApk != null && pendingRelease != null) { ready(); return; }
+        if (availableRelease != null) { prompt(availableRelease); return; }
+        check(true);
+    }
+    private void scheduleRetry() {
+        retryHandler.removeCallbacks(retryCheck);
+        if (active() && checkPolicy.failed)
+            retryHandler.postDelayed(retryCheck, Math.max(1, checkPolicy.remaining(SystemClock.elapsedRealtime(), false)));
+    }
+    private void check(boolean manual) {
+        if (!active() || !BuildConfig.DISTRIBUTION_UPDATES) return;
+        if (busy || dialog != null) {
+            if (!manual && checkPolicy.failed) {
+                retryHandler.removeCallbacks(retryCheck);
+                retryHandler.postDelayed(retryCheck, 30000);
+            }
+            return;
+        }
         long now = SystemClock.elapsedRealtime();
-        if (lastCheck >= 0 && now - lastCheck < 300000) return;
-        lastCheck = now;
+        if (checkPolicy.remaining(now, manual) > 0) {
+            if (manual) showMessage("Please wait before checking", checkMessage + " Try again in " + getRetrySeconds() + " seconds.");
+            scheduleRetry(); return;
+        }
+        retryHandler.removeCallbacks(retryCheck);
         busy = true;
+        manualResultPending = manual;
+        status("checking", "Checking for updates…");
         worker.execute(() -> {
             try {
                 GithubReleaseService.Release release = releases.findUpdate(BuildConfig.VERSION_CODE);
                 activity.runOnUiThread(() -> {
                     busy = false;
+                    if (disposed) return;
+                    checkFailure = null;
+                    checkPolicy.succeeded(SystemClock.elapsedRealtime());
                     availableRelease = release;
+                    status(release == null ? "current" : "available", release == null
+                        ? "You’re up to date. Installed version: " + BuildConfig.VERSION_NAME
+                        : "Version " + release.versionName + " is available.");
                     if (active() && release != null) prompt(release);
+                    else if (active() && manualResultPending) showCheckResult();
                 });
             } catch (Exception error) {
                 Log.w("PresenceUpdates", "Update check unavailable; attendance remains accessible", error);
-                activity.runOnUiThread(() -> busy = false);
+                activity.runOnUiThread(() -> {
+                    busy = false;
+                    if (disposed) return;
+                    checkFailure = error;
+                    long delay = error instanceof GithubReleaseService.HttpFailure
+                        ? ((GithubReleaseService.HttpFailure) error).retryMillis : 0;
+                    checkPolicy.failed(SystemClock.elapsedRealtime(), delay);
+                    status("failed", checkError(error));
+                    if (active() && manualResultPending) showCheckResult();
+                    scheduleRetry();
+                });
             }
         });
     }
 
     private void prompt(GithubReleaseService.Release release) {
-        availableRelease = null;
+        manualResultPending = false;
+        // Background dismissal must retain the offer; only an explicit choice clears it.
+        availableRelease = release;
         UpdateDialog sheet = new UpdateDialog(activity, "A new update is ready", "Keep Presence up to date for a smoother experience.");
         sheet.release(release, true);
-        sheet.button("Download update", true, () -> download(release));
-        sheet.button("Later", false, () -> {});
+        sheet.button("Download update", true, () -> { availableRelease = null; download(release); });
+        sheet.button("Later", false, () -> availableRelease = null);
+        sheet.dialog.setOnCancelListener(ignored -> availableRelease = null);
         show(sheet.dialog);
+    }
+
+    private void showCheckResult() {
+        manualResultPending = false;
+        showMessage(checkFailure == null ? "You’re up to date" : "Couldn’t check for updates", checkMessage
+            + (checkFailure == null ? "" : " Presence will retry while the app is open. You can still sign in and use attendance."));
+        scheduleRetry();
+    }
+    private String checkError(Exception error) {
+        if (error instanceof java.net.UnknownHostException || error instanceof java.net.ConnectException)
+            return "Cannot reach the update server. Check your internet connection.";
+        if (error instanceof java.net.SocketTimeoutException) return "The update check timed out. Try a stronger connection.";
+        if (error instanceof GithubReleaseService.HttpFailure) {
+            int code = ((GithubReleaseService.HttpFailure) error).status;
+            if (code == 403 || code == 429) return "The update server is limiting requests. Wait before trying again.";
+            if (code == 404) return "Update information is not available yet. Please try again later.";
+            return "The update server is temporarily unavailable. Please try again later.";
+        }
+        return "Could not read valid update information. Please try again later.";
     }
 
     private void showProgress() {
@@ -212,11 +302,14 @@ public final class GithubUpdateController {
     }
     public void onPause() {
         foreground = false;
+        retryHandler.removeCallbacks(retryCheck);
         if (dialog != null) dialog.dismiss();
     }
     private boolean active() { return foreground && !disposed && !activity.isFinishing() && !activity.isDestroyed(); }
     public void dispose() {
         disposed = true;
+        retryHandler.removeCallbacks(retryCheck);
+        statusListener = null;
         if (dialog != null) dialog.dismiss();
         worker.shutdownNow();
     }

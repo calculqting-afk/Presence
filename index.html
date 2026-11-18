@@ -28,6 +28,7 @@
   <link rel="stylesheet" href="assets/css/button-loading.css?v=20261010-auth-progress">
   <link rel="stylesheet" href="assets/css/hometown-picker.css?v=20261101">
   <link rel="stylesheet" href="assets/css/legal.css?v=20261101">
+  <link rel="stylesheet" href="assets/css/app-updates.css?v=20261118">
   <link rel="stylesheet" href="assets/css/mascot.css?v=20261102">
   <link rel="preconnect" href="https://presence-admin-api.mikhailovna2007.workers.dev" crossorigin>
 </head>
@@ -121,6 +122,12 @@
             </button>
             <p class="privacy-note"><span aria-hidden="true">◆</span> Your account is protected and private.</p>
           </form>
+          <section class="app-update-controls" id="appUpdateControls" aria-label="Presence app updates" hidden>
+            <small data-installed-version>Installed version unavailable</small>
+            <button class="text-button" type="button">Check for updates</button>
+            <p role="status" aria-live="polite">Updates have not been checked yet.</p>
+            <a href="https://github.com/calculqting-afk/Presence/releases/latest" target="_blank" rel="noopener noreferrer">Official APK downloads</a>
+          </section>
         </div>
       </section>
     </main>

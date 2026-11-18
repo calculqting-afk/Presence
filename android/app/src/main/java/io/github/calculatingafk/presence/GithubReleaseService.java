@@ -1,6 +1,5 @@
 package io.github.calculatingafk.presence;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -30,38 +29,47 @@ public final class GithubReleaseService {
     }
 
     public Release findUpdate(long installed) throws Exception {
-        JSONArray releases = new JSONArray(readText("https://api.github.com/repos/"
-            + UpdatePolicy.REPOSITORY + "/releases?per_page=20", 2 * 1024 * 1024));
-        Release newest = null;
-        for (int i = 0; i < releases.length(); i++) {
-            JSONObject release = releases.getJSONObject(i);
-            if (release.optBoolean("draft")) continue;
-            JSONArray assets = release.optJSONArray("assets");
-            if (assets == null) continue;
-            String manifestUrl = null, apkUrl = null;
-            long sizeBytes = 0;
-            for (int j = 0; j < assets.length(); j++) {
-                JSONObject asset = assets.getJSONObject(j);
-                if ("presence-update.json".equals(asset.optString("name"))) manifestUrl = asset.optString("browser_download_url");
-                if ("Presence.apk".equals(asset.optString("name"))) {
-                    apkUrl = asset.optString("browser_download_url"); sizeBytes = asset.optLong("size", 0);
-                }
-            }
-            if (!UpdatePolicy.isReleaseAsset(manifestUrl) || !UpdatePolicy.isReleaseAsset(apkUrl)) continue;
-            try {
-                JSONObject manifest = new JSONObject(readText(manifestUrl, 16384));
-                long code = manifest.getLong("versionCode");
-                String hash = manifest.getString("sha256");
-                if (!BuildConfig.APPLICATION_ID.equals(manifest.getString("packageId"))
-                    || !UpdatePolicy.isSha256(hash) || !UpdatePolicy.isNewer(code, installed)) continue;
-                if (newest == null || code > newest.versionCode)
-                    newest = new Release(code, manifest.getString("versionName"), apkUrl, hash,
-                        release.optString("body", ""), sizeBytes);
-            } catch (Exception ignored) {
-                // A malformed/incomplete release must not hide other valid releases.
-            }
+        // One bounded manifest request, following GitHub's latest stable release redirect.
+        JSONObject manifest = new JSONObject(readText("https://github.com/" + UpdatePolicy.REPOSITORY
+            + "/releases/latest/download/presence-update.json", 16384));
+        return parseManifest(manifest, installed);
+    }
+
+    Release parseManifest(JSONObject manifest, long installed) throws Exception {
+        long code = manifest.getLong("versionCode");
+        String name = manifest.getString("versionName"), hash = manifest.getString("sha256");
+        if (!BuildConfig.APPLICATION_ID.equals(manifest.getString("packageId")) || code < 1
+            || !UpdatePolicy.isSha256(hash) || !name.matches("[0-9]+(?:\\.[0-9]+){1,3}"))
+            throw new IOException("Invalid update information");
+        // Older manifests have no URL/size/notes. Derive the immutable tagged APK URL.
+        String url = manifest.optString("apkUrl", "https://github.com/" + UpdatePolicy.REPOSITORY
+            + "/releases/download/v" + name + "/Presence.apk");
+        if (!UpdatePolicy.isReleaseAsset(url)) throw new IOException("Invalid update information");
+        if (!UpdatePolicy.isNewer(code, installed)) return null;
+        return new Release(code, name, url, hash, manifest.optString("notes", ""), manifest.optLong("sizeBytes", 0));
+    }
+
+    public static final class HttpFailure extends IOException {
+        public final int status;
+        public final long retryMillis;
+        HttpFailure(int status, long retryMillis) {
+            super("Update server returned " + status); this.status = status; this.retryMillis = retryMillis;
         }
-        return newest;
+    }
+
+    static long retryDelay(String value, String reset, long now) {
+        long delay = 0;
+        try { delay = Math.multiplyExact(Long.parseLong(value), 1000); }
+        catch (Exception ignored) {
+            try {
+                java.text.SimpleDateFormat format = new java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", java.util.Locale.US);
+                format.setTimeZone(java.util.TimeZone.getTimeZone("GMT"));
+                delay = format.parse(value).getTime() - now;
+            } catch (Exception invalid) { /* No valid Retry-After header. */ }
+        }
+        try { delay = Math.max(delay, Math.subtractExact(Math.multiplyExact(Long.parseLong(reset), 1000), now)); }
+        catch (Exception ignored) { /* No valid rate-limit reset header. */ }
+        return Math.max(0, delay);
     }
 
     public File download(Release release, File directory) throws Exception {
@@ -128,6 +136,8 @@ public final class GithubReleaseService {
             if (!UpdatePolicy.isDownloadHost(address)) throw new IOException("Untrusted download host");
             HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection();
             connection.setInstanceFollowRedirects(false);
+            connection.setUseCaches(false);
+            connection.setRequestProperty("Cache-Control", "no-cache");
             connection.setConnectTimeout(15000);
             connection.setReadTimeout(30000);
             connection.setRequestProperty("User-Agent", "Presence-Android-Updater");
@@ -139,7 +149,11 @@ public final class GithubReleaseService {
                 address = new URL(new URL(address), location).toString();
                 continue;
             }
-            if (status != 200) { connection.disconnect(); throw new IOException("Update server returned " + status); }
+            if (status != 200) {
+                long delay = retryDelay(connection.getHeaderField("Retry-After"),
+                    connection.getHeaderField("X-RateLimit-Reset"), System.currentTimeMillis());
+                connection.disconnect(); throw new HttpFailure(status, delay);
+            }
             return connection;
         }
         throw new IOException("Too many download redirects");
