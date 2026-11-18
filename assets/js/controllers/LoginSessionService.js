@@ -61,7 +61,7 @@ export class LoginSessionService {
     const permissionDenied = ['permission-denied', 'firestore/permission-denied'].includes(error.code)
       || error.message?.toLowerCase().includes('insufficient permissions');
     return error.code === 'auth/invalid-credential' ? 'The account or password is incorrect.'
-      : error.code === 'auth/too-many-requests' ? 'Too many attempts. Please wait and try again.'
+      : error.code === 'auth/too-many-requests' ? 'Too many attempts. Pause for at least one minute before retrying. Firebase controls when sign-in resumes, so it may take longer. Use your new password if it was already changed.'
         : permissionDenied ? 'Password accepted, but the latest Firestore rules have not been published yet.'
           : error.message || 'Unable to sign in right now.';
   }

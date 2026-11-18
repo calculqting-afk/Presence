@@ -108,6 +108,10 @@ export class LoginController {
   async submit(event) {
     event.preventDefault();
     if (this.disposed || this.loginAction.busy) return;
+    if (Date.now() < (this.signInRetryAt || 0)) {
+      this.showToast('Please wait before signing in', 'Sign-in is temporarily limited. Firebase controls when access resumes.');
+      return;
+    }
     const accountId = this.accountInput.value.trim(), password = this.passwordInput.value;
     if (!accountId) this.setFieldError(this.accountInput, this.accountError, 'Please enter your student ID or admin email.');
     if (!password) this.setFieldError(this.passwordInput, this.passwordError, 'Please enter your password.');
@@ -136,6 +140,7 @@ export class LoginController {
     } catch (error) {
       await this.sessionService.logOut?.(this.sessionService.auth).catch(() => {});
       if (!this.disposed) {
+        if (error.code === 'auth/too-many-requests') this.signInRetryAt = Date.now() + 60000;
         this.showToast('Unable to sign in', this.sessionService.errorMessage(error));
         this.setFieldError(this.passwordInput, this.passwordError, this.sessionService.errorMessage(error));
         this.passwordInput.focus();

@@ -1,4 +1,5 @@
 import { DuringAttendancePolicy, duringStatusMarkup } from '../core/DuringAttendancePolicy.js';
+import { PasswordRecoveryController } from '../controllers/PasswordRecoveryController.js';
 import { DeviceSessionController } from '../controllers/DeviceSessionController.js';
 import { D1_PRESENCE_ENABLED, PRESENCE_HEARTBEAT_MS, PresenceClient } from '../controllers/PresenceClient.js';
 import { D1_DIRECTORY_ENABLED, StudentDirectoryClient } from '../controllers/StudentDirectoryClient.js';
@@ -261,6 +262,19 @@ export class StudentDashboard {
     dashboard.scope.listen(dashboard.document, "keydown", dashboard.handleWireProfileActionsKeydown);
     dashboard.scope.listen(dashboard.requiredPasswordChangeForm, "submit", dashboard.handleRequiredPasswordChangeFormSubmit);
     dashboard.scope.listen(dashboard.document.querySelector('#requiredPasswordSignOut'), 'click', async () => {
+      if (dashboard.passwordRecovery?.active) {
+        try {
+          await signOut(auth);
+          dashboard.passwordRecovery.dispose();
+          try {
+            dashboard.identity?.clear();
+            dashboard.sessionStorage?.removeItem('presenceSession');
+            dashboard.sessionStorage?.removeItem('presenceDeviceSession');
+          } catch { /* Local storage failure must not prevent returning to login. */ }
+          dashboard.window.location.replace('../index.html');
+        } catch { showDashboardToast('Unable to return to login', 'Please try again.'); }
+        return;
+      }
       try { await stopAttendancePush(auth.currentUser); await DeviceSessionController.release(auth.currentUser); await signOut(auth); SessionToastFeedback.save(dashboard.sessionStorage, 'logout'); dashboard.window.location.replace('../index.html'); }
       catch { showDashboardToast('Unable to sign out', 'Please try again.'); }
     });
@@ -1092,7 +1106,7 @@ export class StudentDashboard {
   async handleRequiredPasswordChangeFormSubmit(event) {
     const dashboard = this;
     event.preventDefault();
-    if (dashboard.requiredPasswordChangeBusy) return;
+    if (dashboard.requiredPasswordChangeBusy || dashboard.passwordRecovery?.active) return;
     const newPassword = dashboard.document.querySelector("#requiredNewPassword").value;
     const confirmPassword = dashboard.document.querySelector("#requiredConfirmPassword").value;
     const passwordError = StudentPasswordPolicy.newPasswordError(newPassword, dashboard.studentProfile || currentUserProfile);
@@ -1111,12 +1125,30 @@ export class StudentDashboard {
     dashboard.document.querySelector('#requiredPasswordSignOut').disabled = true;
     dashboard.completeRequiredPasswordChange.textContent = "Saving password…";
     const finishSync = DeviceSessionController.pausePasswordSync(dashboard.subscriptions, dashboard.window);
+    const expectedUid = auth.currentUser?.uid, email = auth.currentUser?.email;
+    let signInAfter = 0;
+    const recover = (saved, error) => {
+      dashboard.passwordRecovery ||= new PasswordRecoveryController({ document: dashboard.document, window: dashboard.window, notify: showDashboardToast });
+      dashboard.scope?.addCleanup?.(() => dashboard.passwordRecovery?.dispose());
+      dashboard.passwordRecovery.enter({ saved, error, retry: async () => {
+        if (auth.currentUser && auth.currentUser.uid !== expectedUid) throw Error('Your account changed. Return to login to continue.');
+        await new Promise(resolve => dashboard.window.setTimeout(resolve, Math.max(0, signInAfter * 1000 + 200 - Date.now())));
+        if (!dashboard.passwordRecovery?.active) return;
+        const credential = await signInAfterPasswordReset(auth, email, newPassword);
+        if (credential.user?.uid !== expectedUid) throw Error('Your account changed. Return to login to continue.');
+        if (!dashboard.passwordRecovery?.active) return;
+        if (dashboard.document.body.hasAttribute?.('data-device-session-enabled')) await DeviceSessionController.rebind(credential.user);
+        if (!dashboard.passwordRecovery?.active) return;
+        dashboard.window.location.reload();
+      } });
+    };
     let passwordUpdated = false;
     try {
       if (dashboard.studentProfile.passwordResetRequired === true) {
         const email = auth.currentUser.email;
         dashboard.passwordResetApi ||= new PasswordResetApi();
         const result = await dashboard.passwordResetApi.complete(auth.currentUser, newPassword);
+        signInAfter = result.signInAfter || 0;
         passwordUpdated = true;
         await new Promise(resolve => dashboard.window.setTimeout(resolve, Math.max(0, result.signInAfter * 1000 + 200 - Date.now())));
         await signInAfterPasswordReset(auth, email, newPassword);
@@ -1128,6 +1160,7 @@ export class StudentDashboard {
         const email = user.email;
         dashboard.passwordResetApi ||= new PasswordResetApi();
         const result = await dashboard.passwordResetApi.completeFirstLogin(user, newPassword);
+        signInAfter = result.signInAfter || 0;
         passwordUpdated = true;
         await new Promise(resolve => dashboard.window.setTimeout(resolve, Math.max(0, result.signInAfter * 1000 + 200 - Date.now())));
         if (dashboard.document.body.hasAttribute?.('data-device-session-enabled')) {
@@ -1137,6 +1170,10 @@ export class StudentDashboard {
         return;
       }
     } catch (error) {
+      if (passwordUpdated || !Number.isFinite(error.status) || error.status >= 500 || error.status === 408) {
+        recover(passwordUpdated, error);
+        return;
+      }
       if (!passwordUpdated) {
         // A failed request can be ambiguous after a password update. Resume
         // only if the backend confirms this device session still has authority.
@@ -1147,8 +1184,8 @@ export class StudentDashboard {
     } finally {
       dashboard.requiredPasswordChangeBusy = false;
       dashboard.document.querySelector('#requiredPasswordSignOut').disabled = false;
-      dashboard.completeRequiredPasswordChange.disabled = false;
-      dashboard.completeRequiredPasswordChange.textContent = "Save new password";
+      dashboard.completeRequiredPasswordChange.disabled = dashboard.passwordRecovery?.active === true;
+      dashboard.completeRequiredPasswordChange.textContent = dashboard.passwordRecovery?.saved ? 'Password saved' : 'Save new password';
     }
   }
   handleStudentFineListClick(event) {

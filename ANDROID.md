@@ -38,13 +38,15 @@ Run `npm run android:apk` (debug) or `npm run android:beta` (beta). After a succ
 
 ### Publish each update
 
-1. Increase `versionCode` and `versionName` in `android/app/build.gradle` before every new build (current: 33 / 1.8.24; next versionCode: 34).
+1. Increase `versionCode` and `versionName` in `android/app/build.gradle` before every new build (current: 34 / 1.8.25; next versionCode: 35).
 2. Build using one of the commands above.
 3. Create a GitHub release in **calculqting-afk/Presence**, for example tag `v1.7`, title `Presence v1.7 — Morning and Afternoon Attendance`.
 4. Upload **both files from the same build**: `Presence.apk` and `presence-update.json`. Keep those exact asset names. Publish after both uploads complete. Public prereleases are intentionally supported too; drafts are ignored. Publishing a qualifying release makes it eligible for every installed app with a lower version code, so do not use this repository for private test-only updates.
 5. Never edit the manifest hash/version manually or replace only one of the assets. Build and publish a new version instead.
 
 The app checks the 20 most recent public releases on launch/resume, at most once every five minutes per process, and picks the highest newer version with both valid assets. Missing assets, rate limiting, offline checks and malformed metadata leave attendance usable. No credentials or GitHub token are shipped in the app. The repository and release downloads must be public.
+
+The automatic updater uses a dark, scrollable Presence dialog showing installed/new versions, GitHub release notes as plain text, and the APK asset size when available. Download progress updates while the app stays usable; verification finishes before installation is offered. Returning to the foreground retains an in-progress download or verified installer. Failed downloads offer Retry; package/signature/version failures and checksum failures have separate guidance. After Android installs the update, reopen Presence to continue. A manual Check for updates button is not included yet.
 
 ### One-time switch from the old Firebase APK
 

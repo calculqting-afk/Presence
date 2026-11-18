@@ -185,6 +185,16 @@ test('login failures restore controls and disposal discards late authentication 
   assert.equal(env.window.location.href, 'https://presence.test/index.html?survey=event-1');
 });
 
+test('Firebase throttling pauses further login requests without treating the pause as a guaranteed unlock',async()=>{
+ const {LoginController}=await load('assets/js/controllers/LoginController.js');
+ const env=browser();let attempts=0;
+ const service={authenticate:async()=>{attempts++;throw Object.assign(Error('Limited'),{code:'auth/too-many-requests'});},errorMessage:()=> 'Too many attempts. Firebase controls when sign-in resumes.'};
+ const login=new LoginController({...env,sessionService:service});login.initialize();env.element('#accountId').value='123';env.element('#password').value='new-password';
+ await login.submit({preventDefault(){}});assert.equal(attempts,1);assert.ok(login.signInRetryAt>Date.now());
+ await login.submit({preventDefault(){}});assert.equal(attempts,1);assert.match(env.element('#toastMessage').textContent,/Firebase controls/);
+ login.signInRetryAt=Date.now()-1;await login.submit({preventDefault(){}});assert.equal(attempts,2);login.dispose();
+});
+
 test('dashboard state owns view/session updates and retains shared session resources', async () => {
   const { DashboardState } = await load('assets/js/core/DashboardState.js');
   const updates = [], state = new DashboardState({ onChange: value => updates.push(value) });

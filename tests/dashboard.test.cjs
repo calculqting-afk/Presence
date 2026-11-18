@@ -2694,7 +2694,7 @@ test('failed server first-login completion keeps the modal open and never writes
   browser.document.querySelector('#requiredNewPassword').value='Student!42';browser.document.querySelector('#requiredConfirmPassword').value='Student!42';
   const state={document:browser.document,studentProfile:shared.currentUserProfile,completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),passwordResetApi:{completeFirstLogin:async()=>{throw Error('Password change is unconfirmed. Sign in again and retry.');}},closeRequiredPasswordChangeModal(){throw Error('Must remain open');}};
   await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});
-  assert.equal(writes,0);assert.equal(state.completeRequiredPasswordChange.disabled,false);assert.match(toasts.at(-1)[1],/unconfirmed/);
+  assert.equal(writes,0);assert.equal(state.completeRequiredPasswordChange.disabled,true);assert.equal(state.passwordRecovery.saved,false);assert.match(toasts.at(-1)[1],/could not be confirmed/);
 });
 
 test('presence logout drains an in-flight heartbeat and closes only the current user device', async () => {
@@ -3030,6 +3030,55 @@ test('failed first-login session restoration offers recovery with the new passwo
   const state={document:browser.document,window:{setTimeout:fn=>fn()},studentProfile:shared.currentUserProfile,completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),passwordResetApi:{completeFirstLogin:async()=>({signInAfter:0})},restorePasswordSession:async()=>{throw Error('device transferred');}};
   await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});
   assert.equal(writes,0);assert.equal(state.requiredPasswordChangeBusy,false);assert.match(toasts.at(-1)[1],/Sign in with the new password/);
+});
+
+test('saved password recovery retries sign-in without changing the password again for both setup paths',async()=>{
+ for(const reset of [true,false]){
+  const browser=fakeBrowser(),actor={uid:'student-1',email:'student@example.test'},notices=[];
+  let saves=0,signins=0,reloads=0;
+  const shared=birthdayOnboardingShared({auth:{currentUser:actor},showDashboardToast:(...args)=>notices.push(args),signInWithEmailAndPassword:async(_auth,email,password)=>{
+    signins++;assert.equal(email,actor.email);assert.equal(password,'Personal!new42');
+    if(signins===1)throw Object.assign(Error('Offline'),{code:'auth/network-request-failed'});
+    return {user:actor};
+  }});
+  const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
+  browser.document.querySelector('#requiredNewPassword').value='Personal!new42';browser.document.querySelector('#requiredConfirmPassword').value='Personal!new42';
+  const save=async()=>{saves++;return {signInAfter:0};};
+  const state={document:browser.document,window:{setTimeout:fn=>fn(),location:{reload:()=>reloads++}},studentProfile:{...shared.currentUserProfile,passwordResetRequired:reset},completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),passwordResetApi:{complete:save,completeFirstLogin:save}};
+  const submit=()=>StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});
+  await submit();assert.equal(saves,1);assert.equal(state.passwordRecovery.saved,true);assert.equal(state.completeRequiredPasswordChange.disabled,true);assert.equal(state.completeRequiredPasswordChange.hidden,true);
+  assert.match(browser.document.querySelector('#requiredPasswordChangeTitle').textContent,/successfully/);
+  await submit();assert.equal(saves,1);assert.equal(signins,1);
+  await state.passwordRecovery.retry();assert.equal(saves,1);assert.equal(signins,2);assert.equal(reloads,1);
+  state.passwordRecovery.dispose();assert.equal(browser.document.querySelector('#requiredNewPassword').value,'');
+ }
+});
+
+test('uncertain password save offers sign-in recovery while definitive validation failures retain the password form',async()=>{
+ for(const status of [undefined,503,400]){
+  const browser=fakeBrowser(),actor={uid:'student-1',email:'student@example.test'};let saves=0,signins=0,resumed=0;
+  const shared=birthdayOnboardingShared({auth:{currentUser:actor},signInWithEmailAndPassword:async()=>{signins++;return {user:actor};}});
+  const {StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
+  browser.document.querySelector('#requiredNewPassword').value='Personal!new42';browser.document.querySelector('#requiredConfirmPassword').value='Personal!new42';
+  const state={document:browser.document,window:{setTimeout:fn=>fn(),location:{reload(){}}},studentProfile:shared.currentUserProfile,completeRequiredPasswordChange:browser.document.querySelector('#completeRequiredPasswordChange'),
+    subscriptions:{pause(){},resume:()=>resumed++},passwordResetApi:{completeFirstLogin:async()=>{saves++;throw Object.assign(Error('Request failed'),{status});},call:async()=>({current:true})}};
+  await StudentDashboard.prototype.handleRequiredPasswordChangeFormSubmit.call(state,{preventDefault(){}});
+  if(status===400){assert.equal(state.passwordRecovery,undefined);assert.equal(state.completeRequiredPasswordChange.disabled,false);assert.equal(resumed,1);}
+  else{assert.equal(state.passwordRecovery.saved,false);assert.equal(state.completeRequiredPasswordChange.disabled,true);assert.equal(resumed,0);await state.passwordRecovery.retry();assert.equal(signins,1);assert.equal(saves,1);state.passwordRecovery.dispose();}
+ }
+});
+
+test('password recovery prevents duplicate sign-ins, observes throttling, and clears its timer and callback on disposal',async()=>{
+ const browser=fakeBrowser(),timers=new Map();let now=1000,calls=0,finish;
+ browser.window.setTimeout=(fn,delay)=>{timers.set(1,{fn,delay});return 1;};browser.window.clearTimeout=id=>timers.delete(id);
+ const {PasswordRecoveryController}=await isolatedModule('assets/js/controllers/PasswordRecoveryController.js',{},browser);
+ const controller=new PasswordRecoveryController({...browser,notify(){},now:()=>now});
+ controller.enter({saved:true,retry:async()=>{calls++;return new Promise(resolve=>finish=resolve);}});
+ const first=controller.retry();await controller.retry();assert.equal(calls,1);finish();await first;
+ controller.failed({code:'auth/too-many-requests'});await controller.retry();assert.equal(calls,1);assert.equal(controller.button.disabled,true);assert.equal(timers.get(1).delay,60000);
+ assert.match(browser.document.querySelector('#requiredPasswordRecoveryStatus').textContent,/does not guarantee/);
+ now+=60000;timers.get(1).fn();assert.equal(controller.button.disabled,false);
+ controller.failed({code:'auth/too-many-requests'});controller.dispose();assert.equal(timers.size,0);assert.equal(controller.restore,null);assert.equal(controller.button.onclick,null);
 });
 
 test('password session restoration signs in with the new credential before binding and rejects account substitution', async () => {
