@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const root = path.resolve(__dirname, '../..');
-const policy = async () => (await import(pathToFileURL(path.join(root, 'assets/js/core/StudentPasswordPolicy.js')).href)).StudentPasswordPolicy;
+const policy = async () => (await import(pathToFileURL(path.join(root, 'assets/js/core/accounts/StudentPasswordPolicy.js')).href)).StudentPasswordPolicy;
 
 test('birthday passwords use MMDDYYYY with leading zeros and real calendar validation', async () => {
   const P = await policy();

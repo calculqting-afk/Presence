@@ -2,8 +2,8 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs');
 
 async function fixture(options = {}) {
-  const { PolicyAgreementController } = await import('../../assets/js/controllers/PolicyAgreementController.js');
-  const { PolicyAgreementPolicy: Policy } = await import('../../assets/js/core/PolicyAgreementPolicy.js');
+  const { PolicyAgreementController } = await import('../../assets/js/controllers/accounts/PolicyAgreementController.js');
+  const { PolicyAgreementPolicy: Policy } = await import('../../assets/js/core/accounts/PolicyAgreementPolicy.js');
   const attrs = new Set(['data-policy-required']); let resolved;
   const field = () => ({ textContent: '', disabled: false, hidden: false, checked: false, focus() {}, setAttribute() {}, removeAttribute() {} });
   const controller = new PolicyAgreementController({ uid: 'student', document: { body: { removeAttribute: key => attrs.delete(key) } }, window: {},
@@ -15,7 +15,7 @@ async function fixture(options = {}) {
 }
 
 test('agreement receipt requires this user, this version, both decisions and a timestamp', async () => {
-  const { PolicyAgreementPolicy: Policy } = await import('../../assets/js/core/PolicyAgreementPolicy.js');
+  const { PolicyAgreementPolicy: Policy } = await import('../../assets/js/core/accounts/PolicyAgreementPolicy.js');
   const receipt = Policy.receipt('student', 'server-time');
   assert.equal(Policy.accepted(receipt, 'student'), true);
   for (const changed of [{ uid: 'other' }, { version: 'old' }, { termsAccepted: false }, { privacyAcknowledged: false }, { acceptedAt: null }]) {
@@ -70,7 +70,7 @@ test('sign out during verification cannot unlock the dashboard and Android Back 
 });
 
 test('dashboard agreement gate is student-only while admin role verification remains required', () => {
-  const source=fs.readFileSync('assets/js/controllers/DashboardApplication.js','utf8');
+  const source=fs.readFileSync('assets/js/controllers/dashboard/DashboardApplication.js','utf8');
   const gate=source.match(/if \((dashboardRole === 'student' && this.document.body.hasAttribute\?\.\('data-policy-enabled'\))\) \{/)[1];
   const enabled={document:{body:{hasAttribute:()=>true}}};
   const check=new Function('dashboardRole','return '+gate);

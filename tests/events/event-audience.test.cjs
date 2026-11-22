@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const stamp = ms => ({ toDate: () => new Date(ms) });
 const students = [{ uid:'a',section:'2A',active:true,createdAt:stamp(10) },{uid:'b',section:'2B',active:true,createdAt:stamp(10)},{uid:'c',section:'1A',active:true,createdAt:stamp(10)},{uid:'inactive',section:'2B',active:false}];
 const original = { id:'event',name:'Assembly',date:'2026-10-20',audience:'Section 2A',openAt:stamp(500),checkOutClosesAt:stamp(2000),attendanceRoster:{a:'2A'},rosterCapturedAt:stamp(100) };
-async function policy() { return (await import('../../assets/js/controllers/EventAudiencePolicy.js')).EventAudiencePolicy; }
+async function policy() { return (await import('../../assets/js/controllers/events/EventAudiencePolicy.js')).EventAudiencePolicy; }
 test('multiple selected sections authorize assigned students but not view-only students', async () => {
   const Policy = await policy();
   const fields = Policy.assignment(students,['2B','2A'],original,{now:new Date(1000),timestamp:()=>stamp(1000)});
@@ -39,8 +39,8 @@ test('empty/invalid groups and closed-event changes are rejected', async () => {
 });
 test('late-added groups are unverified rather than absences in summaries and projections; real attendance survives removal', async () => {
   const Policy=await policy(); const event={...original,...Policy.assignment(students,['2A','2B'],original,{now:new Date(1000),timestamp:()=>stamp(1000)})};
-  const { AttendanceSummaryService }=await import('../../assets/js/controllers/AttendanceSummaryService.js');
-  const { AttendanceRecordProjectionService }=await import('../../assets/js/controllers/AttendanceRecordProjectionService.js');
+  const { AttendanceSummaryService }=await import('../../assets/js/controllers/reports/AttendanceSummaryService.js');
+  const { AttendanceRecordProjectionService }=await import('../../assets/js/controllers/reports/AttendanceRecordProjectionService.js');
   const summary=new AttendanceSummaryService({closeDate:()=>new Date(1500),checkoutCloseDate:()=>new Date(2000),now:()=>new Date(3000)});
   assert.equal(summary.eligibility(students[0],event),'eligible'); assert.equal(summary.eligibility(students[1],event),'provisional'); assert.equal(summary.eligibility(students[2],event),'excluded');
   const result=summary.summarize(students[1],[event],[]); assert.equal(result.absences.length,0); assert.equal(result.unverified.length,1);
@@ -52,22 +52,22 @@ test('late-added groups are unverified rather than absences in summaries and pro
 });
 test('report and analytics policy mark late additions for review while excluding unassigned sections', async () => {
   const Policy=await policy(); const event={...original,...Policy.assignment(students,['2A','2B'],original,{now:new Date(1000),timestamp:()=>stamp(1000)})};
-  const { AttendanceSummaryService }=await import('../../assets/js/controllers/AttendanceSummaryService.js');
-  const { AttendanceReportService }=await import('../../assets/js/controllers/AttendanceReportService.js');
+  const { AttendanceSummaryService }=await import('../../assets/js/controllers/reports/AttendanceSummaryService.js');
+  const { AttendanceReportService }=await import('../../assets/js/controllers/reports/AttendanceReportService.js');
   const summary=new AttendanceSummaryService({closeDate:()=>new Date(1500),checkoutCloseDate:()=>new Date(2000),now:()=>new Date(3000)});
   const report=new AttendanceReportService({summary,checkoutCloseDate:()=>new Date(2000),now:()=>new Date(3000)}).snapshot({event,students,records:[],verifiedAt:new Date(3000)});
   assert.equal(report.rows.length,2); assert.equal(report.totals.absent,1); assert.equal(report.totals.review,1); assert.equal(report.event.audience,'Sections 2A, 2B');
-  const { AttendanceAnalyticsController }=await import('../../assets/js/controllers/AttendanceAnalyticsController.js');
+  const { AttendanceAnalyticsController }=await import('../../assets/js/controllers/reports/AttendanceAnalyticsController.js');
   const analytics=new AttendanceAnalyticsController({getEvents:()=>[event],getStudents:()=>students,closeDate:()=>new Date(2000),now:()=>new Date(3000)});
   const rows=analytics.rows(event.date); assert.equal(rows.length,2); assert.equal(rows.filter(row=>row.absent).length,1); assert.equal(rows.filter(row=>row.review).length,1);
 });
 test('multi-section surveys share the attendance eligibility policy', async () => {
-  const Policy=await policy(), {SurveyPolicy}=await import('../../assets/js/controllers/SurveyPolicy.js');
+  const Policy=await policy(), {SurveyPolicy}=await import('../../assets/js/controllers/surveys/SurveyPolicy.js');
   const event={...original,...Policy.assignment(students,['2A','2B'],original,{now:new Date(1000),timestamp:()=>stamp(1000)})};
   const survey=new SurveyPolicy(); assert.equal(survey.eligible(students[1],event),true); assert.equal(survey.eligible(students[2],event),false);
 });
 test('section editor restores legacy selections, saves multiple boxes, and resets to All students', async () => {
-  const {EventAudienceController}=await import('../../assets/js/controllers/EventAudienceController.js');
+  const {EventAudienceController}=await import('../../assets/js/controllers/events/EventAudienceController.js');
   const nodes={'#eventAudience':{value:'All students'},'#eventSectionChoices':{hidden:false}};
   const boxes=['1A','1B','2A','2B','3A','3B','4A','4B'].map(value=>({value,checked:false}));
   let onChange;

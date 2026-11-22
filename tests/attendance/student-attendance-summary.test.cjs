@@ -10,7 +10,7 @@ function event(id = 'morning', overrides = {}) {
 }
 const attendance = (overrides = {}) => ({ id: 'r1', eventId: 'morning', studentUid: 'student', checkedInAt: stamp('2026-10-25T08:00:00+08:00'), arrivalStatus: 'present', ...overrides });
 async function project(events, records = [], filters = {}, overrides = {}, time = now) {
-  const { StudentAttendanceSummaryService } = await import('../../assets/js/controllers/StudentAttendanceSummaryService.js');
+  const { StudentAttendanceSummaryService } = await import('../../assets/js/controllers/reports/StudentAttendanceSummaryService.js');
   return new StudentAttendanceSummaryService().project({ student, events, attendance: records, verified: true, ...overrides }, filters, time);
 }
 test('present/late describe arrival while incomplete is a separate completion dimension', async () => {
@@ -82,7 +82,7 @@ function node() {
     addEventListener(key, handler) { handlers.set(key, handler); }, removeEventListener(key) { handlers.delete(key); } };
 }
 test('summary controller switches views, safely renders, filters and disposes listeners/timer', async () => {
-  const { StudentAttendanceSummaryController } = await import('../../assets/js/controllers/StudentAttendanceSummaryController.js');
+  const { StudentAttendanceSummaryController } = await import('../../assets/js/controllers/reports/StudentAttendanceSummaryController.js');
   const root = node(), records = node(), corrections = node(), tabs = ['records', 'summary'].map(name => Object.assign(node(), { dataset: { attendanceTab: name } }));
   let timer, cleared = 0, request;
   const document = { hidden: false, querySelector: selector => ({ '#studentAttendanceSummary': root, '#studentAttendanceRecordsPanel': records, '#studentCorrectionRequests': corrections })[selector], querySelectorAll: () => tabs, createElement: node };

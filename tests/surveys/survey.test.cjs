@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { pathToFileURL } = require('node:url');
 const root = path.resolve(__dirname, '../..');
-const moduleAt = name => import(pathToFileURL(path.join(root, 'assets/js/controllers', `${name}.js`)));
+const moduleAt = name => import(pathToFileURL(path.join(root, 'assets/js/controllers/surveys', `${name}.js`)));
 const config = (mode = 'start-only', size = 3) => ({ eventId: 'event', revision: 1, enabled: true, locationMode: mode, opensAt: new Date(1000), closesAt: new Date(100000), questions: Array.from({ length: size }, (_, index) => ({ id: `q${index}`, text: `Agenda ${index + 1}`, type: 'choice', choices: ['Yes', 'No'] })) });
 
 test('survey policy validates questions/windows and only requests selected location stages', async () => {
@@ -134,11 +134,11 @@ async function repositoryHarness() {
   };
   const remote = new vm.SyntheticModule(Object.keys(sdk), function() { Object.entries(sdk).forEach(([key, value]) => this.setExport(key, value)); }, { context });
   const load = filename => { if (!modules.has(filename)) modules.set(filename, new vm.SourceTextModule(fs.readFileSync(filename, 'utf8'), { context, identifier: filename })); return modules.get(filename); };
-  const entry = load(path.join(root, 'assets/js/controllers/SurveyRepository.js'));
+  const entry = load(path.join(root, 'assets/js/controllers/surveys/SurveyRepository.js'));
   await entry.link((specifier, referencing) => specifier.startsWith('https:') ? remote : load(path.resolve(path.dirname(referencing.identifier), specifier)));
   await entry.evaluate();
   const policy = { now: () => 5000 };
-  const policyModule = modules.get(path.join(root, 'assets/js/controllers/SurveyPolicy.js'));
+  const policyModule = modules.get(path.join(root, 'assets/js/controllers/surveys/SurveyPolicy.js'));
   const repository = new entry.namespace.SurveyRepository({ db: {}, uid: 'student', profile: () => ({ accountId: 'ID-1', firstName: 'Apollo', lastName: 'Paderes' }), policy: new policyModule.namespace.SurveyPolicy(policy) });
   return { repository, documents, writes, timestamp };
 }
@@ -185,7 +185,7 @@ test('published survey definitions cannot be rewritten and pause preserves respo
 });
 
 test('survey role grants and rules preserve owner access, immutable answers and server windows', async () => {
-  const permissions = await import(pathToFileURL(path.join(root, 'assets/js/core/permissions.js')));
+  const permissions = await import(pathToFileURL(path.join(root, 'assets/js/core/security/permissions.js')));
   for (const role of ['super_admin', 'head_admin', 'attendance_admin']) assert.equal(permissions.hasPermission(role, 'manageSurveys'), true);
   for (const role of ['student_manager', 'student', 'unknown']) assert.equal(permissions.hasPermission(role, 'manageSurveys'), false);
   assert.ok(permissions.ROLE_VIEWS.student.includes('surveys'));
@@ -369,7 +369,7 @@ test('confirmation button clicks use receiver-safe timer cleanup and settle once
       assert.equal(this, undefined); assert.equal(timer, 7); cancelled++;
     }
   });
-  const source = fs.readFileSync(path.join(root, 'assets/js/controllers/SurveyConfirmationController.js'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'assets/js/controllers/surveys/SurveyConfirmationController.js'), 'utf8');
   const module = new vm.SourceTextModule(source, { context });
   await module.link(() => {}); await module.evaluate();
   const nodes = new Map();

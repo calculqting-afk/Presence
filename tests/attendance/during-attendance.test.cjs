@@ -2,7 +2,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 globalThis.crypto ||= require('node:crypto').webcrypto;
 async function fixture(){
  const {DuringAttendanceService}=await import('../../workers/admin-api/src/during-attendance.js');
- const {PolicyAgreementPolicy:Policy}=await import('../../assets/js/core/PolicyAgreementPolicy.js');
+ const {PolicyAgreementPolicy:Policy}=await import('../../assets/js/core/accounts/PolicyAgreementPolicy.js');
  let now=Date.parse('2026-11-17T10:00:00+08:00');
  const store=new Map([
   ['students/student',{active:true,role:'student',accountId:'123',section:'2A'}],
@@ -61,7 +61,7 @@ test('During GPS checks freshness, precision and the server boundary; QR fallbac
  assert.equal(f.store.get('attendance/student_event').duringAttendance.method,'student');
 });
 test('During status distinguishes confirmed, missed review and not required without treating disabled sessions as missing',async()=>{
- const {DuringAttendancePolicy:P}=await import('../../assets/js/core/DuringAttendancePolicy.js');
+ const {DuringAttendancePolicy:P}=await import('../../assets/js/core/attendance/DuringAttendancePolicy.js');
  const f=await fixture(),record=f.store.get('attendance/student_event');
  assert.equal(P.state(f.store.get('events/event'),record,f.now()),'not-required');await f.service.configure(f.admin,f.body);
  const event=f.store.get('events/event');
@@ -72,7 +72,7 @@ test('During status distinguishes confirmed, missed review and not required with
 });
 
 test('open checkpoint asks students to check in first while leaving confirmation eligibility unchanged',async()=>{
- const {DuringAttendancePolicy:P,duringStatusMarkup}=await import('../../assets/js/core/DuringAttendancePolicy.js');
+ const {DuringAttendancePolicy:P,duringStatusMarkup}=await import('../../assets/js/core/attendance/DuringAttendancePolicy.js');
  const f=await fixture();await f.enable();const event=f.store.get('events/event'),now=f.now();
  assert.equal(P.label(event,null,now),'Check in first');
  assert.match(duringStatusMarkup(event,null,String,now),/During: Check in first/);
@@ -85,8 +85,8 @@ test('open checkpoint asks students to check in first while leaving confirmation
 });
 
 test('event schedule edits keep enabled checkpoints in the session and preserve started confirmations',async()=>{
- const {EventSessionPolicy:E}=await import('../../assets/js/controllers/EventSessionPolicy.js');
- const {DuringAttendancePolicy:P}=await import('../../assets/js/core/DuringAttendancePolicy.js');
+ const {EventSessionPolicy:E}=await import('../../assets/js/controllers/events/EventSessionPolicy.js');
+ const {DuringAttendancePolicy:P}=await import('../../assets/js/core/attendance/DuringAttendancePolicy.js');
  const f=await fixture();await f.service.configure(f.admin,f.body);const event=f.store.get('events/event');
  const shrink={...event,closeAt:new Date(f.body.closesAt-1)};
  assert.throws(()=>E.assertSchedule(shrink,event,new Date(f.now())),/Adjust or disable/);

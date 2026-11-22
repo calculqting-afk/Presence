@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '../..');
 test('navigation grace reuses a listener but expires and cleans it on disposal', async () => {
- const {ScopedSubscriptions}=await import('../../assets/js/core/ScopedSubscriptions.js');
+ const {ScopedSubscriptions}=await import('../../assets/js/core/shared/ScopedSubscriptions.js');
  let starts=0,stops=0,sequence=0;const timers=new Map();
  const scope=new ScopedSubscriptions({linger:()=>15000,schedule:fn=>{timers.set(++sequence,fn);return sequence;},cancel:id=>timers.delete(id)});
  scope.register('students',['directory'],()=>{starts++;return()=>{stops++;};});
@@ -35,7 +35,7 @@ function browser() {
   return { document, window, handlers, placeholder };
 }
 test('lazy surveys download once on first use, preserve QR routing, and reflect navigation while loading', async () => {
-  const { LazySurveyController } = await loadModule('assets/js/controllers/LazySurveyController.js');
+  const { LazySurveyController } = await loadModule('assets/js/controllers/surveys/LazySurveyController.js');
   const env = browser(); let resolve, reads = 0, initialized = 0, disposed = 0, lastView;
   const feature = { section: {}, initialize() { initialized++; }, dispose() { disposed++; }, onView(event) { lastView = event.detail.viewName; } };
   const controller = new LazySurveyController({ ...env, openView() {}, showToast() {}, load: () => { reads++; return new Promise(done => { resolve = done; }); } });
@@ -48,7 +48,7 @@ test('lazy surveys download once on first use, preserve QR routing, and reflect 
   controller.dispose(); assert.equal(disposed, 1); assert.equal(env.handlers.size, 0);
 });
 test('lazy survey failure can retry and disposal prevents late initialization', async () => {
-  const { LazySurveyController } = await loadModule('assets/js/controllers/LazySurveyController.js');
+  const { LazySurveyController } = await loadModule('assets/js/controllers/surveys/LazySurveyController.js');
   const env = browser(); let attempts = 0, resolve, disposed = 0;
   const controller = new LazySurveyController({ ...env, openView() {}, showToast() {}, load: () => { if (++attempts === 1) throw Error('offline'); return new Promise(done => { resolve = done; }); } });
   controller.initialize(); await controller.ensureLoaded(); assert.equal(controller.loading, null);
@@ -57,7 +57,7 @@ test('lazy survey failure can retry and disposal prevents late initialization', 
   assert.equal(attempts, 2); assert.equal(disposed, 1);
 });
 test('survey refresh requests recent and archived events concurrently and renders the list once', async () => {
-  const { SurveyController } = await loadModule('assets/js/controllers/SurveyController.js');
+  const { SurveyController } = await loadModule('assets/js/controllers/surveys/SurveyController.js');
   let resolveRecent, resolveArchives, recent = 0, archives = 0, renders = 0;
   const state = { generation: 0, visible: true, canManage: true, section: { querySelector: () => ({}) },
     repository: { events() { recent++; return new Promise(resolve => { resolveRecent = resolve; }); }, archivedEvents() { archives++; return new Promise(resolve => { resolveArchives = resolve; }); } },
@@ -67,7 +67,7 @@ test('survey refresh requests recent and archived events concurrently and render
   resolveRecent([]); resolveArchives([]); await pending; assert.equal(renders, 1);
 });
 test('dashboard timing records a completed stage once without transmitting anything', async () => {
-  const { DashboardPerformanceController } = await loadModule('assets/js/controllers/DashboardPerformanceController.js');
+  const { DashboardPerformanceController } = await loadModule('assets/js/controllers/dashboard/DashboardPerformanceController.js');
   const marks = [], measures = [];
   const metrics = new DashboardPerformanceController({ role: 'student', performance: { mark: name => marks.push(name), measure: (...args) => measures.push(args), clearMarks() {} } });
   metrics.start('profile'); metrics.start('profile'); metrics.finish('profile'); metrics.finish('profile');
@@ -78,7 +78,7 @@ test('dashboard timing records a completed stage once without transmitting anyth
   assert.equal(measures.length, 3);
 });
 test('QR code library loads once on demand, preserves project paths and retries failures', async () => {
-  const { QrCodeLoader } = await loadModule('assets/js/controllers/QrCodeLoader.js');
+  const { QrCodeLoader } = await loadModule('assets/js/controllers/attendance/QrCodeLoader.js');
   const scripts = []; const window = { location: { href: 'https://school.test/Presence/pages/admin-dashboard.html' } };
   const document = { createElement: () => ({ remove() {} }), head: { append: script => scripts.push(script) } };
   const loader = new QrCodeLoader({ document, window });
@@ -91,7 +91,7 @@ test('QR code library loads once on demand, preserves project paths and retries 
 
 
 test('hidden pages immediately stop area listeners, keep essential checks and ignore late callbacks', async () => {
-  const { ScopedSubscriptions } = await import('../../assets/js/core/ScopedSubscriptions.js');
+  const { ScopedSubscriptions } = await import('../../assets/js/core/shared/ScopedSubscriptions.js');
   let starts=0, stops=0, essential=0, applied=0, late;
   const scope=new ScopedSubscriptions();
   scope.register('area',['directory'],guard=>{starts++;late=guard(()=>applied++);return()=>stops++;});

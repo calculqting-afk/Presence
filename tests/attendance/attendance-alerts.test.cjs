@@ -10,7 +10,7 @@ async function load(name, globals = {}) {
     if (!modules.has(file)) modules.set(file, new vm.SourceTextModule(fs.readFileSync(file, 'utf8'), { context, identifier: file }));
     return modules.get(file);
   }
-  const entry = get(path.join(root, 'assets/js/controllers', name + '.js'));
+  const entry = get(path.join(root, 'assets/js/controllers', name === 'PhoneAttendanceReminders' ? 'notifications' : 'attendance', name + '.js'));
   await entry.link((specifier, ref) => get(path.resolve(path.dirname(ref.identifier), specifier)));
   await entry.evaluate(); return entry.namespace;
 }

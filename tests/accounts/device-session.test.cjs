@@ -2,7 +2,7 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const { webcrypto } = require('node:crypto'); globalThis.crypto ||= webcrypto;
 
 test('logout waits for confirmed server release and surfaces failure without refreshing the token', async () => {
- const { DeviceSessionController } = await import('../../assets/js/controllers/DeviceSessionController.js');
+ const { DeviceSessionController } = await import('../../assets/js/controllers/accounts/DeviceSessionController.js');
  const events=[], window={dispatchEvent:event=>events.push(event.type)}, user={uid:'student'};
  let finish, ended=false;
  const api={call:(path,actor,body,options)=>{
@@ -87,7 +87,7 @@ test('unsupported, inactive and forged requests are rejected; status never retur
 });
 
 test('client cancellation leaves the current device untouched; confirmation binds only the returned signed token',async()=>{
- const { DeviceSessionController }=await import('../../assets/js/controllers/DeviceSessionController.js');
+ const { DeviceSessionController }=await import('../../assets/js/controllers/accounts/DeviceSessionController.js');
  const calls=[],data=new Map(),storage={getItem:key=>data.get(key),setItem:(key,value)=>data.set(key,value)};
  const user={uid:'student',getIdTokenResult:async()=>({claims:{firebase:{sign_in_provider:'password'}}})};
  const api={call:async(path,who,body)=>{calls.push({path,body});if(path.endsWith('/status'))return {active:true,current:false};return body.transferRevision?{customToken:'signed-token'}:{transferRequired:true,revision:'11111111-1111-4111-8111-111111111111'};}};
@@ -100,7 +100,7 @@ test('client cancellation leaves the current device untouched; confirmation bind
 });
 
 test('fresh password login acquires directly while restored sessions refresh authority once', async () => {
- const { DeviceSessionController }=await import('../../assets/js/controllers/DeviceSessionController.js');
+ const { DeviceSessionController }=await import('../../assets/js/controllers/accounts/DeviceSessionController.js');
  const refreshes=[],calls=[],storage=new Map();
  const user={uid:'student',getIdTokenResult:async force=>{refreshes.push(force);return {claims:{firebase:{sign_in_provider:'password'}}};}};
  const signedUser={uid:'student'};
@@ -141,7 +141,7 @@ test('parallel backend reads share one authorization exchange and failed exchang
  assert.equal(await gateway.access(),'recovered-token');assert.equal(count,3);
 });
 test('displaced refresh-token sessions cannot silently reclaim a device on reload',async()=>{
- const { DeviceSessionController }=await import('../../assets/js/controllers/DeviceSessionController.js');
+ const { DeviceSessionController }=await import('../../assets/js/controllers/accounts/DeviceSessionController.js');
  let calls=0;
  const client=new DeviceSessionController({document:{},window:{},api:{call:async()=>{calls++;return {current:false};}}});
  const user={getIdTokenResult:async()=>({claims:{presenceSession:'old',firebase:{sign_in_provider:'custom'}}})};

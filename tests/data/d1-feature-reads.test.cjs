@@ -100,7 +100,7 @@ test('Firestore source pagination retains nanosecond timestamps and deterministi
 
 
 test('API hydration restores timestamps while leaving timestamp-shaped answer text untouched', async () => {
-  const { hydrateFeature } = await import('../../assets/js/controllers/FeatureReadClient.js');
+  const { hydrateFeature } = await import('../../assets/js/controllers/data/FeatureReadClient.js');
   const iso = '2026-11-04T01:00:00.000Z';
   const row = hydrateFeature({ updatedAt: iso, answers: { q0: { value: iso, answeredAt: iso } } });
   assert.equal(row.updatedAt.toMillis(), Date.parse(iso));

@@ -28,3 +28,4 @@ The main functions of Presence are:
 - Security and activity tracking: Account permissions control access to features, while administrative activity records help track important changes.
 
 - Android updates: The app checks for new versions and lets users download and install available updates.
+- Frontend modules in `assets/js/controllers/` are grouped by feature (attendance, reports, accounts, admin, dashboard, data, events, fines, location, notifications, students, surveys and UI). Shared policies in `assets/js/core/` are grouped by accounts, attendance, dashboard, security, shared utilities and students.

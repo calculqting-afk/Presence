@@ -98,7 +98,7 @@ test('push HTTP endpoint blocks unauthenticated sends, unknown origins, disabled
   assert.equal((await handle(request('{}',{Authorization:'Bearer test'}),env)).status,200);assert.equal(registrations,1);
 });
 test('native push cancels legacy alarms only after successful binding; website stays permission-free; taps and logout are scoped to owner',async()=>{
-  const {PushAttendanceNotifications,stopAttendancePush}=await import('../../assets/js/controllers/PushAttendanceNotifications.js');
+  const {PushAttendanceNotifications,stopAttendancePush}=await import('../../assets/js/controllers/notifications/PushAttendanceNotifications.js');
   const callbacks={},calls=[],storage=new Map();let user={uid:'student',getIdToken:async()=> 'test-token'};
   const push={addListener:async(name,fn)=>{callbacks[name]=fn;return {remove:async()=>{}};},createChannel:async()=>{},checkPermissions:async()=>({receive:'granted'}),register:async()=>{},unregister:async()=>calls.push('unregister'),removeAllDeliveredNotifications:async()=>{}};
   const native={isNative:true,pushNotifications:push,localNotifications:{getPending:async()=>({notifications:[{id:1,extra:{presenceAttendance:true}},{id:2}]}),cancel:async value=>calls.push(value.notifications)}};

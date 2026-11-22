@@ -9,8 +9,8 @@ const stamp = value => ({ toDate: () => new Date(value) });
 const event = { id: 'event-1', name: 'Campus assembly', date: '2026-10-17', timeIn: '08:00', timeOut: '17:00', audience: 'All students', location: 'Campus hall', attendanceRoster: { a: '2A', b: '2A', c: '2B' } };
 const students = ['a', 'b', 'c'].map((uid, index) => ({ uid, accountId: `2026-${index}`, firstName: ['Ana', 'Ben', 'José'][index], lastName: ['Zulu', 'Bravo', 'Peña'][index], section: '3A', course: 'BSInfo Tech', birthday: 'SECRET-BIRTHDAY', password: 'SECRET-PASSWORD' }));
 async function serviceAt(time = '2026-10-17T04:00:00Z') {
-  const { AttendanceReportService } = await import('../../assets/js/controllers/AttendanceReportService.js');
-  const { AttendanceSummaryService } = await import('../../assets/js/controllers/AttendanceSummaryService.js');
+  const { AttendanceReportService } = await import('../../assets/js/controllers/reports/AttendanceReportService.js');
+  const { AttendanceSummaryService } = await import('../../assets/js/controllers/reports/AttendanceSummaryService.js');
   const checkoutCloseDate = () => new Date('2026-10-17T09:00:00Z'), now = () => new Date(time);
   return new AttendanceReportService({ summary: new AttendanceSummaryService({ closeDate: checkoutCloseDate, checkoutCloseDate, now }), checkoutCloseDate, now });
 }
@@ -105,7 +105,7 @@ test('missing profiles with saved attendance retain identity snapshots and times
   assert.equal(report.totals.present, 1); assert.equal(report.totals.review, 1); assert.equal(report.totals.absent, 0);
 });
 test('projection preserves missing-profile roster entries under review and excludes them from absence filter', async () => {
-  const { AttendanceRecordProjectionService } = await import('../../assets/js/controllers/AttendanceRecordProjectionService.js');
+  const { AttendanceRecordProjectionService } = await import('../../assets/js/controllers/reports/AttendanceRecordProjectionService.js');
   const projection = new AttendanceRecordProjectionService({ getEvents: () => [event], getStudents: () => students.filter(student => student.uid !== 'c'), checkoutCloseDate: () => new Date(1000), now: () => new Date(2000) });
   const review = projection.project([], { status: 'review', section: '2B' });
   assert.equal(review.length, 1); assert.equal(review[0].profileMissing, true); assert.equal(review[0].status, 'review'); assert.equal(review[0].rosterSection, '2B');
@@ -115,7 +115,7 @@ test('projection preserves missing-profile roster entries under review and exclu
   assert.equal(projection.project([saved]).filter(record => record.studentUid === 'c').length, 1);
 });
 test('no-check-in view can include pending roster rows without inventing absences or duplicating arrivals', async () => {
-  const { AttendanceRecordProjectionService } = await import('../../assets/js/controllers/AttendanceRecordProjectionService.js');
+  const { AttendanceRecordProjectionService } = await import('../../assets/js/controllers/reports/AttendanceRecordProjectionService.js');
   const projection = new AttendanceRecordProjectionService({ getEvents: () => [event], getStudents: () => students,
     checkoutCloseDate: () => new Date('2026-10-17T09:00:00Z'), now: () => new Date('2026-10-17T04:00:00Z') });
   assert.equal(projection.project([checkIn]).length, 1);
@@ -167,7 +167,7 @@ async function isolated(relative, sdk = {}) {
 }
 test('combined repository verifies both sessions, keeps duplicate-student records separate and cleans all listeners', async () => {
   const callbacks=[];let stopped=0;
-  const {AttendanceReportRepository}=await isolated('assets/js/controllers/AttendanceReportRepository.js',{onSnapshot:(ref,options,receive)=>{callbacks.push(receive);return ()=>{stopped++;};}});
+  const {AttendanceReportRepository}=await isolated('assets/js/controllers/reports/AttendanceReportRepository.js',{onSnapshot:(ref,options,receive)=>{callbacks.push(receive);return ()=>{stopped++;};}});
   const updates=[],repository=new AttendanceReportRepository({});
   const stop=repository.watchSessions([{id:'morning'},{id:'afternoon'}],event=>[event.id],update=>updates.push(update),()=>{});
   const meta={fromCache:false,hasPendingWrites:false};
@@ -184,7 +184,7 @@ test('combined repository verifies both sessions, keeps duplicate-student record
 
 test('report repository watches full event scope, verifies metadata, caps overflow and cleans up', async () => {
   const watches = []; let stopped = 0;
-  const { AttendanceReportRepository } = await isolated('assets/js/controllers/AttendanceReportRepository.js', { onSnapshot: (reference, options, receive, fail) => { watches.push({ reference, options, receive, fail }); return () => stopped++; } });
+  const { AttendanceReportRepository } = await isolated('assets/js/controllers/reports/AttendanceReportRepository.js', { onSnapshot: (reference, options, receive, fail) => { watches.push({ reference, options, receive, fail }); return () => stopped++; } });
   const updates = [], repository = new AttendanceReportRepository({});
   const stop = repository.watch(event.id, [event.id, 'old-event'], update => updates.push(update), () => {});
   assert.equal(watches.length, 2); assert.match(JSON.stringify(watches[1].reference), /5001/); assert.match(JSON.stringify(watches[1].reference), /old-event/);
@@ -208,7 +208,7 @@ function element() {
 }
 
 test('multi-day workbook has ten chronological simple session sheets and safe printable headings', async () => {
-  const { AttendanceExcelExporter } = await import('../../assets/js/controllers/AttendanceExcelExporter.js');
+  const { AttendanceExcelExporter } = await import('../../assets/js/controllers/reports/AttendanceExcelExporter.js');
   const base = snapshot(await serviceAt('2026-10-18T12:00:00Z'), [{ ...checkIn, checkedOutAt: stamp('2026-10-17T01:05:00Z') }]);
   const reports = [];
   for (let day = 1; day <= 5; day++) for (const session of ['Morning', 'Afternoon']) reports.unshift({ ...base,
@@ -229,7 +229,7 @@ test('multi-day workbook has ten chronological simple session sheets and safe pr
 });
 
 test('simple workbook preserves unknown outcomes and uses safe unique worksheet names', async () => {
-  const { AttendanceExcelExporter } = await import('../../assets/js/controllers/AttendanceExcelExporter.js');
+  const { AttendanceExcelExporter } = await import('../../assets/js/controllers/reports/AttendanceExcelExporter.js');
   const pending = snapshot(await serviceAt()); pending.event.name = '=Test [event] / ? * : \\ '.repeat(3);
   pending.rows[0].exportName = '=HYPERLINK("x","y")';
   const parts = excelParts(await new AttendanceExcelExporter().generateSessions([pending, pending]));
@@ -244,7 +244,7 @@ test('simple workbook preserves unknown outcomes and uses safe unique worksheet 
 });
 
 test('multi-session selector gates on server verification, invalidates changes, and ignores closed callbacks', async () => {
-  const { AttendanceWorkbookController } = await import('../../assets/js/controllers/AttendanceWorkbookController.js');
+  const { AttendanceWorkbookController } = await import('../../assets/js/controllers/reports/AttendanceWorkbookController.js');
   const document = element(); document.body = element(); document.createElement = element;
   const context = { events: [event], students, studentsReady: true, filters: { event: event.id, status: 'late', search: 'Ana' } };
   let receive, stopped = 0, online = true, captured, delivered = 0;
@@ -265,7 +265,7 @@ test('multi-session selector gates on server verification, invalidates changes, 
   assert.equal(controller.dialog, null); assert.equal(controller.reports, null);
 });
 test('report controller blocks stale/offline export, freezes full snapshot and disposes late callbacks', async () => {
-  const { AttendanceReportController } = await isolated('assets/js/controllers/AttendanceReportController.js');
+  const { AttendanceReportController } = await isolated('assets/js/controllers/reports/AttendanceReportController.js');
   const document = element(); document.body = element(); document.createElement = element;
   const window = element(); Object.assign(window, { setInterval: () => 1, clearInterval() {}, setTimeout: () => 2, clearTimeout() {} });
   let receive, stopped = 0, online = true, allowed = true, generated, finish, delivered = 0;
@@ -288,7 +288,7 @@ test('report controller blocks stale/offline export, freezes full snapshot and d
   controller.dispose();
 });
 test('native PDF handoff uses save/share bridge, respects cancellation and rejects oversized files', async () => {
-  const { AttendanceReportFileService } = await import('../../assets/js/controllers/AttendanceReportFileService.js');
+  const { AttendanceReportFileService } = await import('../../assets/js/controllers/reports/AttendanceReportFileService.js');
   const calls = [], files = new AttendanceReportFileService({ native: () => ({ isNative: true, attendancePdf: { save: async value => { calls.push(value); return { cancelled: true }; }, share: async value => { calls.push(value); return { started: true }; } } }) });
   const bytes = new TextEncoder().encode('%PDF-test');
   assert.equal((await files.deliver(bytes, 'test.pdf')).cancelled, true);
@@ -297,7 +297,7 @@ test('native PDF handoff uses save/share bridge, respects cancellation and rejec
   await assert.rejects(files.deliver(new Uint8Array(10 * 1024 * 1024 + 1), 'test.pdf'), /10 MB/);
 });
 test('PDF footer includes all four schedule times instead of the old snapshot/timezone text', async () => {
-  const { AttendancePdfExporter } = await import('../../assets/js/controllers/AttendancePdfExporter.js');
+  const { AttendancePdfExporter } = await import('../../assets/js/controllers/reports/AttendancePdfExporter.js');
   const service = await serviceAt();
   const report = snapshot(service, [], { event: { ...event, timeIn: '07:10', checkInCutoff: '07:30', timeOut: '11:10', checkOutCutoff: '11:25' } });
   const exporter = new AttendancePdfExporter();
@@ -310,7 +310,7 @@ test('PDF footer includes all four schedule times instead of the old snapshot/ti
 });
 
 test('PDF header uses readable Philippine dates, hides unused filters and keeps totals and useful warnings', async () => {
-  const { AttendancePdfExporter } = await import('../../assets/js/controllers/AttendancePdfExporter.js');
+  const { AttendancePdfExporter } = await import('../../assets/js/controllers/reports/AttendancePdfExporter.js');
   const exporter = new AttendancePdfExporter(), report = snapshot(await serviceAt());
   const header = exporter.header(report);
   assert.equal(header.filters, 'Session: Morning'); assert.match(header.schedule, /Oct 17, 2026/);
@@ -322,7 +322,7 @@ test('PDF header uses readable Philippine dates, hides unused filters and keeps 
 });
 
 test('actual PDF generator produces multiple pages, local embedded Unicode font and rejects unsupported glyphs', async () => {
-  const { AttendancePdfExporter } = await import('../../assets/js/controllers/AttendancePdfExporter.js');
+  const { AttendancePdfExporter } = await import('../../assets/js/controllers/reports/AttendancePdfExporter.js');
   const library = file => { const module = { exports: {} }; new Function('module', 'exports', fs.readFileSync(path.join(root, 'assets/vendor', file), 'utf8'))(module, module.exports); return module.exports; };
   const runtime = { PDFLib: library('pdf-lib.min.js'), fontkit: library('fontkit.umd.min.js') };
   const assets = { load: async () => ({ pdf: runtime.PDFLib, fontkit: runtime.fontkit, font: new Uint8Array(fs.readFileSync(path.join(root, 'assets/fonts/NotoSans-Regular.ttf'))), logo: new Uint8Array(fs.readFileSync(path.join(root, 'assets/images/presence-logo.png'))) }) };
@@ -355,7 +355,7 @@ function excelParts(bytes) {
   return parts;
 }
 test('Excel is a real XLSX with typed Philippine dates, text IDs and no private profile fields', async () => {
-  const { AttendanceExcelExporter } = await import('../../assets/js/controllers/AttendanceExcelExporter.js');
+  const { AttendanceExcelExporter } = await import('../../assets/js/controllers/reports/AttendanceExcelExporter.js');
   const report = snapshot(await serviceAt(), [{ ...checkIn, checkedOutAt: stamp('2026-10-17T01:05:00Z'), status: 'completed' }]);
   const record = report.rows.find(row => row.studentId === '2026-0');
   assert.equal(record.checkInIso, '2026-10-17T00:01:00.000Z');
@@ -373,7 +373,7 @@ test('Excel is a real XLSX with typed Philippine dates, text IDs and no private 
   assert.doesNotMatch([...parts.values()].join(''), /SECRET-|MUST-NOT-EXPORT|INTERNAL-UID|studentUid|authEmail/);
 });
 test('Excel exports all matching rows, literal formula-like text, Unicode and unknown year without guessing', async () => {
-  const { AttendanceExcelExporter } = await import('../../assets/js/controllers/AttendanceExcelExporter.js');
+  const { AttendanceExcelExporter } = await import('../../assets/js/controllers/reports/AttendanceExcelExporter.js');
   const report = snapshot(await serviceAt(), [checkIn]);
   report.rows = Array.from({ length: 80 }, (_, i) => ({ ...report.rows[0], studentId: `000${i}`, name: '=HYPERLINK("https://example.test","José <Peña> 🦄")', course: 'BS Info Tech', section: i ? '2B' : 'Unknown' }));
   report.totals.rows = 80;
@@ -386,7 +386,7 @@ test('Excel exports all matching rows, literal formula-like text, Unicode and un
   await assert.rejects(new AttendanceExcelExporter().generate({ ...report, rows: Array(5001).fill(report.rows[0]) }), /5,000/);
 });
 test('Excel both-session workbook separates morning/afternoon and preserves the filtered roster', async () => {
-  const { AttendanceExcelExporter } = await import('../../assets/js/controllers/AttendanceExcelExporter.js');
+  const { AttendanceExcelExporter } = await import('../../assets/js/controllers/reports/AttendanceExcelExporter.js');
   const report = snapshot(await serviceAt(), [checkIn], { filters: { course: 'BS Info Tech', section: '2A' } });
   report.filters.session = 'Both sessions';
   report.rows = [{ ...report.rows[0], name: 'Morning student', sessionLabel: 'Morning' }, { ...report.rows[0], name: 'Afternoon student', sessionLabel: 'Afternoon' }];
@@ -397,7 +397,7 @@ test('Excel both-session workbook separates morning/afternoon and preserves the 
   assert.match(parts.get('xl/worksheets/sheet1.xml'), /BS Info Tech/);
 });
 test('Excel export is server-gated, snapshot-frozen, and shares a duplicate-submit lock with PDF', async () => {
-  const { AttendanceReportController } = await isolated('assets/js/controllers/AttendanceReportController.js');
+  const { AttendanceReportController } = await isolated('assets/js/controllers/reports/AttendanceReportController.js');
   const document = element(); document.body = element(); document.createElement = element;
   const window = element(); Object.assign(window, { setInterval: () => 1, clearInterval() {}, setTimeout: () => 2, clearTimeout() {} });
   let receive, online = true, allowed = true, captured, finish, delivered = 0;
@@ -417,7 +417,7 @@ test('Excel export is server-gated, snapshot-frozen, and shares a duplicate-subm
   allowed = false; await controller.exportExcel(); assert.equal(delivered, 1); controller.dispose();
 });
 test('Excel Android delivery uses a separate save bridge and safely rejects old APKs and invalid files', async () => {
-  const { AttendanceExcelFileService } = await import('../../assets/js/controllers/AttendanceExcelFileService.js');
+  const { AttendanceExcelFileService } = await import('../../assets/js/controllers/reports/AttendanceExcelFileService.js');
   let saved;
   const files = new AttendanceExcelFileService({ native: () => ({ isNative: true, attendanceSpreadsheet: { save: async value => { saved = value; return { cancelled: true }; } } }) });
   assert.equal((await files.deliver(new Uint8Array([80, 75, 3, 4]), 'report.xlsx')).cancelled, true);
@@ -439,7 +439,7 @@ test('invalid-duration and wrong-day records remain review in filters, PDF and b
   assert.equal(report.rows.find(row => row.studentUid === 'b').status, 'completed');
   assert.equal(snapshot(service, [invalid, subMinute, wrongDay], { filters: { status: 'review' } }).rows.length, 2);
   assert.deepEqual(snapshot(service, [invalid, subMinute, wrongDay], { filters: { status: 'completed' } }).rows.map(row => row.studentUid), ['b']);
-  const { AttendanceExcelExporter } = await import('../../assets/js/controllers/AttendanceExcelExporter.js');
+  const { AttendanceExcelExporter } = await import('../../assets/js/controllers/reports/AttendanceExcelExporter.js');
   const workbook = excelParts(await new AttendanceExcelExporter().generateSessions([report]));
   assert.match(workbook.get('xl/worksheets/sheet1.xml'), /Needs review — invalid duration/);
   assert.match(workbook.get('xl/worksheets/sheet1.xml'), /Needs review — event date mismatch/);

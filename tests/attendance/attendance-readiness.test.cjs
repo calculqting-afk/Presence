@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 async function fixture(options = {}) {
-  const { AttendanceReadinessController } = await import('../../assets/js/controllers/AttendanceReadinessController.js');
+  const { AttendanceReadinessController } = await import('../../assets/js/controllers/attendance/AttendanceReadinessController.js');
   const fields = new Map();
   const field = selector => { if (!fields.has(selector)) fields.set(selector, { textContent: '', disabled: false, hidden: false }); return fields.get(selector); };
   const dialog = Object.assign(new EventTarget(), { querySelector: field, setAttribute() {}, showModal() {}, close() {}, remove() {} });

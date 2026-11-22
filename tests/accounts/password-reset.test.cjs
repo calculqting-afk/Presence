@@ -4,7 +4,7 @@ const { webcrypto } = require('node:crypto');
 globalThis.crypto ||= webcrypto;
 const operationId = '11111111-1111-4111-8111-111111111111';
 test('browser fetch keeps its global receiver for reset and password completion', async()=>{
-  const { PasswordResetApi } = await import('../../assets/js/controllers/PasswordResetApi.js');
+  const { PasswordResetApi } = await import('../../assets/js/controllers/accounts/PasswordResetApi.js');
   const originalFetch = globalThis.fetch, calls = [];
   try {
     globalThis.fetch = async function(url, options) {
@@ -25,7 +25,7 @@ test('browser fetch keeps its global receiver for reset and password completion'
   } finally { globalThis.fetch = originalFetch; }
 });
 test('session calls reuse SDK-managed tokens without weakening the reset default', async()=>{
-  const { PasswordResetApi } = await import('../../assets/js/controllers/PasswordResetApi.js');
+  const { PasswordResetApi } = await import('../../assets/js/controllers/accounts/PasswordResetApi.js');
   const refreshes=[];
   const user={getIdToken:async force=>{refreshes.push(force);return 'opaque-test-token';}};
   const api=new PasswordResetApi({fetcher:async()=>Response.json({ok:true})});

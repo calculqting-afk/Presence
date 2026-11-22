@@ -13,9 +13,9 @@ async function fixture({ resubmit = false } = {}) {
     doc: (...args) => args, getDoc: async ref => ({ exists: () => !ref.includes('policyAcceptances'), data: () => ({ uid: 'new-user', status: 'declined' }) }), serverTimestamp: () => 'SERVER',
     setDoc: save, updateDoc: save, writeBatch() { let data; return { set(ref, value) { if (!ref.includes('policyAcceptances')) data=value; }, update(ref, value) { data=value; }, commit: () => save(null,data) }; } };
   const context = vm.createContext({ FormData: class { constructor(form) { return Object.entries(form.values); } } });
-  const entry = new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/controllers/RegistrationController.js'), 'utf8'), { context });
+  const entry = new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/controllers/accounts/RegistrationController.js'), 'utf8'), { context });
   await entry.link(specifier => {
-    if (/\/(GenderPolicy|StudentPersonalInfo|PolicyAgreementPolicy)\.js$/.test(specifier)) return new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/core', path.basename(specifier)), 'utf8'), { context });
+    if (/\/(GenderPolicy|StudentPersonalInfo|PolicyAgreementPolicy)\.js$/.test(specifier)) return new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/core', path.basename(specifier) === 'PolicyAgreementPolicy.js' ? 'accounts' : 'students', path.basename(specifier)), 'utf8'), { context });
     const exports = specifier.endsWith('CoursePolicy.js') ? { CoursePolicy: { normalize: value => value } } : sdk;
     return new vm.SyntheticModule(Object.keys(exports), function() { for (const [key, value] of Object.entries(exports)) this.setExport(key, value); }, { context });
   });

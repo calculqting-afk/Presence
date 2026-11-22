@@ -1,7 +1,7 @@
 import { SafeError, digest } from './firebase.js';
 import { ResetService, isSuperAuthority } from './service.js';
-import { hasPermission } from '../../../assets/js/core/permissions.js';
-import { ACTIVITY_ACTIONS } from '../../../assets/js/controllers/ActivityRecordPolicy.js';
+import { hasPermission } from '../../../assets/js/core/security/permissions.js';
+import { ACTIVITY_ACTIONS } from '../../../assets/js/controllers/admin/ActivityRecordPolicy.js';
 
 const id = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 const pick = (value, keys) => Object.fromEntries(keys.filter(key => value?.[key] !== undefined).map(key => [key, value[key]]));

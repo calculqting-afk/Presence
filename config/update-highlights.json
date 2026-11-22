@@ -1,4 +1,9 @@
 {
+  "1.8.30": [
+    "Internal app files are now organized by feature.",
+    "Updated module paths keep existing features connected.",
+    "Clean mobile builds prevent outdated files from carrying over."
+  ],
   "1.8.29": [
     "Shorter, clearer password-reset instructions.",
     "Simpler Message admin button for password help."

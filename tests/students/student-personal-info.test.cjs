@@ -1,7 +1,7 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 
 test('age is calculated by Philippine calendar birthday without storing a stale age', async () => {
-  const { studentAge, ageLabel } = await import('../../assets/js/core/StudentPersonalInfo.js');
+  const { studentAge, ageLabel } = await import('../../assets/js/core/students/StudentPersonalInfo.js');
   assert.equal(studentAge('2005-10-30', new Date('2026-10-29T15:59:59Z')), 20);
   assert.equal(studentAge('2005-10-30', new Date('2026-10-29T16:00:00Z')), 21);
   assert.equal(studentAge('2004-02-29', new Date('2025-02-28T12:00:00Z')), 20);
@@ -11,7 +11,7 @@ test('age is calculated by Philippine calendar birthday without storing a stale 
 });
 
 test('hometown is optional, bounded and trimmed; partial information remains usable', async () => {
-  const { hometownFields, hometownLabel, fillHometownForm, hometownForm } = await import('../../assets/js/core/StudentPersonalInfo.js');
+  const { hometownFields, hometownLabel, fillHometownForm, hometownForm } = await import('../../assets/js/core/students/StudentPersonalInfo.js');
   assert.deepEqual(hometownFields(), { hometownBarangay: '', hometownCity: '', hometownProvince: '' });
   const expected = { hometownBarangay: 'San Juan', hometownCity: 'Bontoc', hometownProvince: 'Southern Leyte' };
   assert.deepEqual(hometownFields({ ...expected, hometownCity: ' Bontoc ' }), expected);

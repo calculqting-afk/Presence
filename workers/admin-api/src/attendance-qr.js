@@ -1,8 +1,8 @@
 import { SafeError, digest } from './firebase.js';
 import { ResetService, isSuperAuthority } from './service.js';
 import { requireActiveDevice, sessionAuthTime } from './device-session.js';
-import { EventAudiencePolicy } from '../../../assets/js/controllers/EventAudiencePolicy.js';
-import { PolicyAgreementPolicy } from '../../../assets/js/core/PolicyAgreementPolicy.js';
+import { EventAudiencePolicy } from '../../../assets/js/controllers/events/EventAudiencePolicy.js';
+import { PolicyAgreementPolicy } from '../../../assets/js/core/accounts/PolicyAgreementPolicy.js';
 import { requireDuring } from './during-attendance.js';
 
 const DISPLAY_TTL = 30 * 60 * 1000;

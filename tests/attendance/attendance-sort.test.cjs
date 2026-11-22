@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 
 test('attendance ordering uses exact arrival time, handles legacy/missing timestamps and keeps ties stable', async () => {
-  const { AttendanceSort } = await import('../../assets/js/controllers/AttendanceSort.js');
+  const { AttendanceSort } = await import('../../assets/js/controllers/attendance/AttendanceSort.js');
   const records = [
     { id: 'first', name: 'Zoe', checkedInAt: { seconds: 10, nanoseconds: 1000000 }, checkedOutAt: new Date(90000) },
     { id: 'last', name: 'Ana', checkedInAt: { seconds: 10, nanoseconds: 2000000 } },

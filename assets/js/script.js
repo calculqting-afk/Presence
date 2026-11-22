@@ -1,4 +1,4 @@
-import('./controllers/LoginController.js').then(({ LoginController }) => {
+import('./controllers/accounts/LoginController.js').then(({ LoginController }) => {
   const login = new LoginController();
   login.initialize();
 }).catch(() => {

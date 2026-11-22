@@ -21,7 +21,7 @@ test('both dashboards have one decorative mascot with motion fallback and no pau
 });
 
 test('mascot speech follows the current eligible session, upcoming gap and closed schedule', async () => {
-  const { mascotEventMessage } = await import('../../assets/js/controllers/PresenceMascotController.js');
+  const { mascotEventMessage } = await import('../../assets/js/controllers/ui/PresenceMascotController.js');
   const events = [
     {id:'morning',date:'2026-11-02',name:'Campus day — Morning',sessionBaseName:'Campus day',sessionGroupId:'day',sessionPeriod:'morning',timeIn:'07:00',timeOut:'11:00',checkOutCutoff:'12:00',audienceSections:['2A']},
     {id:'afternoon',date:'2026-11-02',name:'Campus day — Afternoon',sessionBaseName:'Campus day',sessionGroupId:'day',sessionPeriod:'afternoon',timeIn:'13:00',timeOut:'16:00',checkOutCutoff:'17:00',audienceSections:['2A']}
@@ -39,7 +39,7 @@ test('mascot speech follows the current eligible session, upcoming gap and close
 });
 
 test('tap reactions are bounded, safe, keyboard-ready and yield to real progress feedback', async () => {
-  const { PresenceMascotController } = await import('../../assets/js/controllers/PresenceMascotController.js');
+  const { PresenceMascotController } = await import('../../assets/js/controllers/ui/PresenceMascotController.js');
   const timers = new Map(), handlers = new Map(), mascot = {dataset:{}}, button = {dataset:{},closest:()=>null,
     addEventListener:(name,fn)=>handlers.set(name,fn),removeEventListener:name=>handlers.delete(name)};
   const bubble = {hidden:true,textContent:'',set innerHTML(_value){throw Error('Speech must be plain text');}};
@@ -72,7 +72,7 @@ test('mascot floats with transforms and disables all motion for reduced motion',
 });
 
 test('busy cleanup cannot erase a confirmed mascot result and reactions clean up', async () => {
-  const { PresenceMascotController, mascotStateForFeedback, mascotMarkup } = await import('../../assets/js/controllers/PresenceMascotController.js');
+  const { PresenceMascotController, mascotStateForFeedback, mascotMarkup } = await import('../../assets/js/controllers/ui/PresenceMascotController.js');
   const timers = new Map(), listeners = new Map(), mascot = { dataset: {} };
   let sequence = 0;
   const controller = new PresenceMascotController({

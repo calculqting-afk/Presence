@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, '../../assets/js/controllers/ThemeController.js'), 'utf8')
+const source = fs.readFileSync(path.join(__dirname, '../../assets/js/controllers/ui/ThemeController.js'), 'utf8')
   + '\n' + fs.readFileSync(path.join(__dirname, '../../assets/js/theme.js'), 'utf8');
 
 function page(saved, blocked = false) {
@@ -73,9 +73,9 @@ test('login and both dashboards load one shared controller before CSS with one a
     const html = fs.readFileSync(filename, 'utf8');
     const scriptPaths = [...html.matchAll(/<script src="([^"]+)"/g)].map(match => match[1]);
     assert.equal(scriptPaths.length, file === 'index.html' ? 4 : 2, file);
-    assert.ok(scriptPaths[0].includes('controllers/ThemeController.js?v=20261010-shared-theme'), file);
+    assert.ok(scriptPaths[0].includes('controllers/ui/ThemeController.js?v=20261010-shared-theme'), file);
     assert.ok(scriptPaths[1].includes('theme.js?v=20261010-shared-theme'), file);
-    assert.ok(html.indexOf('controllers/ThemeController.js') < html.indexOf('rel="stylesheet"'), file);
+    assert.ok(html.indexOf('controllers/ui/ThemeController.js') < html.indexOf('rel="stylesheet"'), file);
     assert.equal([...html.matchAll(/id="themeToggle"/g)].length, 1, file);
     assert.ok(html.includes('aria-label="Switch to dark mode" aria-pressed="false"'), file);
     assert.ok(html.includes('theme-toggle.css?v=20261010-shared-theme'), file);

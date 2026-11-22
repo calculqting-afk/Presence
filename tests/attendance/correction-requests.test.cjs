@@ -46,7 +46,7 @@ async function fixture() {
     onSnapshot: (ref, options, next, error) => { liveReference = ref; listener = next; errorListener = error; return () => { unsubscribed = true; }; } };
   const context = vm.createContext({ console }), cache = new Map();
   const load = file => { if (!cache.has(file)) cache.set(file, new vm.SourceTextModule(fs.readFileSync(file, 'utf8'), { context, identifier: file })); return cache.get(file); };
-  const entry = new vm.SourceTextModule("export * from './CorrectionRequestService.js'; export * from './AttendanceCorrectionController.js'; export * from './CorrectionRequestsController.js'; export * from '../core/permissions.js';", { context, identifier: path.join(root, 'assets/js/controllers/test-entry.js') });
+  const entry = new vm.SourceTextModule("export * from './attendance/CorrectionRequestService.js'; export * from './attendance/AttendanceCorrectionController.js'; export * from './attendance/CorrectionRequestsController.js'; export * from '../core/security/permissions.js';", { context, identifier: path.join(root, 'assets/js/controllers/test-entry.js') });
   const firebase = new vm.SyntheticModule(Object.keys(sdk), function() { for (const [key, value] of Object.entries(sdk)) this.setExport(key, value); }, { context });
   await entry.link((specifier, parent) => specifier.startsWith('https:') ? firebase : load(path.resolve(path.dirname(parent.identifier), specifier.split('?')[0])));
   await entry.evaluate();

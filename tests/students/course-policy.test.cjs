@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 test('course policy standardizes verified legacy spelling without guessing other courses or mutating profiles', async () => {
-  const { CoursePolicy } = await import('../../assets/js/core/CoursePolicy.js');
+  const { CoursePolicy } = await import('../../assets/js/core/students/CoursePolicy.js');
   for (const value of ['BSInfo Tech', 'BS Info Tech', ' bsinfo tech ', 'BS INFO TECH']) assert.equal(CoursePolicy.normalize(value), 'BS Info Tech');
   for (const course of ['BSA', 'BSMB', 'BSFI']) assert.equal(CoursePolicy.normalize(course.toLowerCase()), course);
   for (const course of ['BSIT', 'BS Information Technology', 'Unknown course']) assert.equal(CoursePolicy.normalize(course), course);

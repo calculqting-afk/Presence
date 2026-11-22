@@ -3,11 +3,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const policy = import(pathToFileURL(path.resolve('assets/js/core/HometownLocationPolicy.js')).href);
+const policy = import(pathToFileURL(path.resolve('assets/js/core/students/HometownLocationPolicy.js')).href);
 const catalog = JSON.parse(fs.readFileSync('assets/data/hometown/locations.json', 'utf8'));
 
 test('catalog class shares concurrent loads and retries failed or invalid responses', async () => {
-  const { HometownCatalog } = await import(pathToFileURL(path.resolve('assets/js/controllers/HometownPickerController.js')).href);
+  const { HometownCatalog } = await import(pathToFileURL(path.resolve('assets/js/controllers/location/HometownPickerController.js')).href);
   let requests = 0;
   let finishRequest;
   const source = new HometownCatalog(async () => {

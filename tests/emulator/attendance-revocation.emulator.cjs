@@ -19,7 +19,7 @@ async function commit(entries,uid='owner',allowed=true){
 }
 
 (async()=>{
-  const {activityRecord,activitySnapshot}=await import('../../assets/js/controllers/ActivityRecordPolicy.js');
+  const {activityRecord,activitySnapshot}=await import('../../assets/js/controllers/admin/ActivityRecordPolicy.js');
   for(const [uid,role] of [['revstudent','student'],['revhead','head_admin'],['revadmin','attendance_admin'],['revmanager','student_manager']])await commit([['students/'+uid,{uid,accountId:uid,active:true,role,section:'2A'}]]);
   const id='revstudent_revevent',path='attendance/'+id;
   const original={studentUid:'revstudent',studentId:'REV1',eventId:'revevent',eventName:'Revocation test',eventDate:'2020-10-01',status:'completed',arrivalStatus:'present',checkedInAt:new Date('2020-10-01T10:00:00+08:00'),checkedOutAt:new Date('2020-10-01T10:00:00+08:00')};

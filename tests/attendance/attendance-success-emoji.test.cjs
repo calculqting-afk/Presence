@@ -11,7 +11,7 @@ test('dark theme keeps animated attendance logos transparent without changing re
   assert.match(css, /\.toast-mark\.is-mascot, \.toast-icon\.is-mascot \{[^}]*background: transparent;/);
 });
 test('attendance success toast opts into smooth animation, supports reduced motion and clears hidden animations',async()=>{
-  const {DashboardToastController}=await import('../../assets/js/controllers/DashboardToastController.js');
+  const {DashboardToastController}=await import('../../assets/js/controllers/ui/DashboardToastController.js');
   const classes=new Set(),markClasses=new Set();let html='',text='✓';
   const mark={classList:{add:name=>markClasses.add(name),remove:name=>markClasses.delete(name)},setAttribute(){},get innerHTML(){return html;},set innerHTML(value){html=value;text='';},set textContent(value){text=value;html='';},get textContent(){return text;}};
   const toast={classList:{add:name=>classes.add(name),remove:name=>classes.delete(name)},querySelector:()=>mark};
@@ -27,7 +27,7 @@ test('attendance success toast opts into smooth animation, supports reduced moti
   controller.show('Saved','Done',{attendanceSuccess:true});controller.dispose();assert.equal(classes.has('show'),false);assert.match(html,/data-mascot-state="success"/);
 });
 test('success animation is requested only by confirmed attendance branches and required public assets exist',()=>{
-  const root=path.resolve(__dirname,'../..'),source=fs.readFileSync(path.join(root,'assets/js/controllers/StudentAttendanceController.js'),'utf8');
+  const root=path.resolve(__dirname,'../..'),source=fs.readFileSync(path.join(root,'assets/js/controllers/attendance/StudentAttendanceController.js'),'utf8');
   assert.equal((source.match(/attendanceSuccess:/g)||[]).length,2);
   assert.match(source,/Checkout recorded[^\n]+attendanceSuccess: result.state !== 'existing'/);
   assert.match(source,/else showDashboardToast\([^\n]+attendanceSuccess: true/);

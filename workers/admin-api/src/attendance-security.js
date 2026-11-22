@@ -1,9 +1,9 @@
 import { sessionAuthTime } from './device-session.js';
 import { SafeError, digest } from './firebase.js';
 import { ResetService } from './service.js';
-import { GeofenceBoundary } from '../../../assets/js/controllers/GeofenceBoundary.js';
-import { EventAudiencePolicy } from '../../../assets/js/controllers/EventAudiencePolicy.js';
-import { attendanceLocationIssue } from '../../../assets/js/controllers/DeviceLocationService.js';
+import { GeofenceBoundary } from '../../../assets/js/controllers/location/GeofenceBoundary.js';
+import { EventAudiencePolicy } from '../../../assets/js/controllers/events/EventAudiencePolicy.js';
+import { attendanceLocationIssue } from '../../../assets/js/controllers/location/DeviceLocationService.js';
 
 const clean = value => Object.fromEntries(Object.entries(value).filter(([key]) => key !== '_updateTime'));
 export class AttendanceSecurityService {

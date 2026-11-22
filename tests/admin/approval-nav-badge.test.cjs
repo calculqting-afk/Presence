@@ -13,10 +13,10 @@ async function fixture() {
   const sdk = { getCountFromServer: async () => ({ data: () => ({ count: 0 }) }), collection: (db, name) => name, doc() {}, query: (...args) => args, where: (...args) => args, serverTimestamp() {}, updateDoc() {}, writeBatch() {},
     onSnapshot(ref, success, failed) { reads++; reference = ref; next = success; error = failed; return () => stopped++; } };
   const context = vm.createContext({});
-  const controller = new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/controllers/AccountApprovalController.js'), 'utf8'), { context });
+  const controller = new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/controllers/admin/AccountApprovalController.js'), 'utf8'), { context });
   await controller.link(specifier => {
-    if (specifier.endsWith('/PendingRequestsWatch.js')) return new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/controllers/PendingRequestsWatch.js'), 'utf8'), { context });
-    if (/\/(GenderPolicy|StudentPersonalInfo)\.js$/.test(specifier)) return new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/core', path.basename(specifier)), 'utf8'), { context });
+    if (specifier.endsWith('/PendingRequestsWatch.js')) return new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/controllers/admin/PendingRequestsWatch.js'), 'utf8'), { context });
+    if (/\/(GenderPolicy|StudentPersonalInfo)\.js$/.test(specifier)) return new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/core/students', path.basename(specifier)), 'utf8'), { context });
     const exports = specifier.startsWith('https:') ? sdk : { CoursePolicy: { profile: value => value } };
     return new vm.SyntheticModule(Object.keys(exports), function() { for (const [key, value] of Object.entries(exports)) this.setExport(key, value); }, { context });
   });
@@ -66,7 +66,7 @@ test('closed request pages use aggregate counts, visibility stops detail reads, 
   let now = 0, counts = 0, opened = 0, closed = 0, timer;
   const events = new Map(), labels = [], context = vm.createContext({});
   const sdk = new vm.SyntheticModule(['getCountFromServer'], function () { this.setExport('getCountFromServer', async () => { counts++; return { data: () => ({ count: 3 }) }; }); }, { context });
-  const module = new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/controllers/PendingRequestsWatch.js'), 'utf8'), { context });
+  const module = new vm.SourceTextModule(fs.readFileSync(path.join(root, 'assets/js/controllers/admin/PendingRequestsWatch.js'), 'utf8'), { context });
   await module.link(() => sdk); await module.evaluate();
   const window = { addEventListener: (name, fn) => events.set(name, fn), removeEventListener: name => events.delete(name), setInterval: fn => { timer = fn; return 1; }, clearInterval() {} };
   const document = { visibilityState: 'visible', addEventListener: (name, fn) => events.set(name, fn), removeEventListener: name => events.delete(name) };

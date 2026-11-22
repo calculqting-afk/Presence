@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '../..');
-const source = fs.readFileSync(path.join(root, 'assets/js/controllers/LaunchIntroController.js'), 'utf8');
+const source = fs.readFileSync(path.join(root, 'assets/js/controllers/ui/LaunchIntroController.js'), 'utf8');
 const bootstrap = fs.readFileSync(path.join(root, 'assets/js/launch-intro.js'), 'utf8');
 
 function page({ storage = new Map(), reduced = false, blocked = false, search = '' } = {}) {

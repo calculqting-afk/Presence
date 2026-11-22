@@ -43,7 +43,7 @@ function sessionOptions(profile = { active: true, role: 'student', accountId: '1
 }
 
 test('login session preserves student/viewer/admin roles and persistence choices', async () => {
-  const { LoginSessionService } = await load('assets/js/controllers/LoginSessionService.js');
+  const { LoginSessionService } = await load('assets/js/controllers/accounts/LoginSessionService.js');
   for (const role of ['student', 'viewer', 'head_admin', 'attendance_admin', 'student_manager']) {
     const options = sessionOptions({ active: true, role, accountId: '123' });
     const service = new LoginSessionService(options);
@@ -62,7 +62,7 @@ test('login session preserves student/viewer/admin roles and persistence choices
 });
 
 test('login session completes approved registration and rejects inactive students', async () => {
-  const { LoginSessionService } = await load('assets/js/controllers/LoginSessionService.js');
+  const { LoginSessionService } = await load('assets/js/controllers/accounts/LoginSessionService.js');
   const options = sessionOptions();
   let reads = 0, completed = 0;
   options.loadStudent = async () => {
@@ -78,7 +78,7 @@ test('login session completes approved registration and rejects inactive student
 });
 
 test('survey auto-resume eligibility and login error messages stay unchanged', async () => {
-  const { LoginSessionService } = await load('assets/js/controllers/LoginSessionService.js');
+  const { LoginSessionService } = await load('assets/js/controllers/accounts/LoginSessionService.js');
   const service = new LoginSessionService(sessionOptions({ active: false, role: 'head_admin' }));
   assert.equal(await service.resolveExistingRole({ uid: 'one', email: 'a@test.local' }), null);
   assert.equal(await service.resolveExistingRole({ uid: 'owner', email: 'owner@test.local', getIdTokenResult:async()=>({claims:{superAdmin:true}}) }), 'admin');
@@ -92,7 +92,7 @@ test('survey auto-resume eligibility and login error messages stay unchanged', a
 });
 
 test('Super Admin uses a server-issued claim rather than UID or email, and inactive or invented roles cannot sign in as staff',async()=>{
-  const {LoginSessionService}=await load('assets/js/controllers/LoginSessionService.js');
+  const {LoginSessionService}=await load('assets/js/controllers/accounts/LoginSessionService.js');
   const options=sessionOptions(),service=new LoginSessionService(options);
   assert.equal(await service.isSuperAdmin({uid:'impostor',email:'owner@test.local'}),false);
   assert.equal(await service.isSuperAdmin({uid:'owner',email:'changed@example.test',getIdTokenResult:async()=>({claims:{superAdmin:true}})}),true);
@@ -135,7 +135,7 @@ function browser() {
 }
 
 test('login UI initializes once, validates fields, toggles password/help and cleans up', async () => {
-  const { LoginController } = await load('assets/js/controllers/LoginController.js');
+  const { LoginController } = await load('assets/js/controllers/accounts/LoginController.js');
   const env = browser(); let calls = 0;
   const login = new LoginController({ ...env, sessionService: { authenticate() { calls++; } } });
   login.initialize(); login.initialize();
@@ -155,7 +155,7 @@ test('login UI initializes once, validates fields, toggles password/help and cle
 });
 
 test('login blocks duplicate submits and preserves student session, identity and survey routing', async () => {
-  const { LoginController } = await load('assets/js/controllers/LoginController.js');
+  const { LoginController } = await load('assets/js/controllers/accounts/LoginController.js');
   const env = browser(); let resolve, calls = 0;
   const result = { user: { uid: 'one' }, profile: { firstName: 'Test' }, session: { uid: 'one', role: 'student' } };
   const login = new LoginController({ ...env, sessionService: { authenticate() { calls++; return new Promise(done => { resolve = done; }); } } });
@@ -169,7 +169,7 @@ test('login blocks duplicate submits and preserves student session, identity and
 });
 
 test('login failures restore controls and disposal discards late authentication results', async () => {
-  const { LoginController } = await load('assets/js/controllers/LoginController.js');
+  const { LoginController } = await load('assets/js/controllers/accounts/LoginController.js');
   const env = browser();
   const service = { authenticate: async () => { throw Error('Offline'); }, errorMessage: error => error.message };
   const login = new LoginController({ ...env, sessionService: service });
@@ -186,7 +186,7 @@ test('login failures restore controls and disposal discards late authentication 
 });
 
 test('Firebase throttling pauses further login requests without treating the pause as a guaranteed unlock',async()=>{
- const {LoginController}=await load('assets/js/controllers/LoginController.js');
+ const {LoginController}=await load('assets/js/controllers/accounts/LoginController.js');
  const env=browser();let attempts=0;
  const service={authenticate:async()=>{attempts++;throw Object.assign(Error('Limited'),{code:'auth/too-many-requests'});},errorMessage:()=> 'Too many attempts. Firebase controls when sign-in resumes.'};
  const login=new LoginController({...env,sessionService:service});login.initialize();env.element('#accountId').value='123';env.element('#password').value='new-password';
@@ -196,7 +196,7 @@ test('Firebase throttling pauses further login requests without treating the pau
 });
 
 test('dashboard state owns view/session updates and retains shared session resources', async () => {
-  const { DashboardState } = await load('assets/js/core/DashboardState.js');
+  const { DashboardState } = await load('assets/js/core/dashboard/DashboardState.js');
   const updates = [], state = new DashboardState({ onChange: value => updates.push(value) });
   state.mediaStream = { stop() {} };
   state.setSession({ user: { uid: 'one' }, role: 'student', profile: { firstName: 'Test' } });

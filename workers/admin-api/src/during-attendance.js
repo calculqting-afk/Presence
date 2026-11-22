@@ -2,11 +2,11 @@ import { SafeError } from './firebase.js';
 import { ResetService, isSuperAuthority } from './service.js';
 import { requireActiveDevice } from './device-session.js';
 import { AttendanceSecurityService } from './attendance-security.js';
-import { DuringAttendancePolicy, duringTime } from '../../../assets/js/core/DuringAttendancePolicy.js';
-import { EventAudiencePolicy } from '../../../assets/js/controllers/EventAudiencePolicy.js';
-import { GeofenceBoundary } from '../../../assets/js/controllers/GeofenceBoundary.js';
-import { attendanceLocationIssue } from '../../../assets/js/controllers/DeviceLocationService.js';
-import { PolicyAgreementPolicy } from '../../../assets/js/core/PolicyAgreementPolicy.js';
+import { DuringAttendancePolicy, duringTime } from '../../../assets/js/core/attendance/DuringAttendancePolicy.js';
+import { EventAudiencePolicy } from '../../../assets/js/controllers/events/EventAudiencePolicy.js';
+import { GeofenceBoundary } from '../../../assets/js/controllers/location/GeofenceBoundary.js';
+import { attendanceLocationIssue } from '../../../assets/js/controllers/location/DeviceLocationService.js';
+import { PolicyAgreementPolicy } from '../../../assets/js/core/accounts/PolicyAgreementPolicy.js';
 
 export function requireDuring(event, record, now, uid, eventId) {
   if (!event?.duringAttendance?.enabled || !DuringAttendancePolicy.validWindow(event, event.duringAttendance)

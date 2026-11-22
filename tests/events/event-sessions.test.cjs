@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { pathToFileURL } = require('node:url');
 const path = require('node:path');
-const load = () => import(pathToFileURL(path.resolve(__dirname, '../../assets/js/controllers/EventSessionPolicy.js')));
+const load = () => import(pathToFileURL(path.resolve(__dirname, '../../assets/js/controllers/events/EventSessionPolicy.js')));
 const now = new Date('2026-10-20T06:00:00');
 const stamp = date => ({ toDate: () => date });
 const record = () => ({ name:'Intramurals', date:'2026-10-20', timeIn:'07:00', checkInCutoff:'09:00', timeOut:'11:00', checkOutCutoff:'12:10',
@@ -101,7 +101,7 @@ test('finished sessions can extend the late cutoff without reopening attendance 
 
 test('report scopes keep morning and afternoon separate instead of consolidating their students', async () => {
   const {EventSessionPolicy:Policy}=await load();
-  const {AttendanceReportService}=await import(pathToFileURL(path.resolve(__dirname,'../../assets/js/controllers/AttendanceReportService.js')));
+  const {AttendanceReportService}=await import(pathToFileURL(path.resolve(__dirname,'../../assets/js/controllers/reports/AttendanceReportService.js')));
   const plan=Policy.prepare(options());
   const morning={...plan.primary,id:'group'},afternoon={...plan.afternoon,id:'group_afternoon'};
   const service=new AttendanceReportService({});
@@ -124,7 +124,7 @@ test('afternoon-only creates a single primary session and rejects a pre-noon sch
 
 test('cards show both schedules and mark the session matching the current time', async () => {
   const {EventSessionPolicy:Policy}=await load();
-  const {EventSchedulePresenter}=await import(pathToFileURL(path.resolve(__dirname,'../../assets/js/controllers/EventSchedulePresenter.js')));
+  const {EventSchedulePresenter}=await import(pathToFileURL(path.resolve(__dirname,'../../assets/js/controllers/events/EventSchedulePresenter.js')));
   const plan=Policy.prepare(options()),morning={...plan.primary,id:'group'},afternoon={...plan.afternoon,id:'group_afternoon'};
   const presenter=new EventSchedulePresenter({formatTime:value=>value,escapeHtml:String,addMinutes:value=>value,now:()=>+afternoon.openAt.toDate()+60000});
   const html=presenter.render(afternoon,[morning,afternoon]);

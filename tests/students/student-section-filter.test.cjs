@@ -2,7 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 function node(){const listeners=new Map();return {listeners,innerHTML:'',textContent:'',open:false,addEventListener:(name,fn)=>listeners.set(name,fn),removeEventListener:name=>listeners.delete(name),emit(name,event){listeners.get(name)?.(event);}};}
 async function fixture(){
-  const {StudentSectionFilter}=await import('../../assets/js/controllers/StudentSectionFilter.js');
+  const {StudentSectionFilter}=await import('../../assets/js/controllers/students/StudentSectionFilter.js');
   const root=node(),document=node(),label=node(),options=node(),summary={focus(){this.focused=true;}};
   root.querySelector=selector=>selector==='summary'?summary:selector==='[data-section-options]'?options:label;
   root.contains=target=>target===root||target.inside===true;

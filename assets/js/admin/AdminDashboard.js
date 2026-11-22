@@ -1,52 +1,52 @@
-import { DuringAttendanceController } from '../controllers/DuringAttendanceController.js';
-import { duringStatusMarkup } from '../core/DuringAttendancePolicy.js';
-import { DeviceSessionController } from '../controllers/DeviceSessionController.js';
-import { D1_PRESENCE_ENABLED, PresenceClient } from '../controllers/PresenceClient.js';
-import { D1_DIRECTORY_ENABLED, StudentDirectoryClient } from '../controllers/StudentDirectoryClient.js';
+import { DuringAttendanceController } from '../controllers/attendance/DuringAttendanceController.js';
+import { duringStatusMarkup } from '../core/attendance/DuringAttendancePolicy.js';
+import { DeviceSessionController } from '../controllers/accounts/DeviceSessionController.js';
+import { D1_PRESENCE_ENABLED, PresenceClient } from '../controllers/data/PresenceClient.js';
+import { D1_DIRECTORY_ENABLED, StudentDirectoryClient } from '../controllers/data/StudentDirectoryClient.js';
 import { startAfter, limit } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
-import { authorizedPresenceSessions } from '../core/PresenceSession.js';
-import { refreshMascotContext } from '../controllers/PresenceMascotController.js';
-import { AttendanceRevocationController } from '../controllers/AttendanceRevocationController.js';
-import { AdminRecentLogin } from '../controllers/AdminRecentLogin.js';
-import { attendanceTimeIssue, attendanceReviewLabel } from '../core/AttendanceTimePolicy.js';
-import { ControllerScope } from '../core/ControllerScope.js';
-import { StableListRenderer } from '../core/StableListRenderer.js';
-import { StudentIdCorrectionController } from '../controllers/StudentIdCorrectionController.js';
-import { ActivityHistoryController } from '../controllers/ActivityHistoryController.js';
-import { ArrivalRecalculationController } from '../controllers/ArrivalRecalculationController.js';
-import { activityRecord, activitySnapshot } from '../controllers/ActivityRecordPolicy.js';
-import { CoursePolicy } from '../core/CoursePolicy.js';
-import { ageLabel, hometownLabel, hometownForm, fillHometownForm } from '../core/StudentPersonalInfo.js';
-import { GenderPolicy } from '../core/GenderPolicy.js';
-import { PasswordResetApi } from '../controllers/PasswordResetApi.js';
+import { authorizedPresenceSessions } from '../core/accounts/PresenceSession.js';
+import { refreshMascotContext } from '../controllers/ui/PresenceMascotController.js';
+import { AttendanceRevocationController } from '../controllers/attendance/AttendanceRevocationController.js';
+import { AdminRecentLogin } from '../controllers/admin/AdminRecentLogin.js';
+import { attendanceTimeIssue, attendanceReviewLabel } from '../core/attendance/AttendanceTimePolicy.js';
+import { ControllerScope } from '../core/shared/ControllerScope.js';
+import { StableListRenderer } from '../core/shared/StableListRenderer.js';
+import { StudentIdCorrectionController } from '../controllers/students/StudentIdCorrectionController.js';
+import { ActivityHistoryController } from '../controllers/admin/ActivityHistoryController.js';
+import { ArrivalRecalculationController } from '../controllers/attendance/ArrivalRecalculationController.js';
+import { activityRecord, activitySnapshot } from '../controllers/admin/ActivityRecordPolicy.js';
+import { CoursePolicy } from '../core/students/CoursePolicy.js';
+import { ageLabel, hometownLabel, hometownForm, fillHometownForm } from '../core/students/StudentPersonalInfo.js';
+import { GenderPolicy } from '../core/students/GenderPolicy.js';
+import { PasswordResetApi } from '../controllers/accounts/PasswordResetApi.js';
 import { EmailAuthProvider, reauthenticateWithCredential } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
-import { EventAudiencePolicy } from '../controllers/EventAudiencePolicy.js';
-import { EventAudienceController } from '../controllers/EventAudienceController.js';
-import { EventSessionController } from '../controllers/EventSessionController.js';
-import { EventSessionPolicy } from '../controllers/EventSessionPolicy.js';
-import { AttendanceRelativeTime } from '../controllers/AttendanceRelativeTime.js';
-import { SurveyConfirmationController } from '../controllers/SurveyConfirmationController.js';
-import { AttendanceReportController } from '../controllers/AttendanceReportController.js';
-import { StudentPasswordPolicy } from '../core/StudentPasswordPolicy.js';
-import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261011-optimized';
-import { ScopedSubscriptions } from '../core/ScopedSubscriptions.js';
-import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/AttendanceController.js?v=20261011-optimized';
-import { GeofenceController } from '../controllers/GeofenceController.js?v=20261011-optimized';
-import { hasPermission } from '../core/permissions.js?v=20261011-optimized';
-import { AttendanceCorrectionController } from '../controllers/AttendanceCorrectionController.js?v=20261011-optimized';
-import { AttendanceSummaryService } from '../controllers/AttendanceSummaryService.js';
-import { FineEligibilityService } from '../controllers/FineEligibilityService.js';
-import { getDocFromServer, sessionState } from '../dashboard.js?v=20261011-optimized';
-import { AttendanceHistoryController, AttendanceRepository } from '../controllers/AttendanceHistoryController.js?v=20261011-optimized';
-import { AttendanceToolbarController } from '../controllers/AttendanceToolbarController.js';
-import { AttendanceRecordProjectionService } from '../controllers/AttendanceRecordProjectionService.js';
-import { AttendanceAnalyticsController } from '../controllers/AttendanceAnalyticsController.js';
-import { DailyAttendanceClock } from '../controllers/DailyAttendanceClock.js';
-import { EventSchedulePresenter } from '../controllers/EventSchedulePresenter.js';
-import { AttendanceViews } from '../controllers/AttendanceViews.js';
-import { StudentActionsPresenter } from '../controllers/StudentActionsPresenter.js';
-import { StudentSectionFilter } from '../controllers/StudentSectionFilter.js';
-import { AbsenceCardsPresenter } from '../controllers/AbsenceCardsPresenter.js';
+import { EventAudiencePolicy } from '../controllers/events/EventAudiencePolicy.js';
+import { EventAudienceController } from '../controllers/events/EventAudienceController.js';
+import { EventSessionController } from '../controllers/events/EventSessionController.js';
+import { EventSessionPolicy } from '../controllers/events/EventSessionPolicy.js';
+import { AttendanceRelativeTime } from '../controllers/attendance/AttendanceRelativeTime.js';
+import { SurveyConfirmationController } from '../controllers/surveys/SurveyConfirmationController.js';
+import { AttendanceReportController } from '../controllers/reports/AttendanceReportController.js';
+import { StudentPasswordPolicy } from '../core/accounts/StudentPasswordPolicy.js';
+import { currentUser, activeView, currentUserRole, escapeHtml, ASSIGNABLE_ROLE_LABELS, firebaseErrorCode, roleLabel, roleChangeErrorMessage, formatBirthday, FineModalController, showDashboardToast, createNotification, resetFacePhotoInDrive, waitForFaceRegistration, openView, formatEventDate, formatEventTime, timePlusMinutes, formatTimeWindow, eventOpenDate, eventCloseDate, eventCheckInCloseDate, eventCheckoutCloseDate, isEventFinished, formatAttendanceTimestamp, attendanceDuration, getEventStatus, arrivalStatusBadge, eventStatusBadge, getInitials, formatServiceMinutes, formatFineDate, getFineHistory, fineDetailsMarkup, updateDashboardGreeting, auth, db, studentIdToEmail, studentProvisioningAuth, createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut, updatePassword, updateProfile, Timestamp, addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocsFromServer, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from '../dashboard.js?v=20261122-feature-folders';
+import { ScopedSubscriptions } from '../core/shared/ScopedSubscriptions.js';
+import { AttendanceSyncService, AttendanceRealtimeBridge } from '../controllers/attendance/AttendanceController.js?v=20261122-feature-folders';
+import { GeofenceController } from '../controllers/location/GeofenceController.js?v=20261122-feature-folders';
+import { hasPermission } from '../core/security/permissions.js?v=20261122-feature-folders';
+import { AttendanceCorrectionController } from '../controllers/attendance/AttendanceCorrectionController.js?v=20261122-feature-folders';
+import { AttendanceSummaryService } from '../controllers/reports/AttendanceSummaryService.js';
+import { FineEligibilityService } from '../controllers/fines/FineEligibilityService.js';
+import { getDocFromServer, sessionState } from '../dashboard.js?v=20261122-feature-folders';
+import { AttendanceHistoryController, AttendanceRepository } from '../controllers/attendance/AttendanceHistoryController.js?v=20261122-feature-folders';
+import { AttendanceToolbarController } from '../controllers/attendance/AttendanceToolbarController.js';
+import { AttendanceRecordProjectionService } from '../controllers/reports/AttendanceRecordProjectionService.js';
+import { AttendanceAnalyticsController } from '../controllers/reports/AttendanceAnalyticsController.js';
+import { DailyAttendanceClock } from '../controllers/attendance/DailyAttendanceClock.js';
+import { EventSchedulePresenter } from '../controllers/events/EventSchedulePresenter.js';
+import { AttendanceViews } from '../controllers/attendance/AttendanceViews.js';
+import { StudentActionsPresenter } from '../controllers/students/StudentActionsPresenter.js';
+import { StudentSectionFilter } from '../controllers/students/StudentSectionFilter.js';
+import { AbsenceCardsPresenter } from '../controllers/attendance/AbsenceCardsPresenter.js';
 export class AdminDashboard {
   constructor({
     document = globalThis.document,
@@ -895,7 +895,7 @@ export class AdminDashboard {
   }
   async loadCorrectionRequests() {
     if (!this.can('correctAttendance') || this.correctionRequests) return;
-    const { CorrectionRequestsController } = await import('../controllers/CorrectionRequestsController.js');
+    const { CorrectionRequestsController } = await import('../controllers/attendance/CorrectionRequestsController.js');
     if (!this.scope.initialized || this.correctionRequests) return;
     this.correctionRequests = new CorrectionRequestsController({ root: this.document.querySelector('#adminCorrectionRequests'),
       window: this.window, getView: () => activeView, badge: this.document.querySelector('#correctionRequestNavCount'), db, user: currentUser, role: currentUserRole,
@@ -906,7 +906,7 @@ export class AdminDashboard {
   async loadAccountApprovals() {
     const dashboard = this;
     if (!dashboard.can('viewAccountApprovals') || dashboard.accountApprovalController) return;
-    const { AccountApprovalController } = await import('../controllers/AccountApprovalController.js');
+    const { AccountApprovalController } = await import('../controllers/admin/AccountApprovalController.js');
     if (!dashboard.scope.initialized || dashboard.accountApprovalController) return;
     dashboard.accountApprovalController = new AccountApprovalController({
       document: dashboard.document, window: dashboard.window, getView: () => activeView, db, user: currentUser,

@@ -4,7 +4,7 @@ globalThis.crypto ||= require('node:crypto').webcrypto;
 
 async function fixture() {
   const { AttendanceQrService } = await import('../../workers/admin-api/src/attendance-qr.js');
-  const { PolicyAgreementPolicy: Policy } = await import('../../assets/js/core/PolicyAgreementPolicy.js');
+  const { PolicyAgreementPolicy: Policy } = await import('../../assets/js/core/accounts/PolicyAgreementPolicy.js');
   let now = Date.parse('2026-11-09T10:00:00+08:00'), revision = 0;
   const store = new Map([
     ['students/student', { active: true, role: 'student', accountId: '2510004-1', firstName: 'Test', lastName: 'Student', course: 'BS Info Tech', section: '2A', _updateTime: 'student-v1' }],
@@ -160,7 +160,7 @@ test('QR scanning cannot overwrite checkout-only attendance or complete a wrong-
 });
 
 async function browserFixture(admin = true) {
-  const { AttendanceQrController } = await import('../../assets/js/controllers/AttendanceQrController.js');
+  const { AttendanceQrController } = await import('../../assets/js/controllers/attendance/AttendanceQrController.js');
   const event = { id: 'session', name: 'Current event', date: '2026-11-09', openAt: new Date(Date.now() - 1000), checkOutClosesAt: new Date(Date.now() + 3600000), audienceSections: ['2A'] };
   const node = () => ({ value: '', checked: false, disabled: false, hidden: false, children: [], textContent: '',
     classList: { toggle() {} }, setAttribute() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {}, focus() {},

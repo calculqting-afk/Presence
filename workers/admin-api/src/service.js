@@ -1,6 +1,6 @@
 import { sessionAuthTime } from './device-session.js';
 import { SafeError, digest, temporaryPassword } from './firebase.js';
-import { StudentPasswordPolicy } from '../../../assets/js/core/StudentPasswordPolicy.js';
+import { StudentPasswordPolicy } from '../../../assets/js/core/accounts/StudentPasswordPolicy.js';
 
 export function authHasSuperAdmin(user) {
   try { return JSON.parse(user?.customAttributes || '{}').superAdmin === true; } catch { return false; }

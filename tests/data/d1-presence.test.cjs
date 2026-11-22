@@ -80,8 +80,8 @@ test('650 students update only their own status row and SQL suppresses repeated 
 });
 
 test('client enrolls once, throttles focus heartbeats, and logout never writes Firestore', async () => {
-  const { PresenceClient, PRESENCE_HEARTBEAT_MS } = await import('../../assets/js/controllers/PresenceClient.js');
-  const { endPresenceSession } = await import('../../assets/js/core/PresenceSession.js');
+  const { PresenceClient, PRESENCE_HEARTBEAT_MS } = await import('../../assets/js/controllers/data/PresenceClient.js');
+  const { endPresenceSession } = await import('../../assets/js/core/accounts/PresenceSession.js');
   const calls = [], user = { uid: 'student' };
   const client = new PresenceClient({ call: async (path, actor, body) => {
     assert.equal(actor, user); calls.push({ path, body });

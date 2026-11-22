@@ -5,6 +5,12 @@ const esbuild = require('esbuild');
 async function build() {
   const root = path.resolve(__dirname, '..');
   const output = path.join(root, 'mobile-web');
+  // This directory is generated. Remove stale modules after source files move.
+  if (path.dirname(output) !== root || path.basename(output) !== 'mobile-web') throw new Error('Invalid mobile output path');
+  if (fs.existsSync(output)) {
+    if (fs.lstatSync(output).isSymbolicLink()) throw new Error('Refusing to replace linked mobile output');
+    fs.rmSync(output, { recursive: true, force: true });
+  }
   fs.mkdirSync(output, { recursive: true });
   // Explicit public-file allowlist: never copy backend scripts or credentials.
   for (const entry of ['index.html', 'assets', 'pages']) {

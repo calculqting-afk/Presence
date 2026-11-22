@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const load = () => import('../../assets/js/core/PresenceSession.js');
+const load = () => import('../../assets/js/core/accounts/PresenceSession.js');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const timestamp = value => ({ toMillis: () => value });
 

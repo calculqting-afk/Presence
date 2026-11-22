@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const load = () => import('../../assets/js/core/AttendanceTimePolicy.js');
+const load = () => import('../../assets/js/core/attendance/AttendanceTimePolicy.js');
 const stamp = value => ({ toMillis: () => Date.parse(value) });
 test('exact timestamps distinguish zero/reversed duration from legitimate sub-minute attendance', async () => {
   const { attendanceTimeIssue, attendanceReviewLabel } = await load();

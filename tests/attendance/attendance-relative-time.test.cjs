@@ -2,7 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const path=require('node:path');
 const {pathToFileURL}=require('node:url');
-const load=()=>import(pathToFileURL(path.resolve(__dirname,'../../assets/js/controllers/AttendanceRelativeTime.js')));
+const load=()=>import(pathToFileURL(path.resolve(__dirname,'../../assets/js/controllers/attendance/AttendanceRelativeTime.js')));
 
 test('time since distinguishes actions, uses minutes/hours/days and handles pending/invalid/future timestamps',async()=>{
   const {AttendanceRelativeTime:Time}=await load(),now=2_000_000_000_000;

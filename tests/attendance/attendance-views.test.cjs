@@ -6,7 +6,7 @@ const sessions = () => [
   { id:'day_afternoon', sessionGroupId:'day',sessionPeriod:'afternoon',sessionBaseName:'Day 4',name:'Day 4 — Afternoon',date:'2026-10-22',timeIn:'13:25',checkOutCutoff:'17:25',openAt:new Date(at('13:25')),checkOutClosesAt:new Date(at('17:25')) }
 ];
 test('one grouped event survives morning, the gap and afternoon, then closes only after final cutoff',async()=>{
- const {AttendanceViews:View}=await import('../../assets/js/controllers/AttendanceViews.js');
+ const {AttendanceViews:View}=await import('../../assets/js/controllers/attendance/AttendanceViews.js');
  const pair=sessions();assert.equal(View.groups(pair).length,1);assert.equal(View.title(pair[1]),'Day 4');
  assert.equal(View.state(pair,at('06:00')).upcoming.id,'day');
  assert.equal(View.state(pair,at('08:00')).current.id,'day');
@@ -25,7 +25,7 @@ test('one grouped event survives morning, the gap and afternoon, then closes onl
  assert.equal(View.state([legacy],at('11:16')).closed,true);
 });
 test('current-session badge follows the actual open window rather than whichever session was passed to render',async()=>{
- const {EventSchedulePresenter}=await import('../../assets/js/controllers/EventSchedulePresenter.js');
+ const {EventSchedulePresenter}=await import('../../assets/js/controllers/events/EventSchedulePresenter.js');
  const pair=sessions();let now=at('08:00');
  const presenter=new EventSchedulePresenter({formatTime:String,escapeHtml:String,addMinutes:String,now:()=>now});
  assert.match(presenter.render(pair[1],pair),/Morning <span>Current session/);
@@ -34,9 +34,9 @@ test('current-session badge follows the actual open window rather than whichever
  now=at('18:00');assert.doesNotMatch(presenter.render(pair[1],pair),/Current session/);
 });
 test('combined report preserves each session, groups students, and marks only closed session absences',async()=>{
- const {AttendanceReportService}=await import('../../assets/js/controllers/AttendanceReportService.js');
- const {AttendanceSummaryService}=await import('../../assets/js/controllers/AttendanceSummaryService.js');
- const {AttendancePdfExporter}=await import('../../assets/js/controllers/AttendancePdfExporter.js');
+ const {AttendanceReportService}=await import('../../assets/js/controllers/reports/AttendanceReportService.js');
+ const {AttendanceSummaryService}=await import('../../assets/js/controllers/reports/AttendanceSummaryService.js');
+ const {AttendancePdfExporter}=await import('../../assets/js/controllers/reports/AttendancePdfExporter.js');
  const pair=sessions().map(e=>({...e,type:'School Activity',location:'Campus',audience:'All students',attendanceRoster:{a:'2A',b:'2A'},timeOut:e.sessionPeriod==='morning'?'11:00':'16:00',checkInCutoff:e.sessionPeriod==='morning'?'09:00':'14:30'}));
  const students=[{uid:'a',accountId:'A',firstName:'Ana',section:'2A',course:'BSA'},{uid:'b',accountId:'B',firstName:'Ben',section:'2A',course:'BSA'}];
  const now=()=>new Date(at('12:45')),checkoutCloseDate=e=>e.checkOutClosesAt;

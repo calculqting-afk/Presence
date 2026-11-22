@@ -6,7 +6,7 @@ const morning = { id: 'day', name: 'Intramurals — Morning', sessionGroupId: 'd
 const afternoon = { ...morning, id: 'day_afternoon', name: 'Intramurals — Afternoon', sessionPeriod: 'afternoon', timeIn: '13:00', timeOut: '17:00' };
 
 test('linked absent sessions share one event card with ordered session details and actual audience', async () => {
-  const { AbsenceCardsPresenter } = await import('../../assets/js/controllers/AbsenceCardsPresenter.js');
+  const { AbsenceCardsPresenter } = await import('../../assets/js/controllers/attendance/AbsenceCardsPresenter.js');
   const before = JSON.stringify([afternoon, morning]);
   const result = AbsenceCardsPresenter.render([afternoon, morning], options);
   assert.equal(result.eventCount, 1);
@@ -20,7 +20,7 @@ test('linked absent sessions share one event card with ordered session details a
 });
 
 test('only confirmed missing sessions render; unlinked events and different dates never merge', async () => {
-  const { AbsenceCardsPresenter } = await import('../../assets/js/controllers/AbsenceCardsPresenter.js');
+  const { AbsenceCardsPresenter } = await import('../../assets/js/controllers/attendance/AbsenceCardsPresenter.js');
   const single = AbsenceCardsPresenter.render([afternoon], options);
   assert.match(single.markup, /1 missed session</);
   assert.doesNotMatch(single.markup, />Morning</);
@@ -30,7 +30,7 @@ test('only confirmed missing sessions render; unlinked events and different date
 });
 
 test('audience supports all students and legacy roster sections without guessing unknown sections', async () => {
-  const { AbsenceCardsPresenter: Presenter } = await import('../../assets/js/controllers/AbsenceCardsPresenter.js');
+  const { AbsenceCardsPresenter: Presenter } = await import('../../assets/js/controllers/attendance/AbsenceCardsPresenter.js');
   assert.equal(Presenter.audience({ audienceSections: [] }), 'All students');
   assert.equal(Presenter.audience({ audience: 'Selected sections', attendanceRoster: { a: '2B', b: '2A', c: '2A' } }), 'Sections 2A, 2B');
   assert.equal(Presenter.audience({ audience: 'Selected sections' }), 'Sections not specified');
@@ -38,7 +38,7 @@ test('audience supports all students and legacy roster sections without guessing
 });
 
 test('empty absence state and saved event content are safely rendered', async () => {
-  const { AbsenceCardsPresenter: Presenter } = await import('../../assets/js/controllers/AbsenceCardsPresenter.js');
+  const { AbsenceCardsPresenter: Presenter } = await import('../../assets/js/controllers/attendance/AbsenceCardsPresenter.js');
   assert.equal(Presenter.render([], options).eventCount, 0);
   assert.match(Presenter.render([], options).markup, /No recorded absences/);
   const result = Presenter.render([{ ...morning, sessionBaseName: '<img>', location: '<script>', audienceSections: ['<b>'] }], options);

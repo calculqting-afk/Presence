@@ -6,8 +6,8 @@ const root = path.resolve(__dirname, '../..');
 const load = file => import(`file:///${path.join(root, file).replaceAll('\\', '/')}`);
 
 async function fixture() {
-  const { AttendanceSummaryService } = await load('assets/js/controllers/AttendanceSummaryService.js');
-  const { FineEligibilityService } = await load('assets/js/controllers/FineEligibilityService.js');
+  const { AttendanceSummaryService } = await load('assets/js/controllers/reports/AttendanceSummaryService.js');
+  const { FineEligibilityService } = await load('assets/js/controllers/fines/FineEligibilityService.js');
   const summary = new AttendanceSummaryService({ now: () => new Date('2026-10-12T12:00:00Z'),
     closeDate: event => new Date(event.end), checkoutCloseDate: event => new Date(event.end) });
   const student = { uid: 'student', section: '2A' };

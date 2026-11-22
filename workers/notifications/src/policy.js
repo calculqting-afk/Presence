@@ -1,6 +1,6 @@
-import { EventAudiencePolicy } from '../../../assets/js/controllers/EventAudiencePolicy.js';
-import { AttendanceViews } from '../../../assets/js/controllers/AttendanceViews.js';
-import { DuringAttendancePolicy, duringTime } from '../../../assets/js/core/DuringAttendancePolicy.js';
+import { EventAudiencePolicy } from '../../../assets/js/controllers/events/EventAudiencePolicy.js';
+import { AttendanceViews } from '../../../assets/js/controllers/attendance/AttendanceViews.js';
+import { DuringAttendancePolicy, duringTime } from '../../../assets/js/core/attendance/DuringAttendancePolicy.js';
 
 export const SHARDS = 32;
 export const NEVER = 8640000000000000;
