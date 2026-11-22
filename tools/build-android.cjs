@@ -10,7 +10,7 @@ class AndroidBuildService {
     const installed = fs.existsSync(portable) ? fs.readdirSync(portable).map(name => path.join(portable, name))
       .find(directory => fs.existsSync(path.join(directory, 'bin/java.exe'))) : undefined;
     const javaHome = installed || process.env.JAVA_HOME;
-    if (!javaHome) throw new Error('Configure JAVA_HOME with JDK 21, or select JDK 21 in Android Studio. See docs/android/ANDROID.md.');
+    if (!javaHome) throw new Error('Configure JAVA_HOME with JDK 21, or select JDK 21 in Android Studio. See README.md.');
     const task = process.argv.includes('--beta') ? 'assembleBeta' : 'assembleDebug';
     const result = spawnSync(process.platform === 'win32' ? 'cmd.exe' : './gradlew',
       process.platform === 'win32' ? ['/d', '/s', '/c', `gradlew.bat ${task}`] : [task],

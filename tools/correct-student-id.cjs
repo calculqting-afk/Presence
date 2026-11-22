@@ -126,7 +126,7 @@ async function main(args=process.argv.slice(2)) {
   const configPath=path.resolve(__dirname,'../.android-tools/student-id-helper.config.json');
   const localConfig=!process.env.PRESENCE_SERVICE_ACCOUNT_KEY && fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath,'utf8')) : {};
   const keyPath=process.env.PRESENCE_SERVICE_ACCOUNT_KEY || localConfig.serviceAccountPath;
-  if (!keyPath) throw Error('Set PRESENCE_SERVICE_ACCOUNT_KEY or configure .android-tools/student-id-helper.config.json with serviceAccountPath. See docs/maintenance/CORRECT-STUDENT-ID.md.');
+  if (!keyPath) throw Error('Set PRESENCE_SERVICE_ACCOUNT_KEY or configure .android-tools/student-id-helper.config.json with serviceAccountPath. See README.md.');
   const credential=JSON.parse(fs.readFileSync(path.resolve(keyPath),'utf8'));
   if (credential.project_id!==PROJECT) throw Error('Service-account key must belong to '+PROJECT);
   const requireAdmin=createRequire(path.resolve(__dirname,'../functions/package.json'));
