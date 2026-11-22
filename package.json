@@ -4,13 +4,14 @@
   "type": "module",
   "scripts": {
     "serve": "node tools/serve.cjs",
-    "test": "node --experimental-vm-modules --test tests/*.test.cjs",
+    "test": "node tools/run-tests.cjs",
     "check": "node tools/check-modules.cjs",
     "mobile:build": "node tools/build-mobile.cjs",
     "android:sync": "npm run mobile:build && cap sync android",
     "android:open": "cap open android",
     "android:apk": "npm run android:sync && node tools/build-android.cjs",
-    "android:beta": "npm run android:sync && node tools/build-android.cjs --beta"
+    "android:beta": "npm run android:sync && node tools/build-android.cjs --beta",
+    "test:emulator": "node tools/run-tests.cjs --emulator"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.3",

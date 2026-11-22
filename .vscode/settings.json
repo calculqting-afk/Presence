@@ -1,0 +1,13 @@
+{
+  "files.exclude": {
+    "**/node_modules": true,
+    "mobile-web": true,
+    ".android-tools": true,
+    ".firebase": true,
+    "**/build": true,
+    "**/.gradle": true,
+    "**/.kotlin": true,
+    "**/.wrangler": true,
+    "**/*-debug.log*": true
+  }
+}

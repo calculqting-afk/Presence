@@ -1,0 +1,467 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const { pathToFileURL } = require('node:url');
+const root = path.resolve(__dirname, '../..');
+const moduleAt = name => import(pathToFileURL(path.join(root, 'assets/js/controllers', `${name}.js`)));
+const config = (mode = 'start-only', size = 3) => ({ eventId: 'event', revision: 1, enabled: true, locationMode: mode, opensAt: new Date(1000), closesAt: new Date(100000), questions: Array.from({ length: size }, (_, index) => ({ id: `q${index}`, text: `Agenda ${index + 1}`, type: 'choice', choices: ['Yes', 'No'] })) });
+
+test('survey policy validates questions/windows and only requests selected location stages', async () => {
+  const { SurveyPolicy } = await moduleAt('SurveyPolicy');
+  const policy = new SurveyPolicy({ now: () => 5000 });
+  policy.validate(config()); policy.assertOpen(config());
+  assert.equal(policy.status(config()), 'Open');
+  assert.equal(policy.status({...config(), enabled:false}), 'Paused');
+  assert.equal(policy.status({...config(), closesAt:new Date(4000)}), 'Closed');
+  assert.equal(policy.status({...config(), opensAt:new Date(6000)}), 'Not open yet');
+  assert.equal(policy.currentEvent({openAt:new Date(1000),checkOutClosesAt:new Date(6000)}),true);
+  assert.equal(policy.currentEvent({openAt:new Date(1000),checkOutClosesAt:new Date(4000)}),false);
+  assert.equal(policy.locationStage(config(), null), 'start');
+  assert.equal(policy.locationStage(config(), { answerCount: 1 }), null);
+  assert.equal(policy.locationStage(config('start-finish'), { answerCount: 1 }), null);
+  assert.equal(policy.locationStage(config('start-finish'), { answerCount: 2 }), 'finish');
+  assert.throws(() => policy.validate({ ...config(), questions: [] }), /1 and 20/);
+  assert.throws(() => policy.validate({ ...config(), closesAt: new Date(0) }), /closing time/);
+  assert.throws(() => policy.validate({ ...config(), questions: [{ id: 'q0', text: 'Agenda', type: 'choice', choices: ['Same', 'Same'] }] }), /distinct/);
+  assert.throws(() => policy.assertOpen({ ...config(), enabled: false }), /not open/);
+  assert.throws(() => policy.validateAnswer(config().questions[0], 'forged'), /answer/);
+  assert.throws(() => policy.nextQuestion(config(), { surveyRevision: 2 }), /changed/);
+  assert.equal(policy.reviewApproved({ reviewDecision: 'approved', reviewStage: 'start', reviewedAt: new Date(5000), reviewRequestedAt: new Date(6000) }, 'start'), false);
+});
+
+test('admin survey picker groups sessions once and loads only the chosen session without changing existing surveys', async () => {
+  const {SurveyController}=await moduleAt('SurveyController');
+  const loaded=[],list={innerHTML:''};
+  const controller=new SurveyController({repository:{load:async id=>{loaded.push(id);return {config:null};}},locationService:{},profile:()=>({}),canManage:true,escapeHtml:String,openView(){},showToast(){},document:{},window:{location:{href:'https://school.test/'}}});
+  controller.visible=true;controller.workspace={innerHTML:''};
+  controller.section={querySelector:()=>list,querySelectorAll:()=>[]};
+  const morning={id:'day',sessionGroupId:'day',sessionBaseName:'Intramurals',sessionPeriod:'morning',name:'Intramurals — Morning',date:'2026-10-23',timeIn:'07:00',openAt:new Date('2026-10-23T07:00:00+08:00'),checkOutClosesAt:new Date('2026-10-23T12:00:00+08:00'),hasSurvey:true};
+  const afternoon={...morning,id:'day_afternoon',sessionPeriod:'afternoon',timeIn:'13:00',name:'Intramurals — Afternoon',hasSurvey:false};
+  controller.policy.now=()=>new Date('2026-10-23T09:00:00+08:00').getTime();controller.events=[afternoon,morning];controller.renderList();
+  assert.equal((list.innerHTML.match(/<option value="day/g)||[]).length,1);
+  assert.match(list.innerHTML,/Intramurals/);
+  await controller.select('day');
+  assert.match(controller.workspace.innerHTML,/data-survey-session/);
+  assert.match(controller.workspace.innerHTML,/value="day" selected>Morning — Manage survey/);
+  assert.match(controller.workspace.innerHTML,/value="day_afternoon">Afternoon — Create survey/);
+  await controller.select('day_afternoon');
+  assert.equal(loaded.join(','),'day,day_afternoon');
+  assert.match(controller.workspace.innerHTML,/value="day_afternoon" selected/);
+  assert.match(list.innerHTML,/value="day_afternoon" selected/);
+  assert.equal(morning.hasSurvey,true);assert.equal(afternoon.hasSurvey,false);
+  afternoon.surveyArchived=true;controller.archivePanel=true;controller.renderList();
+  assert.equal((list.innerHTML.match(/<option value="day/g)||[]).length,1);
+  assert.doesNotMatch(controller.sessionPickerMarkup(),/data-survey-session/);
+  controller.archivePanel=false;controller.selectedEvent=morning;controller.renderList();
+  assert.doesNotMatch(list.innerHTML,/data-survey-select="day_afternoon"/);
+  afternoon.surveyArchived=false;controller.canManage=false;controller.renderList();
+  assert.equal((list.innerHTML.match(/data-survey-select=/g)||[]).length,2,'student survey entries retain original session IDs');
+});
+
+test('QR links preserve GitHub project paths and reject injected event IDs', async () => {
+  const { SurveyLinkService } = await moduleAt('SurveyLinkService');
+  const service = new SurveyLinkService({ href: 'https://school.github.io/Presence/pages/admin-dashboard.html?v=old#x' });
+  assert.equal(service.url('event_1'), 'https://school.github.io/Presence/index.html?survey=event_1');
+  assert.equal(new SurveyLinkService({ href: service.url('event_1') }).eventId(), 'event_1');
+  assert.equal(new SurveyLinkService({ href: 'https://school.test/?survey=https://bad.test' }).eventId(), null);
+  assert.throws(() => service.url('../bad'), /Invalid/);
+});
+
+test('survey location uses fresh precise GPS and rejects insecure, outside, stale and poor-accuracy reports', async () => {
+  const { SurveyLocationService } = await moduleAt('SurveyLocationService');
+  let requests = 0;
+  const position = { coords: { latitude: 10, longitude: 124, accuracy: 5 }, timestamp: 5000 };
+  const geo = { getCurrentPosition(resolve, reject, options) { requests++; assert.equal(options.maximumAge, 0); assert.equal(options.enableHighAccuracy, true); resolve(position); } };
+  const service = new SurveyLocationService({ secure: true, geolocation: geo, now: () => 5000, loadBoundary: async () => ({ enabled: true, latitude: 10, longitude: 124, radiusMeters: 100 }) });
+  const evidence = await service.check('event'); assert.equal(evidence.result, 'inside'); assert.equal(evidence.method, 'browser'); assert.ok(!Object.hasOwn(evidence, 'latitude'));
+  position.coords.longitude = 125;
+  await assert.rejects(service.check('event'), error => error.surveyIssue === 'outside');
+  position.coords.longitude = 124; position.coords.accuracy = 100;
+  await assert.rejects(service.check('event'), /precise/);
+  position.coords.accuracy = 5; position.timestamp = -100000;
+  await assert.rejects(service.check('event'), /stale/);
+  const insecure = new SurveyLocationService({ ...service, secure: false });
+  const before = requests; await assert.rejects(insecure.check('event'), /HTTPS/); assert.equal(requests, before);
+  const polygon = new SurveyLocationService({ secure: true, geolocation: { getCurrentPosition(resolve) { resolve({ coords: { latitude: 10.0005, longitude: 124.0005, accuracy: 5 }, timestamp: 5000 }); } }, now: () => 5000, loadBoundary: async () => ({ enabled: true, type: 'polygon', vertices: [{ latitude: 10, longitude: 124 }, { latitude: 10, longitude: 124.001 }, { latitude: 10.001, longitude: 124.001 }, { latitude: 10.001, longitude: 124 }] }) });
+  assert.equal((await polygon.check('event')).boundaryType, 'polygon');
+});
+
+test('location retries once for coarse GPS, reports measured accuracy, and never relaxes the limit', async () => {
+  const { SurveyLocationService } = await moduleAt('SurveyLocationService');
+  let reads = 0, denied = false, outside = false, cancelled = false;
+  let accuracies = [381, 5];
+  const progress = [];
+  const service = new SurveyLocationService({ secure: true, now: () => 5000,
+    loadBoundary: async () => ({ enabled: true, latitude: 10, longitude: 124, radiusMeters: 100 }),
+    geolocation: { getCurrentPosition(resolve, reject) {
+      reads++;
+      if (denied) return reject({ code: 1 });
+      resolve({ coords: { latitude: 10, longitude: outside ? 125 : 124, accuracy: accuracies.shift() }, timestamp: 5000 });
+    } }
+  });
+  assert.equal((await service.check('event', { onProgress: label => progress.push(label) })).accuracy, 5);
+  assert.equal(reads, 2); assert.match(progress[0], /381 m/);
+  accuracies = [381, 381]; reads = 0;
+  await assert.rejects(service.check('event'), error => error.locationReason === 'accuracy' && /381 m; required 50 m/.test(error.message));
+  assert.equal(reads, 2);
+  denied = true; reads = 0;
+  await assert.rejects(service.check('event'), /permission was denied/); assert.equal(reads, 1);
+  denied = false; outside = true; accuracies = [5]; reads = 0;
+  await assert.rejects(service.check('event'), error => error.surveyIssue === 'outside'); assert.equal(reads, 1);
+  outside = false; accuracies = [381, 5]; reads = 0;
+  await assert.rejects(service.check('event', { isCancelled: () => cancelled, onProgress: () => { cancelled = true; } }), /cancelled/);
+  assert.equal(reads, 1);
+});
+
+async function repositoryHarness() {
+  const context = vm.createContext({ console, Date, Object, Error, globalThis: {} });
+  const documents = new Map(), writes = [], modules = new Map();
+  const timestamp = new Date(5000);
+  const snapshot = reference => ({ exists: () => documents.has(reference.path), data: () => documents.get(reference.path), id: reference.path.split('/').at(-1) });
+  const sdk = {
+    doc: (db, ...parts) => ({ path: parts.length ? parts.join('/') : `${db.path}/audit-id`, id: parts.length ? parts.at(-1) : 'audit-id' }),
+    collection: (db, ...parts) => ({ path: parts.join('/') }), serverTimestamp: () => timestamp,
+    getDocFromServer: async reference => snapshot(reference), getDocsFromServer: async () => ({ docs: [] }),
+    query: (...args) => args, where: (...args) => args, limit: n => n, orderBy: (...args) => args, startAfter: cursor => cursor,
+    writeBatch: () => { const pending = []; return { delete: reference => pending.push(reference.path), commit: async () => pending.forEach(key => documents.delete(key)) }; },
+    runTransaction: async (db, action) => {
+      const pending = [];
+      const result = await action({ get: async reference => snapshot(reference), delete: reference => pending.push([reference.path, null]), set: (reference, data) => pending.push([reference.path, data]), update: (reference, data) => pending.push([reference.path, { ...documents.get(reference.path), ...data }]) });
+      pending.forEach(([key, value]) => { if (value === null) documents.delete(key); else documents.set(key, value); writes.push(key); }); return result;
+    }
+  };
+  const remote = new vm.SyntheticModule(Object.keys(sdk), function() { Object.entries(sdk).forEach(([key, value]) => this.setExport(key, value)); }, { context });
+  const load = filename => { if (!modules.has(filename)) modules.set(filename, new vm.SourceTextModule(fs.readFileSync(filename, 'utf8'), { context, identifier: filename })); return modules.get(filename); };
+  const entry = load(path.join(root, 'assets/js/controllers/SurveyRepository.js'));
+  await entry.link((specifier, referencing) => specifier.startsWith('https:') ? remote : load(path.resolve(path.dirname(referencing.identifier), specifier)));
+  await entry.evaluate();
+  const policy = { now: () => 5000 };
+  const policyModule = modules.get(path.join(root, 'assets/js/controllers/SurveyPolicy.js'));
+  const repository = new entry.namespace.SurveyRepository({ db: {}, uid: 'student', profile: () => ({ accountId: 'ID-1', firstName: 'Apollo', lastName: 'Paderes' }), policy: new policyModule.namespace.SurveyPolicy(policy) });
+  return { repository, documents, writes, timestamp };
+}
+
+test('saved sequential answers resume across retries without overwriting, and final location is required', async () => {
+  const { repository, documents, writes } = await repositoryHarness();
+  const survey = config('start-finish'); documents.set('eventSurveys/event', survey);
+  const evidence = { result: 'inside', method: 'browser', accuracy: 5, boundaryType: 'circle' };
+  await repository.submit('event', survey, survey.questions[0], 'Yes', evidence);
+  let saved = documents.get('eventSurveys/event/responses/student');
+  assert.equal(saved.answerCount, 1); assert.equal(saved.studentId, 'ID-1');
+  const count = writes.length;
+  const retried = await repository.submit('event', survey, survey.questions[0], 'No', evidence);
+  assert.equal(retried.existing, true); assert.equal(writes.length, count); assert.equal(saved.answers.q0.value, 'Yes');
+  await assert.rejects(repository.submit('event', survey, survey.questions[2], 'Yes', evidence), /another tab/);
+  await repository.submit('event', survey, survey.questions[1], 'No');
+  await assert.rejects(repository.submit('event', survey, survey.questions[2], 'Yes'), /location check/);
+  await repository.submit('event', survey, survey.questions[2], 'Yes', evidence);
+  saved = documents.get('eventSurveys/event/responses/student'); assert.equal(saved.status, 'completed'); assert.equal(saved.answerCount, 3); assert.ok(saved.finishEvidence);
+  assert.ok(writes.every(key => key.startsWith('eventSurveys/')));
+});
+
+test('review requests preserve progress, record an immutable audit and waive only their location stage', async () => {
+  const { repository, documents } = await repositoryHarness();
+  const survey = config('start-finish', 2); documents.set('eventSurveys/event', survey);
+  await repository.requestReview('event', 'Poor GPS', 'unavailable');
+  assert.equal(documents.get('eventSurveys/event/responses/student').answerCount, 0);
+  await repository.review('event', 'student', 'approved', 'School ID and venue presence checked');
+  assert.ok(documents.has('eventSurveys/event/responses/student/reviews/audit-id'));
+  await repository.submit('event', survey, survey.questions[0], 'Yes');
+  assert.equal(documents.get('eventSurveys/event/responses/student').startEvidence.result, 'reviewed');
+  await assert.rejects(repository.submit('event', survey, survey.questions[1], 'Yes'), /location check/);
+  documents.set('eventSurveys/event', { ...survey, closesAt: new Date(2000) });
+  await assert.rejects(repository.submit('event', survey, survey.questions[1], 'Yes', { result: 'inside' }), /not open/);
+});
+
+test('published survey definitions cannot be rewritten and pause preserves responses', async () => {
+  const { repository, documents } = await repositoryHarness();
+  documents.set('events/event', { name: 'Meeting' });
+  await repository.saveConfig('event', config());
+  await assert.rejects(repository.saveConfig('event', config()), /already published/);
+  await repository.setEnabled('event', false); assert.equal(documents.get('eventSurveys/event').enabled, false);
+  assert.equal(documents.get('events/event').hasSurvey, true);
+});
+
+test('survey role grants and rules preserve owner access, immutable answers and server windows', async () => {
+  const permissions = await import(pathToFileURL(path.join(root, 'assets/js/core/permissions.js')));
+  for (const role of ['super_admin', 'head_admin', 'attendance_admin']) assert.equal(permissions.hasPermission(role, 'manageSurveys'), true);
+  for (const role of ['student_manager', 'student', 'unknown']) assert.equal(permissions.hasPermission(role, 'manageSurveys'), false);
+  assert.ok(permissions.ROLE_VIEWS.student.includes('surveys'));
+  const rules = fs.readFileSync(path.join(root, 'firestore.rules'), 'utf8');
+  assert.match(rules, /match \/eventSurveys\/\{eventId\}/);
+  assert.match(rules, /request.time >= config.opensAt && request.time <= config.closesAt/);
+  assert.match(rules, /data.answers.diff\(previous.answers\).affectedKeys\(\).hasOnly\(\[question.id\]\)/);
+  assert.match(rules, /resource.data.status != "completed"/);
+  assert.match(rules, /match \/reviews\/\{reviewId\}/);
+  // Structural checks only: run authorization cases in a Firestore emulator as well.
+});
+
+test('vendored QR generator produces a real local QR matrix and scalable SVG', () => {
+  const context = vm.createContext({}); vm.runInContext(fs.readFileSync(path.join(root, 'assets/vendor/qrcode-generator.js'), 'utf8'), context);
+  const code = context.qrcode(0, 'M'); code.addData('https://school.test/index.html?survey=event'); code.make();
+  assert.ok(code.getModuleCount() >= 21); assert.match(code.createSvgTag({ scalable: true, margin: 4 }), /<svg/);
+  assert.equal(code.isDark(0, 0), true);
+});
+
+test('survey login routing is idempotent and cancels stale authentication results', async () => {
+  const { SurveyEntryController } = await moduleAt('SurveyEntryController');
+  let callback, subscriptions = 0, cleanups = 0, resolveRole;
+  const redirects = [];
+  const controller = new SurveyEntryController({ auth: {},
+    subscribe(auth, listener) { subscriptions++; callback = listener; return () => cleanups++; },
+    resolveRole: () => new Promise(resolve => { resolveRole = resolve; }),
+    window: { location: { href: 'https://school.test/index.html?survey=event', replace: url => redirects.push(url) } }
+  });
+  controller.initialize(); controller.initialize(); assert.equal(subscriptions, 1);
+  const pending = controller.resume({ uid: 'student' });
+  await controller.resume(null); resolveRole('student'); await pending;
+  assert.equal(redirects.length, 0);
+  const accepted = controller.resume({ uid: 'student' }); resolveRole('student'); await accepted;
+  assert.deepEqual(redirects, ['pages/student-dashboard.html?survey=event']);
+  const disposed = controller.resume({ uid: 'admin' }); controller.dispose(); resolveRole('admin'); await disposed;
+  assert.equal(redirects.length, 1); assert.equal(cleanups, 1); assert.equal(typeof callback, 'function');
+});
+
+test('normal login restores the verified dashboard once without needing a survey link', async () => {
+  const {SurveyEntryController}=await moduleAt('SurveyEntryController');
+  for (const role of ['student','admin']) {
+    let callback,subscriptions=0;const redirects=[];
+    const controller=new SurveyEntryController({auth:{},subscribe:(_auth,listener)=>{callback=listener;subscriptions++;return ()=>{};},resolveRole:async()=>role,
+      window:{location:{href:'https://presence.test/index.html',replace:url=>redirects.push(url)}}});
+    controller.initialize();controller.initialize();assert.equal(subscriptions,1);
+    await callback(null);assert.equal(redirects.length,0,'signed-out users stay on login');
+    await callback({uid:'saved'});await callback({uid:'saved'});
+    assert.deepEqual(redirects,[`pages/${role}-dashboard.html`]);controller.dispose();
+  }
+});
+
+test('automatic login respects inactive profiles, read failures, manual sign-in and disposal', async () => {
+  const {SurveyEntryController}=await moduleAt('SurveyEntryController');
+  let busy=false,finish;const redirects=[];
+  const controller=new SurveyEntryController({auth:{},subscribe:()=>()=>{},resolveRole:async()=>null,isLoginBusy:()=>busy,
+    window:{location:{href:'https://presence.test/index.html',replace:url=>redirects.push(url)}}});
+  await controller.resume({uid:'inactive'});assert.equal(redirects.length,0);
+  controller.resolveRole=async()=>{throw Error('offline');};await assert.rejects(controller.resume({uid:'one'}),/offline/);assert.equal(redirects.length,0);
+  controller.resolveRole=()=>new Promise(resolve=>{finish=resolve;});
+  const manual=controller.resume({uid:'one'});busy=true;finish('student');await manual;assert.equal(redirects.length,0);
+  busy=false;const leaving=controller.resume({uid:'one'});controller.dispose();finish('admin');await leaving;assert.equal(redirects.length,0);
+});
+
+test('survey controller guards duplicate saves and cancels submissions after leaving during GPS', async () => {
+  const { SurveyController } = await moduleAt('SurveyController');
+  const { SurveyPolicy } = await moduleAt('SurveyPolicy');
+  let releaseLocation, saves = 0;
+  const messages = [];
+  const controller = new SurveyController({ repository: { uid: 'student', submit: async () => saves++ },
+    locationService: { check: () => new Promise(resolve => { releaseLocation = resolve; }) },
+    profile: () => ({}), canManage: false, escapeHtml: value => value, openView() {},
+    showToast: (...args) => messages.push(args), document: {},
+    window: { location: { href: 'https://school.test/pages/student-dashboard.html' } },
+    policy: new SurveyPolicy({ now: () => 5000 })
+  });
+  controller.visible = true; controller.selectedEvent = { id: 'event' }; controller.config = config();
+  controller.workspace = { querySelector: () => null };
+  const labels = [];
+  controller.loading = { start: (key, button, label) => labels.push(label), update: (key, label) => labels.push(label), reset() {}, finish() {} };
+  const form = { matches: selector => selector.includes('[data-survey-answer]'), querySelector: () => ({}), elements: { answer: { value: 'Yes' } } };
+  const event = { target: form, preventDefault() {} };
+  const pending = controller.handleSubmit(event);
+  assert.equal(controller.busy, true); await controller.handleSubmit(event);
+  controller.generation++; controller.visible = false;
+  releaseLocation({ result: 'inside' }); await pending;
+  assert.equal(saves, 0); assert.equal(controller.busy, false);
+  assert.ok(labels.includes('Checking location…')); assert.match(messages[0][1], /view changed/);
+});
+
+test('survey screens keep concise location notice and move guidance into accessible instructions', async () => {
+  const { SurveyController } = await moduleAt('SurveyController');
+  const { SurveyPolicy } = await moduleAt('SurveyPolicy');
+  const controller = new SurveyController({ repository: { uid: 'student' }, locationService: {},
+    profile: () => ({}), canManage: false, escapeHtml: value => String(value).replaceAll('<', '&lt;'),
+    openView() {}, showToast() {}, document: {},
+    window: { location: { href: 'https://school.test/' }, localStorage: { getItem: () => 'Yes' } },
+    policy: new SurveyPolicy({ now: () => 5000 }) });
+  controller.workspace = { innerHTML: '' }; controller.selectedEvent = { id: 'event', name: '<Meeting>' }; controller.config = config();
+  controller.renderStudent();
+  const html = controller.workspace.innerHTML;
+  assert.match(html, /&lt;Meeting>/); assert.match(html, /<details class="survey-instructions"><summary>How it works<\/summary>/);
+  assert.match(html, /Location: first answer · Submission times recorded/);
+  assert.match(html, /<dl class="survey-window">/); assert.match(html, /value="Yes" checked/);
+  assert.match(html, /data-survey-message role="status" hidden/);
+  assert.doesNotMatch(html, /Only submitted answers are saved to your account/);
+  controller.canManage = true; controller.loadResponses = async () => {};
+  await controller.renderAdmin();
+  assert.match(controller.workspace.innerHTML, /How it works/); assert.match(controller.workspace.innerHTML, /survey-results-heading">Responses/);
+  const css = fs.readFileSync(path.join(root, 'assets/css/dashboard.css'), 'utf8');
+  assert.match(css, /event-card-actions > \.badge \{ flex-shrink: 0; white-space: nowrap;/);
+});
+
+test('response search and sorting use IDs/names and historical roster sections without mutating rows', async () => {
+  const { SurveyResponseList } = await moduleAt('SurveyResponseList');
+  const list = new SurveyResponseList();
+  const rows = [{ studentUid: 'a', studentName: 'Zoe', studentId: 'ID-10', status: 'completed', updatedAt: new Date(1000) },
+    { studentUid: 'b', studentName: 'Apollo', studentId: 'ID-2', status: 'needs-review', updatedAt: new Date(2000) }];
+  const event = { attendanceRoster: { a: '2B', b: '2A' } };
+  assert.deepEqual(list.apply(rows, event).map(row => row.studentUid), ['b', 'a']);
+  list.filters.sort = 'id'; assert.deepEqual(list.apply(rows, event).map(row => row.studentId), ['ID-2', 'ID-10']);
+  list.filters.search = 'APOL'; assert.equal(list.apply(rows, event)[0].studentUid, 'b');
+  list.filters.search = ''; list.filters.section = '2B'; assert.equal(list.apply(rows, event)[0].studentUid, 'a');
+  list.filters.status = 'needs-review'; assert.equal(list.apply(rows, event).length, 0);
+  assert.deepEqual(rows.map(row => row.studentUid), ['a', 'b']); assert.equal(list.section(rows[0], {}), 'Unknown');
+});
+
+test('survey action loading blocks repeated clicks and restores failures; toggle requires confirmation', async () => {
+  const { SurveyController } = await moduleAt('SurveyController');
+  let writes = 0, release, resets = 0;
+  const controller = new SurveyController({ repository: { setEnabled: async () => writes++ }, locationService: {},
+    profile: () => ({}), canManage: true, escapeHtml: String, openView() {}, showToast() {}, document: {},
+    window: { location: { href: 'https://school.test/' } } });
+  controller.loading = { start() {}, reset() { resets++; } };
+  const action = controller.runAction({}, 'Refreshing…', () => new Promise(resolve => { release = resolve; }));
+  await controller.runAction({}, 'Refreshing…', () => writes++); assert.equal(writes, 0);
+  release(); await action; assert.equal(controller.busy, false);
+  await assert.rejects(controller.runAction({}, 'Saving…', async () => { throw Error('offline'); }), /offline/);
+  assert.equal(controller.busy, false); assert.equal(resets, 2);
+  controller.visible = true; controller.selectedEvent = { id: 'event' }; controller.config = { enabled: true };
+  controller.confirmation = { open: async () => false }; await controller.toggleSurvey({}); assert.equal(writes, 0);
+  controller.confirmation.open = async () => true; controller.renderAdmin = async () => {};
+  await controller.toggleSurvey({}); assert.equal(writes, 1); assert.equal(controller.config.enabled, false);
+  const css = fs.readFileSync(path.join(root, 'assets/css/survey.css'), 'utf8');
+  assert.match(css, /\.sidebar \.nav-list \{ display:flex; flex-direction:row; flex-wrap:nowrap;/);
+});
+
+test('survey confirmation dialog reuses its instance and settles cancel/cleanup safely', async () => {
+  const { SurveyConfirmationController } = await moduleAt('SurveyConfirmationController');
+  let created = 0, opened = 0, removed = 0;
+  const nodes = new Map(); const get = key => { if (!nodes.has(key)) nodes.set(key, { textContent: '', addEventListener() {}, focus() {} }); return nodes.get(key); };
+  const dialog = { setAttribute() {}, querySelector: get, addEventListener() {}, showModal() { opened++; }, close() {}, remove() { removed++; } };
+  const controller = new SurveyConfirmationController({ document: { createElement() { created++; return dialog; }, body: { append() {} } } });
+  const first = controller.open(false); assert.match(get('p').textContent, /saved progress/);
+  assert.equal(await controller.open(true), false); controller.finish(true); assert.equal(await first, true);
+  const second = controller.open(true); assert.match(get('p').textContent, /deadline will not change/);
+  controller.dispose(); assert.equal(await second, false); assert.equal(created, 1); assert.equal(opened, 2); assert.equal(removed, 1);
+});
+
+test('destructive confirmation requires five elapsed seconds, an explicit click, and clears its timer', async () => {
+  const { SurveyConfirmationController } = await moduleAt('SurveyConfirmationController');
+  let now = 1000, tick, cancelled = 0;
+  const nodes = new Map(); const get = key => { if (!nodes.has(key)) nodes.set(key, { textContent: '', disabled: false, addEventListener() {}, focus() {} }); return nodes.get(key); };
+  const dialog = { setAttribute() {}, querySelector: get, addEventListener() {}, showModal() {}, close() {}, remove() {} };
+  const controller = new SurveyConfirmationController({ document: { createElement: () => dialog, body: { append() {} } }, now: () => now, schedule: fn => { tick = fn; return 1; }, cancelTimer: () => cancelled++ });
+  const pending = controller.open(false, { title: 'Delete?', label: 'Delete permanently', countdown: 5 });
+  assert.equal(get('[data-confirm]').disabled, true); assert.equal(get('[data-confirm]').textContent, 'Wait 5s');
+  controller.finish(true); assert.ok(controller.resolve);
+  now = 5999; tick(); assert.equal(get('[data-confirm]').disabled, true);
+  now = 6000; tick(); assert.equal(get('[data-confirm]').disabled, false); assert.ok(controller.resolve);
+  controller.finish(true); assert.equal(await pending, true); assert.equal(cancelled, 1);
+  const next = controller.open(false, { countdown: 5 }); controller.finish(false); assert.equal(await next, false); assert.equal(cancelled, 2);
+});
+
+test('confirmation button clicks use receiver-safe timer cleanup and settle once', async () => {
+  let now = 1000, tick, cancelled = 0, closed = 0;
+  const context = vm.createContext({
+    setInterval(fn) { tick = fn; return 7; },
+    clearInterval: function(timer) {
+      'use strict';
+      // Browser APIs must not be invoked as methods of our controller.
+      assert.equal(this, undefined); assert.equal(timer, 7); cancelled++;
+    }
+  });
+  const source = fs.readFileSync(path.join(root, 'assets/js/controllers/SurveyConfirmationController.js'), 'utf8');
+  const module = new vm.SourceTextModule(source, { context });
+  await module.link(() => {}); await module.evaluate();
+  const nodes = new Map();
+  const get = key => {
+    if (!nodes.has(key)) nodes.set(key, {
+      listeners: {}, textContent: '', disabled: false, focus() {},
+      addEventListener(type, handler) { this.listeners[type] = handler; },
+      click() { if (!this.disabled) this.listeners.click?.(); }
+    });
+    return nodes.get(key);
+  };
+  const dialog = { setAttribute() {}, querySelector: get, addEventListener() {}, showModal() {}, close() { closed++; }, remove() {} };
+  const controller = new module.namespace.SurveyConfirmationController({ document: { createElement: () => dialog, body: { append() {} } }, now: () => now });
+  const cancelledAction = controller.open(false, { countdown: 5 });
+  get('[data-cancel]').click(); assert.equal(await cancelledAction, false);
+  assert.equal(cancelled, 1); assert.equal(closed, 1);
+  const confirmedAction = controller.open(false, { countdown: 5, label: 'Delete permanently' });
+  get('[data-confirm]').click(); assert.ok(controller.resolve);
+  now += 5000; tick(); assert.equal(get('[data-confirm]').textContent, 'Delete permanently');
+  get('[data-confirm]').click(); assert.equal(await confirmedAction, true);
+  assert.equal(cancelled, 2); assert.equal(closed, 2); assert.equal(controller.resolve, null);
+});
+
+test('confirmation still closes and resolves if timer cleanup throws', async () => {
+  const { SurveyConfirmationController } = await moduleAt('SurveyConfirmationController');
+  const node = { addEventListener() {}, focus() {} }; let closed = 0;
+  const dialog = { setAttribute() {}, querySelector: () => node, addEventListener() {}, showModal() {}, close() { closed++; } };
+  const controller = new SurveyConfirmationController({ document: { createElement: () => dialog, body: { append() {} } }, schedule: () => 1, cancelTimer: () => { throw Error('timer cleanup'); } });
+  const pending = controller.open(false, { countdown: 5 });
+  assert.throws(() => controller.finish(false), /timer cleanup/);
+  assert.equal(await pending, false); assert.equal(closed, 1); assert.equal(controller.timer, null);
+});
+
+test('survey deletion removes every review before its response and supports resuming a partial failure', async () => {
+  const { SurveyDeletionService } = await moduleAt('SurveyDeletionService');
+  const responses = [{ id: 'a', kind: 'response' }, { id: 'b', kind: 'response' }];
+  const reviews = { a: [{ id: 'audit', kind: 'review' }], b: [] }; const order = []; let fail = true;
+  const repository = {
+    beginDeletion: async () => order.push('lock'),
+    deletionPage: async (event, uid) => uid ? reviews[uid] : responses.slice(0, 1),
+    deleteDocuments: async docs => { const record = docs[0]; if (record.kind === 'response' && fail) { fail = false; throw Error('offline'); }
+      order.push(record.kind); if (record.kind === 'review') reviews.a = []; else responses.shift(); },
+    finishDeletion: async () => order.push('parent')
+  };
+  const service = new SurveyDeletionService({ repository });
+  await assert.rejects(service.remove('event'), /offline/); assert.deepEqual(order, ['lock', 'review']);
+  await service.remove('event'); assert.deepEqual(order, ['lock', 'review', 'lock', 'response', 'response', 'parent']);
+});
+
+test('archive policy stops answering and rules gate deletion on archived locked surveys', async () => {
+  const { SurveyPolicy } = await moduleAt('SurveyPolicy');
+  const policy = new SurveyPolicy({ now: () => 5000 });
+  assert.throws(() => policy.assertOpen({ ...config(), archived: true }), /not open/);
+  assert.throws(() => policy.assertOpen({ ...config(), deleting: true }), /not open/);
+  const rules = fs.readFileSync(path.join(root, 'firestore.rules'), 'utf8');
+  assert.match(rules, /allow delete: if canManageSurveys\(\) && surveyIsDeleting\(eventId\)/);
+  assert.match(rules, /return surveyAcceptsWrites\(eventId\) && config.enabled/);
+});
+
+test('archive/restore retains answers and deletion locks reopening before removing only survey metadata', async () => {
+  const { repository, documents } = await repositoryHarness();
+  documents.set('events/event', { name: 'Meeting', hasSurvey: true });
+  documents.set('eventSurveys/event', config());
+  documents.set('eventSurveys/event/responses/student', { answers: { q0: { value: 'Yes' } } });
+  documents.set('attendance/student_event', { present: true });
+  await assert.rejects(repository.beginDeletion('event'), /Only archived/);
+  await repository.setArchived('event', true);
+  assert.equal(documents.get('events/event').surveyArchived, true);
+  await assert.rejects(repository.setEnabled('event', true), /Restore/);
+  assert.ok(documents.get('eventSurveys/event/responses/student').answers.q0);
+  await repository.setArchived('event', false); assert.equal(documents.get('eventSurveys/event').enabled, false);
+  await repository.setArchived('event', true); await repository.beginDeletion('event');
+  await assert.rejects(repository.setArchived('event', false), /deletion already started/);
+  await repository.deleteDocuments([{ ref: { path: 'eventSurveys/event/responses/student' } }]);
+  await repository.finishDeletion('event');
+  assert.equal(documents.has('eventSurveys/event'), false); assert.equal(documents.get('events/event').hasSurvey, false);
+  assert.equal(documents.get('attendance/student_event').present, true);
+});
+
+test('survey tabs remain responsive while an event refresh is pending and timeout unlocks retry', async () => {
+  const {SurveyController}=await moduleAt('SurveyController');
+  let timeout, resolveRefresh, renders=0, reset=0;
+  const controller=new SurveyController({repository:{},canManage:true,document:{},window:{location:{href:'https://school.test/'},setTimeout:fn=>{timeout=fn;return 1;},clearTimeout(){}},showToast(){}});
+  controller.loading={start(){},reset(){reset++;}};
+  controller.renderList=()=>{renders++;};controller.workspace={innerHTML:''};
+  controller.refresh=()=>new Promise(resolve=>{resolveRefresh=resolve;});
+  const pending=controller.refreshEvents({});
+  assert.equal(controller.busy,false);
+  const tab={dataset:{surveyPanel:'archive'},hasAttribute:name=>name==='data-survey-panel'};
+  await controller.handleClick({target:{closest:()=>tab}});
+  assert.equal(controller.archivePanel,true);assert.equal(renders,1);
+  timeout();await assert.rejects(pending,/timed out/);
+  assert.equal(controller.refreshing,false);assert.equal(reset,1);
+  resolveRefresh();
+});
