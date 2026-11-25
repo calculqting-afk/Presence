@@ -9,7 +9,8 @@ export class FineEligibilityService {
       const end = this.summary.checkoutCloseDate(event).getTime();
       return Number.isFinite(end) && this.summary.now().getTime() > end;
     });
-    return this.summary.summarize(student, finished, records, coverage).absences;
+    return this.summary.summarize(student, finished, records, coverage).absences
+      .filter(event => this.summary.eligibility(student, event) === 'eligible');
   }
   async verify(student, eventId) {
     const [event, records] = await Promise.all([this.loadEvent(eventId), this.loadAttendance(student.uid)]);

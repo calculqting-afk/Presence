@@ -3154,3 +3154,79 @@ for(const role of ['admin','student'])for(const fails of [false,true]){
     navigation.dispose();subscriptions.stop();
   });
 }
+
+
+test('correction arrival follows the Philippine cutoff, including the exact boundary', async () => {
+  const { correctionValues } = await isolatedModule('assets/js/controllers/attendance/AttendanceCorrectionController.js');
+  const event = {date:'2020-10-01',timeOut:'11:00',checkInCutoff:'09:00'};
+  const input = {event,eventDate:event.date,checkIn:'2020-10-01T08:59:59',arrival:'late',reason:'Verified with event staff'};
+  assert.equal(correctionValues(input).arrival,'present');
+  assert.equal(correctionValues({...input,checkIn:'2020-10-01T09:00:00',arrival:'present'}).arrival,'late');
+  assert.equal(correctionValues({...input,event:{...event,lateAfterAt:new Date('2020-10-01T10:00:00+08:00')},checkIn:'2020-10-01T09:30:00'}).arrival,'present');
+  const absent=correctionValues({...input,arrival:'absent',checkIn:'',checkOut:''});
+  assert.equal(absent.start,null);assert.equal(absent.end,null);
+  assert.throws(()=>correctionValues({...input,arrival:'absent',reason:''}),/reason/);
+});
+
+test('absent correction preserves exact original attendance in its immutable audit and clears active times', async () => {
+  const {AttendanceCorrectionController,correctionVersion}=await isolatedModule('assets/js/controllers/attendance/AttendanceCorrectionController.js');
+  const before={studentUid:'s',eventId:'e',checkedInAt:new Date('2020-10-01T07:00:00+08:00'),checkedOutAt:new Date('2020-10-01T11:00:00+08:00'),attendedAt:new Date('2020-10-01T07:00:00+08:00'),status:'completed',arrivalStatus:'present',duringAttendance:{checkpointId:'old'},checkInLocation:{latitude:1},checkOutLocation:{latitude:1}};
+  const writes=[];
+  const controller=new AttendanceCorrectionController({db:{},user:{uid:'admin'},role:'attendance_admin',getStudents:()=>[{uid:'s',accountId:'123',active:true,section:'2A'}],getEvents:()=>[{id:'e',date:'2020-10-01',name:'Event',audience:'All students',timeIn:'07:00',timeOut:'11:00'}],transaction:async(_,run)=>run({get:async()=>({exists:()=>true,data:()=>before}),set:(ref,data)=>writes.push(data)})});
+  const input={studentUid:'s',eventId:'e',arrival:'absent',reason:'Verified absence with event staff',expectedVersion:correctionVersion(before)};
+  await controller.save(input);
+  assert.equal(writes[0].status,'absent');assert.equal(writes[0].arrivalStatus,'absent');
+  for(const field of ['attendedAt','checkedInAt','checkedOutAt','checkInLocation','checkOutLocation']) assert.equal(field in writes[0],false);
+  assert.equal(writes[1].before,before);assert.equal(writes[1].after,writes[0]);assert.equal(writes[0].duringAttendance,before.duringAttendance);
+  assert.equal(writes[2].action,'attendance-corrected');assert.equal(writes.length,3);
+  await assert.rejects(controller.save({...input,expectedVersion:'stale'}),/changed since/);assert.equal(writes.length,3);
+  await assert.rejects(controller.save({...input,requestId:'pending'}),/Decline/);assert.equal(writes.length,3);
+});
+
+test('review and cancel write nothing; only explicit confirmation saves an absent correction', async () => {
+  const browser=fakeBrowser(),{AttendanceCorrectionController}=await isolatedModule('assets/js/controllers/attendance/AttendanceCorrectionController.js',{},browser);
+  const controller=new AttendanceCorrectionController({db:{},user:{uid:'admin'},role:'attendance_admin',escapeHtml:String,getStudents:()=>[{uid:'s',accountId:'123'}],getEvents:()=>[{id:'e',date:'2020-10-01',name:'Event',timeIn:'07:00',checkInCutoff:'09:00',timeOut:'11:00',audience:'All students'}],notify:()=>{}});
+  controller.initialize();controller.open({studentUid:'s',eventId:'e',status:'absent'});
+  const field=id=>browser.document.querySelector('#'+id);field('correctionReason').value='Verified absence with event staff';
+  let saves=0;controller.save=async()=>{saves++;};
+  await controller.submit();assert.ok(controller.review);assert.equal(saves,0);assert.equal(field('correctionReview').hidden,false);
+  await controller.submit();assert.equal(saves,0);assert.match(field('correctionSubmitError').textContent,/Confirm/);
+  field('correctionAbsentConfirm').checked=true;controller.onChange({target:{id:'correctionAbsentConfirm'}});assert.ok(controller.review);
+  await controller.submit();assert.equal(saves,1);assert.equal(controller.modal.hidden,true);
+  controller.open({studentUid:'s',eventId:'e',status:'absent'});controller.close();assert.equal(saves,1);
+  controller.dispose();
+});
+
+test('failed correction saves retain the reviewed proposal for retry and duplicate submits are blocked', async () => {
+  const browser=fakeBrowser(),{AttendanceCorrectionController}=await isolatedModule('assets/js/controllers/attendance/AttendanceCorrectionController.js',{},browser);
+  const event={id:'e',date:'2020-10-01',timeIn:'07:00',checkInCutoff:'09:00',timeOut:'11:00'};
+  const controller=new AttendanceCorrectionController({db:{},user:{uid:'admin'},role:'attendance_admin',escapeHtml:String,getStudents:()=>[],getEvents:()=>[event],notify:()=>{}});
+  controller.modal=browser.document.querySelector('#attendanceCorrectionModal');controller.modal.hidden=false;
+  const input={studentUid:'s',eventId:'e',arrival:'present',reason:'Verified with staff'};
+  controller.showReview(null,input,{start:new Date('2020-10-01T08:00:00+08:00'),end:null,arrival:'present',reason:input.reason});
+  let rejectSave,calls=0;controller.save=()=>{calls++;return new Promise((resolve,reject)=>{rejectSave=reject;});};
+  const pending=controller.submit();await controller.submit();assert.equal(calls,1);rejectSave(Error('Connection unavailable'));await pending;
+  assert.ok(controller.review);assert.equal(controller.modal.hidden,false);assert.match(browser.document.querySelector('#correctionSubmitError').textContent,/Connection/);assert.equal(browser.document.querySelector('#saveAttendanceCorrection').disabled,false);
+});
+
+test('explicit absent corrections are excluded from attended totals and preserved in student summary', async () => {
+  const {AttendanceSummaryService}=await isolatedModule('assets/js/controllers/reports/AttendanceSummaryService.js');
+  const {StudentAttendanceSummaryService}=await isolatedModule('assets/js/controllers/reports/StudentAttendanceSummaryService.js');
+  const student={uid:'s',section:'2A',active:true},event={id:'e',date:'2020-10-01',name:'Event',timeIn:'07:00',timeOut:'11:00',checkOutCutoff:'12:00',attendanceRoster:{s:'2A'},audience:'All students'};
+  const record={studentUid:'s',eventId:'e',eventDate:event.date,status:'absent',arrivalStatus:'absent',recordSource:'admin-corrected'};
+  const summary=new AttendanceSummaryService({closeDate:()=>new Date(1),checkoutCloseDate:()=>new Date(2),now:()=>new Date(3)}).summarize(student,[event],[record]);
+  assert.equal(summary.attendedCount,0);assert.equal(summary.presentDays,0);assert.equal(summary.absences.length,1);
+  const projection=new StudentAttendanceSummaryService().project({student,events:[event],attendance:[record],verified:true},{},Date.parse('2020-10-01T10:00:00+08:00'));
+  assert.equal(projection.rows[0].status,'absent');assert.equal(projection.counts.absent,1);assert.equal(projection.counts.present,0);
+});
+
+
+test('Present selection cannot silently ignore a late check-in while the reason is edited',async()=>{
+ const browser=fakeBrowser(),{AttendanceCorrectionController}=await isolatedModule('assets/js/controllers/attendance/AttendanceCorrectionController.js',{},browser);
+ const controller=new AttendanceCorrectionController({role:'attendance_admin',escapeHtml:String,getStudents:()=>[{uid:'s',accountId:'123'}],getEvents:()=>[{id:'e',name:'Event',date:'2020-10-01',timeIn:'07:00',checkInCutoff:'09:00',timeOut:'11:00'}]});
+ controller.initialize();controller.open({studentUid:'s',eventId:'e',arrivalStatus:'late',checkedInAt:new Date('2020-10-01T10:00:00+08:00')});
+ const choice={dataset:{correctionStatus:'present'}};controller.onClose({target:{closest:s=>s==='[data-correction-status]'?choice:null}});
+ const field=id=>browser.document.querySelector('#'+id);assert.equal(field('saveAttendanceCorrection').disabled,true);assert.match(field('correctionTimeError').textContent,/Adjust the time/);
+ field('correctionReason').value='Verified with event staff';controller.onChange({target:{id:'correctionReason'}});assert.equal(field('saveAttendanceCorrection').disabled,true);
+ field('correctionCheckIn').value='2020-10-01T08:55:00';controller.onChange({target:{id:'correctionCheckIn'}});assert.equal(field('saveAttendanceCorrection').disabled,false);assert.equal(field('correctionArrival').value,'present');controller.dispose();
+});

@@ -59,3 +59,10 @@ test('fine Rules enforce server end time, roster membership and canonical attend
   assert.match(block, /request.resource.data.studentUid == resource.data.studentUid/);
   assert.match(block, /request.resource.data.eventId == resource.data.eventId/);
 });
+
+
+test('manual absence remains a fine candidate only for a closed and confirmed roster session',async()=>{
+ const f=await fixture();f.records.push({studentUid:'student',eventId:'present',status:'absent'});f.records.splice(0,1);
+ f.records.push({studentUid:'student',eventId:'ongoing',status:'absent'},{studentUid:'student',eventId:'legacy',status:'absent'});
+ assert.deepEqual(f.service.candidates(f.student,f.events,f.records).map(e=>e.id),['absent','present']);
+});

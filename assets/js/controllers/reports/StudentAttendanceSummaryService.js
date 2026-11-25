@@ -42,7 +42,8 @@ export class StudentAttendanceSummaryService {
       const malformed = Boolean(timeIssue) || Boolean(record && ((record.checkedInAt || record.attendedAt) && !hasCheckIn
         || record.checkedOutAt && !hasCheckOut || hasCheckIn && checkIn > now || hasCheckOut && (!hasCheckIn || checkOut < checkIn || checkOut > now)));
       let status = 'review', label = attendanceReviewLabel(timeIssue) || 'Needs review';
-      if (event && Number.isFinite(close) && !malformed) {
+      if (record?.status === 'absent' && record.recordSource === 'admin-corrected' && !hasCheckIn && !hasCheckOut) { status = 'absent'; label = 'Absent — admin correction'; }
+      else if (event && Number.isFinite(close) && !malformed) {
         if (hasCheckIn && hasCheckOut) { status = record.arrivalStatus === 'late' ? 'late' : 'present'; label = 'Completed'; }
         else if (hasCheckIn) {
           if (now <= close) { status = 'awaiting'; label = 'Awaiting checkout'; }
@@ -55,7 +56,7 @@ export class StudentAttendanceSummaryService {
       const arrival = hasCheckIn && !malformed ? record.arrivalStatus === 'late' ? 'Late' : 'Present' : '';
       rows.push({ eventId: id, group, title, date, session, status, label, arrival, checkIn: hasCheckIn ? checkIn : null,
         checkOut: hasCheckOut ? checkOut : null, corrected: record?.recordSource === 'admin-corrected',
-        canRequest: verified && event && (['absent', 'incomplete'].includes(status) || Boolean(timeIssue) && now > close) && EventAudiencePolicy.canAttend(student, event),
+        canRequest: verified && event && now > close && (['absent', 'incomplete'].includes(status) || Boolean(timeIssue)) && EventAudiencePolicy.canAttend(student, event),
         requestKind: timeIssue ? 'incorrect-attendance' : status === 'incomplete' ? 'missed-checkout' : 'missed-check-in' });
     }
     const selected = rows.filter(row => (!filters.month || row.date.slice(0, 7) === filters.month)
