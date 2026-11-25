@@ -1,4 +1,9 @@
 {
+  "1.8.33": [
+    "Fixed typing minutes when correcting attendance times.",
+    "Correction review now shows the administrator’s name.",
+    "Shorter instructions and clearer attendance correction messages."
+  ],
   "1.8.32": [
     "Absent corrections enabled with updated database permissions.",
     "Review Present, Late and Absent changes before saving.",

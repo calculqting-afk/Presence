@@ -352,6 +352,7 @@ export class AdminDashboard {
       db,
       user: currentUser,
       role: currentUserRole,
+      getActorName: () => dashboard.document.querySelector('[data-admin-name]')?.textContent,
       getStudents: () => dashboard.students,
       getEvents: () => dashboard.events,
       eligibility: (student, event) => dashboard.summaryService.eligibility(student, event),

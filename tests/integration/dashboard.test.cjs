@@ -3226,7 +3226,42 @@ test('Present selection cannot silently ignore a late check-in while the reason 
  const controller=new AttendanceCorrectionController({role:'attendance_admin',escapeHtml:String,getStudents:()=>[{uid:'s',accountId:'123'}],getEvents:()=>[{id:'e',name:'Event',date:'2020-10-01',timeIn:'07:00',checkInCutoff:'09:00',timeOut:'11:00'}]});
  controller.initialize();controller.open({studentUid:'s',eventId:'e',arrivalStatus:'late',checkedInAt:new Date('2020-10-01T10:00:00+08:00')});
  const choice={dataset:{correctionStatus:'present'}};controller.onClose({target:{closest:s=>s==='[data-correction-status]'?choice:null}});
- const field=id=>browser.document.querySelector('#'+id);assert.equal(field('saveAttendanceCorrection').disabled,true);assert.match(field('correctionTimeError').textContent,/Adjust the time/);
+ const field=id=>browser.document.querySelector('#'+id);assert.equal(field('saveAttendanceCorrection').disabled,true);assert.match(field('correctionTimeError').textContent,/For Present, set check-in before/);
  field('correctionReason').value='Verified with event staff';controller.onChange({target:{id:'correctionReason'}});assert.equal(field('saveAttendanceCorrection').disabled,true);
  field('correctionCheckIn').value='2020-10-01T08:55:00';controller.onChange({target:{id:'correctionCheckIn'}});assert.equal(field('saveAttendanceCorrection').disabled,false);assert.equal(field('correctionArrival').value,'present');controller.dispose();
+});
+
+
+test('correction validation leaves unchanged native time constraints alone while typing',async()=>{
+ const browser=fakeBrowser(),{AttendanceCorrectionController}=await isolatedModule('assets/js/controllers/attendance/AttendanceCorrectionController.js',{},browser);
+ const event={id:'e',date:'2020-10-01',name:'Event',timeIn:'07:00',checkInCutoff:'09:00',timeOut:'11:00'};
+ const counts={},field=id=>browser.document.querySelector('#'+id);
+ for(const id of ['correctionCheckIn','correctionCheckOut'])for(const property of ['min','max','disabled','required']){
+  let value=['disabled','required'].includes(property)?false:'';const key=id+':'+property;counts[key]=0;
+  Object.defineProperty(field(id),property,{configurable:true,get:()=>value,set:next=>{value=next;counts[key]++;}});
+ }
+ const controller=new AttendanceCorrectionController({role:'attendance_admin',escapeHtml:String,getStudents:()=>[{uid:'s',accountId:'123'}],getEvents:()=>[event]});
+ controller.initialize();controller.open({studentUid:'s',eventId:'e',checkedInAt:new Date('2020-10-01T08:42:06+08:00')});
+ const initial={...counts};
+ for(const minute of ['03','37']){field('correctionCheckIn').value='2020-10-01T08:'+minute+':06';controller.onChange({target:{id:'correctionCheckIn'}});}
+ field('correctionCheckOut').value='2020-10-01T11:37:06';controller.onChange({target:{id:'correctionCheckOut'}});
+ assert.deepEqual(counts,initial);assert.equal(field('correctionCheckIn').value,'2020-10-01T08:37:06');
+ event.date='2020-10-02';controller.refreshValidation();
+ assert.equal(field('correctionCheckIn').min,'2020-10-02T00:00:00');assert.equal(field('correctionCheckOut').max,'2020-10-02T23:59:59');
+ assert.equal(counts['correctionCheckIn:min'],initial['correctionCheckIn:min']+1);
+ field('correctionArrival').value='absent';controller.refreshValidation();assert.equal(field('correctionCheckIn').disabled,true);assert.equal(field('correctionCheckIn').required,false);
+ field('correctionArrival').value='present';controller.refreshValidation();assert.equal(field('correctionCheckIn').disabled,false);assert.equal(field('correctionCheckIn').required,true);controller.dispose();
+});
+
+test('correction review uses the current administrator profile name instead of login email or UID',async()=>{
+ const browser=fakeBrowser(),{AttendanceCorrectionController}=await isolatedModule('assets/js/controllers/attendance/AttendanceCorrectionController.js',{},browser);
+ let name='School Administrator';
+ const controller=new AttendanceCorrectionController({user:{uid:'admin-uid',email:'login@example.test',displayName:'Old name'},getActorName:()=>name,escapeHtml:String,getStudents:()=>[],getEvents:()=>[]});
+ const values={arrival:'absent',start:null,end:null,reason:'Verified absence with staff'};
+ controller.showReview(null,{studentUid:'s',eventId:'e'},values);
+ const actor=browser.document.querySelector('#correctionReviewActor');assert.equal(actor.textContent,'School Administrator');
+ name='  Updated Admin Name  ';controller.showReview(null,{studentUid:'s',eventId:'e'},values);assert.equal(actor.textContent,'Updated Admin Name');
+ name='';controller.showReview(null,{studentUid:'s',eventId:'e'},values);assert.equal(actor.textContent,'Administrator');
+ const fallback=new AttendanceCorrectionController({user:{uid:'private-uid',email:'private@example.test'},escapeHtml:String,getStudents:()=>[],getEvents:()=>[]});
+ fallback.showReview(null,{studentUid:'s',eventId:'e'},values);assert.equal(actor.textContent,'Administrator');
 });
