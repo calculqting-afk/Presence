@@ -115,6 +115,22 @@ test('APK schedules opening notifications and replaces check-in alerts with chec
   s.attendance[0].status = 'completed'; await N.replacePhoneReminders('student', P.reminders(s, now));
   assert.equal(f.pending().length, 1); await N.clearPhoneReminders();
 });
+
+test('Absent corrections cancel scheduled attendance reminders while other sessions continue normally',async()=>{
+ const f=nativeFixture(),N=await load('PhoneAttendanceReminders',f.globals),{AttendanceAlertPolicy:P}=await load('AttendanceAlertPolicy');
+ const s=state();s.events.push({...s.events[0],id:'afternoon'});
+ N.activatePhoneReminders('student');await N.replacePhoneReminders('student',P.reminders(s,now));
+ assert.ok(f.pending().some(item=>item.extra?.eventId==='morning'));
+ s.attendance=[{eventId:'morning',status:'absent',arrivalStatus:'absent',recordSource:'admin-corrected'}];
+ const after=P.reminders(s,now);assert.ok(after.length>0);assert.ok(after.every(item=>item.eventId==='afternoon'));
+ await N.replacePhoneReminders('student',after);
+ assert.equal(f.pending().some(item=>item.extra?.eventId==='morning'),false);
+ assert.ok(f.pending().some(item=>item.extra?.eventId==='afternoon'));assert.ok(f.pending().some(item=>item.id===1));
+ s.attendance=[{eventId:'morning',status:'checked-in',checkedInAt:new Date(now)}];
+ assert.ok(P.reminders(s,now).filter(item=>item.eventId==='morning').every(item=>item.action==='checkout'));
+ assert.ok(P.reminders(s,now).some(item=>item.eventId==='morning'));
+ await N.clearPhoneReminders();
+});
 test('logout fences queued old-account scheduling; permission denial prevents scheduling', async () => {
   const f = nativeFixture(), N = await load('PhoneAttendanceReminders', f.globals);
   N.activatePhoneReminders('old'); const scheduled = N.replacePhoneReminders('old', [reminder('old')]);

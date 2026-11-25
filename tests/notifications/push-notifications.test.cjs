@@ -50,6 +50,20 @@ test('event sync is idempotent, edits invalidate old jobs and never replay past 
   const published=[...f.store].find(([,v])=>v.kind==='published')[0].split('/')[1];
   assert.equal(await f.service.deliver(published,0,()=>false),true);assert.equal(f.sent.length,0);
 });
+
+test('push delivery skips manually marked Absent records and resumes normal check-in reminders after removal',async()=>{
+ const {eligible,milestones}=await import('../../workers/notifications/src/policy.js');
+ const e=event(),student={uid:'student',active:true,section:'2A'},absent={eventId:'morning',status:'absent',recordSource:'admin-corrected'};
+ for(const item of milestones(e,+time('06:00')))assert.equal(eligible(student,e,absent,item.kind,item.at),false,item.kind);
+ assert.equal(eligible(student,e,absent,'during-open',+time('08:00')),false);
+ const f=await fixture();await f.service.syncEvent('morning');
+ const [path,job]=[...f.store].find(([,v])=>v.kind==='checkin-open'),id=path.split('/')[1];f.setNow(job.at);
+ f.store.set('pushDevices/device',{uid:'student',token:'sample-token',active:true,authTime:200,shard:0,expiresAt:job.expiresAt+100000});
+ f.store.set('attendance/student_morning',absent);
+ await f.service.deliver(id,0,()=>false);assert.equal(f.sent.length,0);
+ f.store.delete('pushDeliveries/'+id+'_0');f.store.delete('attendance/student_morning');
+ await f.service.deliver(id,0,()=>false);assert.equal(f.sent.length,1);
+});
 test('device registration authenticates current profile, bounds input/rate, and cannot unregister another student token',async()=>{
   const f=await fixture(),claims={sub:'student',auth_time:200},body={token:'token_'.repeat(8),installationId:'install-one'};
   assert.equal((await f.service.device(claims,body)).registered,true);

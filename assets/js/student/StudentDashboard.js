@@ -673,7 +673,7 @@ export class StudentDashboard {
         const card=[...eventGrid.querySelectorAll('[data-event-group]')].find(node=>node.dataset.eventGroup===pushGroup);
         if(card) {card.setAttribute('tabindex','-1');card.scrollIntoView?.({block:'center'});card.focus?.({preventScroll:true});dashboard.pushEventId=undefined;}
       }
-      if (dashboard.view === 'dashboard') dashboard.updateMarkup(timeline, `<div class="timeline">${activeEvents.slice(0, 4).map(event => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(AttendanceViews.title(event))}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${attendanceByEventId.has(event.id) ? '<span class="badge green">Attended</span>' : eventStatusBadge(getEventStatus(event))}</div>`).join("")}</div>`);
+      if (dashboard.view === 'dashboard') dashboard.updateMarkup(timeline, `<div class="timeline">${activeEvents.slice(0, 4).map(event => `<div class="timeline-item"><span class="timeline-time">${escapeHtml(formatEventTime(event.timeIn))}</span><div class="timeline-main"><strong>${escapeHtml(AttendanceViews.title(event))}</strong><small>${escapeHtml(formatEventDate(event.date))} · ${escapeHtml(formatTimeWindow(event))}</small></div>${attendanceByEventId.get(event.id)?.status === 'absent' ? '<span class="badge orange">Absent</span>' : attendanceByEventId.has(event.id) ? '<span class="badge green">Attended</span>' : eventStatusBadge(getEventStatus(event))}</div>`).join("")}</div>`);
     }
     if (dashboard.view === 'events') dashboard.attendanceController.syncLoadingButtons();
     dashboard.renderAttendanceSummary();

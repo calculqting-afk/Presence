@@ -3,6 +3,7 @@ export const duringTime = value => value?.toMillis?.() ?? value?.getTime?.() ?? 
 // A checkpoint is supplementary: it never changes arrival, completion, or fines.
 export class DuringAttendancePolicy {
   static state(event, record, now = Date.now()) {
+    if (record?.status === 'absent') return 'not-required';
     const checkpoint = event?.duringAttendance;
     if (record?.duringAttendance?.confirmedAt) return 'confirmed';
     if (!checkpoint?.enabled) return 'not-required';
@@ -17,6 +18,7 @@ export class DuringAttendancePolicy {
     return 'open';
   }
   static label(event, record, now = Date.now()) {
+    if (record?.status === 'absent') return 'Not applicable';
     const state = this.state(event, record, now);
     const checkpoint = event?.duringAttendance;
     if (state === 'not-required' && !record?.checkedInAt && !record?.checkedOutAt && checkpoint?.enabled
@@ -31,6 +33,7 @@ export class DuringAttendancePolicy {
 }
 
 export function duringStatusMarkup(event, record, escapeHtml, now = Date.now()) {
+  if (record?.status === 'absent') return '';
   if (!event?.duringAttendance?.enabled && !record?.duringAttendance?.confirmedAt) return '';
   const state = DuringAttendancePolicy.state(event, record, now);
   const color = state === 'confirmed' ? 'green' : state === 'missed' ? 'orange' : 'blue';

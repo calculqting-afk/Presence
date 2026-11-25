@@ -84,6 +84,23 @@ test('open checkpoint asks students to check in first while leaving confirmation
  assert.equal(P.label(event,null,event.duringAttendance.closesAt.getTime()),'Not required');
 });
 
+test('an Absent correction hides old During confirmation without changing its historical data',async()=>{
+ const {DuringAttendancePolicy:P,duringStatusMarkup}=await import('../../assets/js/core/attendance/DuringAttendancePolicy.js');
+ const f=await fixture(),body=await f.enable();await f.service.confirm(f.student,body);
+ const event=f.store.get('events/event'),original=f.store.get('attendance/student_event');
+ const absent={...structuredClone(original),status:'absent',arrivalStatus:'absent',recordSource:'admin-corrected'};
+ delete absent.checkedInAt;
+ const preserved=structuredClone(absent);
+ for(const now of [f.now()-60000,f.now(),f.now()+600000]){
+  assert.equal(P.state(event,absent,now),'not-required');
+  assert.equal(P.label(event,absent,now),'Not applicable');
+  assert.equal(duringStatusMarkup(event,absent,String,now),'');
+ }
+ assert.deepEqual(absent,preserved);assert.deepEqual(absent.duringAttendance,original.duringAttendance);
+ assert.equal(P.state(event,original,f.now()),'confirmed');
+ assert.match(duringStatusMarkup(event,original,String,f.now()),/During: Confirmed/);
+});
+
 test('event schedule edits keep enabled checkpoints in the session and preserve started confirmations',async()=>{
  const {EventSessionPolicy:E}=await import('../../assets/js/controllers/events/EventSessionPolicy.js');
  const {DuringAttendancePolicy:P}=await import('../../assets/js/core/attendance/DuringAttendancePolicy.js');

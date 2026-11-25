@@ -260,6 +260,27 @@ test('student dashboard exposes a current-events card that opens the events view
   assert.match(source, /#currentEventsMeta/);
 });
 
+test('student timeline shows Absent corrections as absent while other attendance labels stay unchanged',async()=>{
+ const names=fs.readFileSync(path.join(root,'assets/js/dashboard.js'),'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
+ const shared=Object.fromEntries(names.map(name=>[name,()=> '']));
+ Object.assign(shared,{escapeHtml:String,getEventStatus:()=> 'open',eventStatusBadge:()=> '<span>Open</span>'});
+ const browser=fakeBrowser(),{StudentDashboard}=await isolatedModule('assets/js/student/StudentDashboard.js',shared,browser);
+ const events=['absent','present','late','completed','pending'].map(id=>({id,name:id,date:'2020-10-01'}));
+ const attendance=[{eventId:'absent',status:'absent',recordSource:'admin-corrected'},
+  {eventId:'present',status:'checked-in',arrivalStatus:'present'},
+  {eventId:'late',status:'checked-in',arrivalStatus:'late'},{eventId:'completed',status:'completed'}];
+ const original=JSON.stringify(attendance);
+ const state={view:'dashboard',events,attendance,document:browser.document,currentEventsForStudent:()=>events,
+  updateMarkup:(node,html)=>{node.innerHTML=html;},renderAttendanceSummary(){}};
+ StudentDashboard.prototype.renderEvents.call(state);
+ const timeline=browser.document.querySelector('#studentEventTimeline').innerHTML;
+ assert.match(timeline,/<span class="badge orange">Absent<\/span>/);assert.equal((timeline.match(/>Attended<\/span>/g)||[]).length,3);
+ assert.equal(JSON.stringify(attendance),original);
+ state.currentEventsForStudent=()=>[events[4]];StudentDashboard.prototype.renderEvents.call(state);
+ assert.match(browser.document.querySelector('#studentEventTimeline').innerHTML,/>Open<\/span>/);
+ assert.doesNotMatch(browser.document.querySelector('#studentEventTimeline').innerHTML,/>Attended<\/span>/);
+});
+
 test('all students see events, only selected sections can act, and removed check-ins can finish checkout', async () => {
   const names = fs.readFileSync(path.join(root, 'assets/js/dashboard.js'), 'utf8').match(/export \{ ([^}]+) \}/)[1].split(', ');
   const user = { uid: 'c' }, shared = Object.fromEntries(names.map(name => [name, () => '']));

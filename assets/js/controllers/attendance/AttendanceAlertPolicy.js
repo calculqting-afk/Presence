@@ -9,7 +9,7 @@ export class AttendanceAlertPolicy {
     return events.flatMap(event => {
       const record = records.get(event.id);
       const checkedIn = Boolean(record?.checkedInAt || record?.attendedAt);
-      if (record?.checkedOutAt || record?.status === 'completed') return [];
+      if (record?.checkedOutAt || record?.status === 'completed' || record?.status === 'absent') return [];
       if (!checkedIn && (event.checkoutOnlyReopened || !EventAudiencePolicy.canAttend(student, event))) return [];
       const close = AttendanceViews.time(event, 'checkOutClosesAt');
       const open = AttendanceViews.time(event, checkedIn ? 'closeAt' : 'openAt');

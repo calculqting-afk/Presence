@@ -1,4 +1,9 @@
 {
+  "1.8.34": [
+    "Absent corrections now show the correct dashboard status.",
+    "Previous During confirmations stay in history without a misleading badge.",
+    "Attendance reminders stop for sessions marked Absent."
+  ],
   "1.8.33": [
     "Fixed typing minutes when correcting attendance times.",
     "Correction review now shows the administrator’s name.",

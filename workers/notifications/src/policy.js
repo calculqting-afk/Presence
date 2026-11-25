@@ -27,6 +27,7 @@ export function milestones(event, publishedAt) {
 }
 export function eligible(student, event, record, kind, now) {
   if (student?.active !== true || student.passwordResetRequired === true || student.mustChangePassword === true) return false;
+  if (record?.status === 'absent') return false;
   const checkedIn = Boolean(record?.checkedInAt || record?.attendedAt);
   const completed = Boolean(record?.checkedOutAt || record?.status === 'completed');
   if (kind === 'during-open') return !completed && checkedIn && EventAudiencePolicy.canAttend(student, event)
