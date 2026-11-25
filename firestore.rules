@@ -411,7 +411,9 @@ service cloud.firestore {
           && data.status in ["checked-in", "completed"])
           || (data.status == "checkout-only" && data.arrivalStatus == "absent"
             && data.keys().hasAll(["checkedOutAt"])
-            && !data.keys().hasAny(["attendedAt", "checkedInAt", "checkInLocation"])));
+            && !data.keys().hasAny(["attendedAt", "checkedInAt", "checkInLocation"]))
+          || (data.status == "absent" && data.arrivalStatus == "absent" && data.get("recordSource", "") == "admin-corrected"
+            && !data.keys().hasAny(["attendedAt", "checkedInAt", "checkedOutAt", "checkInLocation", "checkOutLocation"])));
     }
 
     // Spark-plan attendance verification. Rules enforce authorization and data
@@ -557,10 +559,11 @@ service cloud.firestore {
         && shortText(data.correctionId, 128) && data.correctionId.matches('^[A-Za-z0-9_-]+$')
         && data.correctedAt == request.time
         && shortText(data.correctionReason, 1000) && data.correctionReason.size() >= 5
-        && data.attendedAt == data.checkedInAt && data.checkedInAt <= request.time
-        && attendanceOnEventDate(data, event)
-        && ((data.status == "completed" && data.checkedOutAt > data.checkedInAt && data.checkedOutAt <= request.time)
-          || (data.status == "checked-in" && !data.keys().hasAny(["checkedOutAt", "checkOutLocation"])))
+        && (data.status == "absent" || (data.attendedAt == data.checkedInAt && data.checkedInAt <= request.time
+          && attendanceOnEventDate(data, event)
+          && data.arrivalStatus == (data.checkedInAt < event.get("lateAfterAt", event.checkInClosesAt) ? "present" : "late")
+          && ((data.status == "completed" && data.checkedOutAt > data.checkedInAt && data.checkedOutAt <= request.time)
+            || (data.status == "checked-in" && !data.keys().hasAny(["checkedOutAt", "checkOutLocation"])))))
         && data.keys().hasAll(["arrivalStatus"])
         && audit.keys().hasOnly(["before", "after", "by", "at", "reason"])
         && audit.before == before && audit.after == data
@@ -1091,7 +1094,8 @@ service cloud.firestore {
         && event.checkOutClosesAt is timestamp && request.time > event.checkOutClosesAt
         && 'attendanceRoster' in event && event.attendanceRoster is map
         && data.studentUid in event.attendanceRoster
-        && !exists(/databases/$(database)/documents/attendance/$(data.studentUid + '_' + data.eventId));
+        && (!exists(/databases/$(database)/documents/attendance/$(data.studentUid + '_' + data.eventId))
+          || get(/databases/$(database)/documents/attendance/$(data.studentUid + '_' + data.eventId)).data.status == 'absent');
     }
 
     match /fines/{fineId} {

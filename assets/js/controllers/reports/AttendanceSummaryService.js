@@ -43,11 +43,14 @@ export class AttendanceSummaryService {
 
   summarize(student, events, records, { coverageFrom = '', coverageConfirmed = true } = {}) {
     const eventsById = new Map(events.map(event => [event.id, event]));
-    const own = records.filter(record => record.studentUid === student.uid);
+    const own = records.filter(record => record.studentUid === student.uid && record.status !== 'absent');
+    const explicitAbsences = new Set(records.filter(record => record.studentUid === student.uid && record.status === 'absent').map(record => record.eventId));
     const attended = new Set(own.map(record => record.eventId));
     const absences = [], unverified = [];
     for (const event of events) {
-      if (this.now() <= this.checkoutCloseDate(event) || attended.has(event.id)) continue;
+      if (attended.has(event.id)) continue;
+      if (explicitAbsences.has(event.id)) { absences.push(event); continue; }
+      if (this.now() <= this.checkoutCloseDate(event)) continue;
       const eligibility = this.eligibility(student, event);
       if (eligibility === 'excluded') continue;
       if (!coverageConfirmed || eligibility === 'unknown' || eligibility === 'provisional' || (coverageFrom && event.date < coverageFrom)) unverified.push(event);

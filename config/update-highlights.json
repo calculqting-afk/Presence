@@ -1,4 +1,9 @@
 {
+  "1.8.31": [
+    "Present, Late and Absent attendance corrections.",
+    "Review corrected times and a required reason before saving.",
+    "Clearer phone layout and preserved correction history."
+  ],
   "1.8.30": [
     "Internal app files are now organized by feature.",
     "Updated module paths keep existing features connected.",

@@ -445,3 +445,10 @@ test('invalid-duration and wrong-day records remain review in filters, PDF and b
   assert.match(workbook.get('xl/worksheets/sheet1.xml'), /Needs review — event date mismatch/);
   assert.equal(invalid.checkedOutAt, invalid.checkedInAt, 'projection never edits the saved values');
 });
+
+
+test('manual absent correction exports as absent without attendance times or duplicate roster rows',async()=>{
+ const service=await serviceAt();
+ const report=snapshot(service,[{id:'a_event-1',studentUid:'a',eventId:event.id,status:'absent',arrivalStatus:'absent',recordSource:'admin-corrected'}]);
+ const rows=report.rows.filter(row=>row.studentUid==='a');assert.equal(rows.length,1);assert.equal(rows[0].status,'absent');assert.equal(rows[0].checkInIso,null);assert.equal(rows[0].checkOutIso,null);
+});
