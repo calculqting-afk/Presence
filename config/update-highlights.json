@@ -1,4 +1,9 @@
 {
+  "1.8.32": [
+    "Absent corrections enabled with updated database permissions.",
+    "Review Present, Late and Absent changes before saving.",
+    "Attendance times, reasons and correction history stay recorded."
+  ],
   "1.8.31": [
     "Present, Late and Absent attendance corrections.",
     "Review corrected times and a required reason before saving.",
