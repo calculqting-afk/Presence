@@ -1,0 +1,23 @@
+.attendance-quick-filters { display:flex; flex-wrap:wrap; gap:8px; margin-top:20px; }
+.attendance-quick-filters button { display:flex; align-items:center; gap:8px; }
+.attendance-quick-filters button[aria-pressed="true"] { background:#1f6feb; border-color:#1f6feb; color:#fff; }
+.attendance-quick-filters [data-quick-status-count] { padding:2px 7px; border-radius:20px; background:rgba(128,150,180,.18); font-variant-numeric:tabular-nums; }
+.attendance-quick-note { font-size:.75rem; margin:10px 0 20px; }
+.correction-history-backdrop { padding:0; place-items:stretch end; }
+.correction-history-panel.dashboard-modal { width:min(620px,100%); max-width:100%; height:100dvh; max-height:100dvh; border-radius:0; padding:0; display:flex; flex-direction:column; overflow:hidden; }
+.correction-history-header, .correction-history-footer { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:20px 24px; flex-shrink:0; }
+.correction-history-header { border-bottom:1px solid var(--line); }
+.correction-history-header h2 { margin:6px 0 0; }
+.correction-history-header .eyebrow { margin:0; }
+.correction-history-body { padding:20px 24px; overflow:auto; flex:1; min-height:0; overflow-wrap:anywhere; }
+.correction-history-body > h3 { margin-top:0; }
+.correction-history-body > .muted, #correctionHistoryStatus { font-size:.8rem; }
+.correction-history-footer { border-top:1px solid var(--line); padding-bottom:max(20px,env(safe-area-inset-bottom)); }
+.correction-history-entry { padding:20px 0; border-top:1px solid var(--line); }
+.correction-history-entry h3 { margin:8px 0 16px; }
+.correction-history-entry p { font-size:.8rem; }
+.correction-history-entry table { table-layout:fixed; width:100%; font-size:.75rem; }
+.correction-history-entry td, .correction-history-entry th { white-space:normal; overflow-wrap:anywhere; padding:10px 8px; vertical-align:top; }
+.correction-history-entry caption { text-align:left; color:var(--muted); padding-bottom:8px; }
+.correction-history-reason { white-space:pre-wrap; }
+@media(max-width:480px) { .correction-history-header,.correction-history-body,.correction-history-footer { padding-left:16px; padding-right:16px; } .correction-history-footer { flex-wrap:wrap; } }

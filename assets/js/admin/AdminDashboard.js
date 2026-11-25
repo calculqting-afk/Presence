@@ -1,3 +1,4 @@
+import { AttendanceCorrectionHistoryController, AttendanceCorrectionHistoryRepository } from '../controllers/attendance/AttendanceCorrectionHistoryController.js';
 import { DuringAttendanceController } from '../controllers/attendance/DuringAttendanceController.js';
 import { duringStatusMarkup } from '../core/attendance/DuringAttendancePolicy.js';
 import { DeviceSessionController } from '../controllers/accounts/DeviceSessionController.js';
@@ -317,7 +318,7 @@ export class AdminDashboard {
       notify: showDashboardToast,
       onStatus: status => dashboard.updateAttendanceSyncStatus({ ...status, history: true }),
       prepareRecords: (records, state) => {
-        const filters = dashboard.historyController?.applied || {};
+        const filters = state.filters || dashboard.historyController?.applied || {};
         const projected = state.verified && !state.busy && !state.partial
           ? dashboard.historyController.selectedSessions(filters).flatMap(event => dashboard.attendanceProjection.project(records.filter(record => record.eventId === event.id), { ...filters, eventId: event.id, includePending: filters.sort === 'no-check-in' || dashboard.historyController.combined() }, dashboard.historyController?.records || records))
           : records;
@@ -348,6 +349,15 @@ export class AdminDashboard {
       dashboard.historyController.dispose();
       dashboard.window.removeEventListener('presence:viewchange', dashboard.onHistoryView);
     });
+    dashboard.correctionHistoryController = new AttendanceCorrectionHistoryController({
+      repository: new AttendanceCorrectionHistoryRepository(db),
+      getRole: () => currentUserRole,
+      getStudents: () => dashboard.students,
+      getActorName: uid => uid === currentUser.uid ? dashboard.document.querySelector('[data-admin-name]')?.textContent : dashboard.students.filter(student => student.uid === uid).map(student => [student.firstName, student.middleName, student.lastName].filter(Boolean).join(' '))[0],
+      escapeHtml, document: dashboard.document, window: dashboard.window
+    });
+    dashboard.correctionHistoryController.initialize();
+    dashboard.scope.addCleanup(() => dashboard.correctionHistoryController.dispose());
     dashboard.correctionController = new AttendanceCorrectionController({
       db,
       user: currentUser,
@@ -928,6 +938,14 @@ export class AdminDashboard {
   }
   handleCorrection(event) {
     const dashboard = this;
+    const historyButton = event.target.closest('[data-attendance-correction-history]');
+    if (historyButton?.dataset.attendanceCorrectionHistory) {
+      if (!dashboard.can('viewAttendance')) return;
+      const record = dashboard.historyController.records.find(item => item.id === historyButton.dataset.attendanceCorrectionHistory)
+        || dashboard.attendance.find(item => item.id === historyButton.dataset.attendanceCorrectionHistory);
+      if (record && !record.displayOnly) void dashboard.correctionHistoryController.open(record, historyButton);
+      return;
+    }
     const revokeButton = event.target.closest('[data-revoke-attendance]');
     if (revokeButton?.dataset.revokeAttendance) {
       if (!dashboard.can('correctAttendance')) return;
@@ -1177,13 +1195,14 @@ export class AdminDashboard {
     const dashboard = this;
     if (!records.length) return '<div class="empty-state">No attendance activity yet.</div>';
     return records.map(record => {
+      const historyAction = !record.displayOnly && (record.correctionId || record.recordSource === 'admin-corrected') && dashboard.can('viewAttendance') ? `<button class="small-button" type="button" data-attendance-correction-history="${escapeHtml(record.id)}">View history</button>` : '';
       const renderKey = escapeHtml(record.id || `${record.studentUid}:${record.eventId}`);
       const student = dashboard.students.find(item => item.uid === record.studentUid);
       const studentName = student ? [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ") : record.studentId || "Student";
       const avatar = student?.photoDataUrl ? `<img src="${escapeHtml(student.photoDataUrl)}" alt="">` : escapeHtml(getInitials(student?.firstName || studentName, student?.lastName || ""));
       if (!student) {
         const section = dashboard.events.find(event => event.id === record.eventId)?.attendanceRoster?.[record.studentUid] ?? record.rosterSection ?? record.section;
-        return `<article class="attendance-line-item" data-render-key="${renderKey}"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>Deleted/missing student profile</strong><small>${escapeHtml(record.studentId || 'Student ID unavailable')}${section ? ` · ${escapeHtml(section)}` : ''}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || 'Attendance event')}</strong><small>${escapeHtml(record.eventDate || 'Date unavailable')}</small></div><div class="attendance-line-times"><div><span>IN</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedInAt || record.attendedAt))}</strong>${AttendanceRelativeTime.render(record.checkedInAt || record.attendedAt, "in")}</div><div><span>OUT</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong>${AttendanceRelativeTime.render(record.checkedOutAt, "out")}</div></div><div class="attendance-line-status">${duringStatusMarkup(dashboard.events.find(event => event.id === record.eventId), record, escapeHtml)}<span class="badge orange">Needs review — profile missing</span></div></article>`;
+        return `<article class="attendance-line-item" data-render-key="${renderKey}"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>Deleted/missing student profile</strong><small>${escapeHtml(record.studentId || 'Student ID unavailable')}${section ? ` · ${escapeHtml(section)}` : ''}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || 'Attendance event')}</strong><small>${escapeHtml(record.eventDate || 'Date unavailable')}</small></div><div class="attendance-line-times"><div><span>IN</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedInAt || record.attendedAt))}</strong>${AttendanceRelativeTime.render(record.checkedInAt || record.attendedAt, "in")}</div><div><span>OUT</span><strong>${escapeHtml(formatAttendanceTimestamp(record.checkedOutAt))}</strong>${AttendanceRelativeTime.render(record.checkedOutAt, "out")}</div></div><div class="attendance-line-status">${historyAction}${duringStatusMarkup(dashboard.events.find(event => event.id === record.eventId), record, escapeHtml)}<span class="badge orange">Needs review — profile missing</span></div></article>`;
       }
       if (record.rosterUnverified) return `<article class="attendance-line-item" data-render-key="${renderKey}"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || '')} · ${escapeHtml(record.rosterSection || student?.section || '')}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName)}</strong><small>${escapeHtml(record.eventDate)}</small></div><div class="attendance-line-times"><p class="attendance-no-record">No attendance recorded</p></div><div class="attendance-line-status"><span class="badge orange">${record.assignmentUnverified ? 'Needs review — assigned after attendance opened' : 'Needs review — registration date unknown'}</span></div></article>`;
       const checkedInAt = record.checkedInAt || record.attendedAt;
@@ -1193,7 +1212,7 @@ export class AdminDashboard {
       const inLabel = absent || partial ? 'ABSENT IN' : record.arrivalStatus === 'late' ? 'LATE IN' : 'IN';
       const timeIssue = attendanceTimeIssue(record, dashboard.events.find(event => event.id === record.eventId));
       const completionLabel = timeIssue ? attendanceReviewLabel(timeIssue) : record.pending ? 'Not yet checked in' : absent ? 'Absent — no attendance' : partial ? 'Partial attendance' : completed ? 'Completed' : dashboard.summaryService.needsReview(record, dashboard.events.find(event => event.id === record.eventId)) ? 'Needs review — missed checkout' : 'Checked in';
-      return `<article class="attendance-line-item" data-render-key="${renderKey}"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || record.studentId || "Student ID unavailable")}${student?.section ? ` · ${escapeHtml(student.section)}` : ""}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><small>${escapeHtml(record.eventDate || "Date unavailable")}</small></div><div class="attendance-line-times"><div class="${record.arrivalStatus === 'late' ? 'attendance-time-late' : ''}"><span>${inLabel}</span><strong>${escapeHtml(absent || partial ? 'Not recorded' : formatAttendanceTimestamp(checkedInAt))}</strong>${!absent && !partial ? AttendanceRelativeTime.render(checkedInAt, 'in') : ''}</div><div><span>OUT</span><strong>${escapeHtml(absent ? 'Not recorded' : formatAttendanceTimestamp(record.checkedOutAt))}</strong>${!absent ? AttendanceRelativeTime.render(record.checkedOutAt, 'out') : ''}</div><div><span>Duration</span><strong>${escapeHtml(checkedInAt ? attendanceDuration(checkedInAt, record.checkedOutAt) : 'Not available')}</strong></div></div><div class="attendance-line-status">${duringStatusMarkup(dashboard.events.find(event => event.id === record.eventId), record, escapeHtml)}${record.qrCheckedInBy || record.qrCheckedOutBy ? '<span class="badge blue">Admin QR scan</span>' : ""}${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}${(!record.displayOnly || (absent && student.active !== false)) && dashboard.can("correctAttendance") ? `<button class="small-button" type="button" data-correct-attendance="${escapeHtml(record.id)}">Change attendance</button>` : ""}${!record.displayOnly && dashboard.can("correctAttendance") ? `<button class="small-button danger" type="button" data-revoke-attendance="${escapeHtml(record.id)}">Revoke</button>` : ""}${absent || partial ? '<span class="badge orange">Absent in</span>' : record.pending ? '' : arrivalStatusBadge(record.arrivalStatus)}<span class="badge ${absent || partial || dashboard.summaryService.needsReview(record, dashboard.events.find(event => event.id === record.eventId)) ? "orange" : completed ? "green" : "blue"}">${completionLabel}</span></div>${record.recordSource === "admin-corrected" ? `<p class="attendance-correction-reason"><span>Correction reason:</span> ${escapeHtml(record.correctionReason || "Reason not recorded")}</p>` : ""}</article>`;
+      return `<article class="attendance-line-item" data-render-key="${renderKey}"><div class="attendance-line-person"><span class="mini-avatar">${avatar}</span><div><strong>${escapeHtml(studentName)}</strong><small>${escapeHtml(student?.accountId || record.studentId || "Student ID unavailable")}${student?.section ? ` · ${escapeHtml(student.section)}` : ""}</small></div></div><div class="attendance-line-event"><strong>${escapeHtml(record.eventName || "Attendance event")}</strong><small>${escapeHtml(record.eventDate || "Date unavailable")}</small></div><div class="attendance-line-times"><div class="${record.arrivalStatus === 'late' ? 'attendance-time-late' : ''}"><span>${inLabel}</span><strong>${escapeHtml(absent || partial ? 'Not recorded' : formatAttendanceTimestamp(checkedInAt))}</strong>${!absent && !partial ? AttendanceRelativeTime.render(checkedInAt, 'in') : ''}</div><div><span>OUT</span><strong>${escapeHtml(absent ? 'Not recorded' : formatAttendanceTimestamp(record.checkedOutAt))}</strong>${!absent ? AttendanceRelativeTime.render(record.checkedOutAt, 'out') : ''}</div><div><span>Duration</span><strong>${escapeHtml(checkedInAt ? attendanceDuration(checkedInAt, record.checkedOutAt) : 'Not available')}</strong></div></div><div class="attendance-line-status">${historyAction}${duringStatusMarkup(dashboard.events.find(event => event.id === record.eventId), record, escapeHtml)}${record.qrCheckedInBy || record.qrCheckedOutBy ? '<span class="badge blue">Admin QR scan</span>' : ""}${record.recordSource === "admin-corrected" ? `<span class="badge orange" title="${escapeHtml(`${record.correctedBy || "Administrator"} · ${formatAttendanceTimestamp(record.correctedAt)} · ${record.correctionReason || ""}`)}">Manual correction</span>` : ""}${(!record.displayOnly || (absent && student.active !== false)) && dashboard.can("correctAttendance") ? `<button class="small-button" type="button" data-correct-attendance="${escapeHtml(record.id)}">Change attendance</button>` : ""}${!record.displayOnly && dashboard.can("correctAttendance") ? `<button class="small-button danger" type="button" data-revoke-attendance="${escapeHtml(record.id)}">Revoke</button>` : ""}${absent || partial ? '<span class="badge orange">Absent in</span>' : record.pending ? '' : arrivalStatusBadge(record.arrivalStatus)}<span class="badge ${absent || partial || dashboard.summaryService.needsReview(record, dashboard.events.find(event => event.id === record.eventId)) ? "orange" : completed ? "green" : "blue"}">${completionLabel}</span></div>${record.recordSource === "admin-corrected" ? `<p class="attendance-correction-reason"><span>Correction reason:</span> ${escapeHtml(record.correctionReason || "Reason not recorded")}</p>` : ""}</article>`;
     }).join("");
   }
   renderAttendanceLine() {

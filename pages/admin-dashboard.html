@@ -28,6 +28,7 @@
   <link rel="stylesheet" href="../assets/css/legal.css?v=20261101">
   <link rel="stylesheet" href="../assets/css/mascot.css?v=20261102">
   <link rel="preconnect" href="https://presence-admin-api.mikhailovna2007.workers.dev" crossorigin>
+  <link rel="stylesheet" href="../assets/css/correction-history.css?v=20261125">
 </head>
 <body data-dashboard="admin" data-dashboard-loading data-policy-enabled data-device-session-enabled>
   <div class="app-shell">
@@ -140,10 +141,12 @@
               <label>Course<select id="attendanceCourse"><option value="">All courses</option><option value="BSA">BSA</option><option value="BS Info Tech">BS Info Tech</option><option value="BSMB">BSMB</option><option value="BSFI">BSFI</option></select></label>
               <label>From<input type="date" id="attendanceFromDate"></label><label>To<input type="date" id="attendanceToDate"></label>
               <label>Section<select id="attendanceSection"><option value="">All sections</option><option>1A</option><option>1B</option><option>2A</option><option>2B</option><option>3A</option><option>3B</option><option>4A</option><option>4B</option></select></label>
-              <label>Status<select id="attendanceStatus"><option value="">All statuses</option><option value="checked-in">Checked in</option><option value="late">Late check-in</option><option value="completed">Completed</option><option value="review">Needs review — missed checkout</option><option value="absent">Did not attend</option></select></label>
+              <label>Status<select id="attendanceStatus"><option value="">All statuses</option><option value="present">Present</option><option value="checked-in">Checked in</option><option value="late">Late check-in</option><option value="completed">Completed</option><option value="review">Needs review — missed checkout</option><option value="absent">Did not attend</option></select></label>
               </div>
               <div class="attendance-filter-actions"><button class="link-button" id="attendanceClearFilters" type="button">Clear</button><button class="primary-button" type="submit">Apply</button></div>
             </form>
+            <div id="attendanceQuickFilters" class="attendance-quick-filters" role="group" aria-label="Filter loaded attendance by status"><button type="button" class="small-button" data-attendance-quick-status="" aria-pressed="true">All <span data-quick-status-count>0</span></button><button type="button" class="small-button" data-attendance-quick-status="present" aria-pressed="false">Present <span data-quick-status-count>0</span></button><button type="button" class="small-button" data-attendance-quick-status="late" aria-pressed="false">Late <span data-quick-status-count>0</span></button><button type="button" class="small-button" data-attendance-quick-status="absent" aria-pressed="false">Absent <span data-quick-status-count>0</span></button><button type="button" class="small-button" data-attendance-quick-status="review" aria-pressed="false">Needs review <span data-quick-status-count>0</span></button></div>
+            <p id="attendanceQuickFilterNote" class="muted attendance-quick-note">Loaded session records · Counts may overlap.</p>
             <div class="attendance-line attendance-results" id="adminAttendanceLine"><div class="attendance-empty"><h3>No attendance records yet.</h3></div></div>
             <div class="attendance-pagination" id="attendancePagination" hidden><span id="attendancePageInfo" role="status" aria-live="polite"></span><div class="attendance-page-actions" id="attendancePaginationControls"><button class="outline-button" id="previousAttendancePage" type="button">Previous</button><span class="attendance-page-number" id="attendanceCurrentPage" aria-label="Current page">1</span><button class="outline-button" id="nextAttendancePage" type="button">Load more</button></div></div>
           </article>
@@ -421,6 +424,13 @@
   </div>
   <div class="toast" id="dashboardToast" role="status" aria-live="polite"><span class="toast-mark">✓</span><div><strong id="dashboardToastTitle"></strong><small id="dashboardToastMessage"></small></div></div>
   <script type="module" src="../assets/js/dashboard.js?v=20261122-feature-folders"></script>
+<div class="dashboard-modal-backdrop correction-history-backdrop" id="attendanceCorrectionHistoryModal" hidden>
+  <section class="dashboard-modal correction-history-panel" role="dialog" aria-modal="true" aria-labelledby="correctionHistoryTitle" aria-describedby="correctionHistoryReadOnly">
+    <header class="correction-history-header"><div><p class="eyebrow">ATTENDANCE CORRECTIONS</p><h2 id="correctionHistoryTitle" tabindex="-1">Correction history</h2></div><button type="button" class="small-button" data-close-correction-history aria-label="Close correction history">×</button></header>
+    <div class="correction-history-body"><h3 id="correctionHistoryStudent"></h3><p class="muted" id="correctionHistoryEvent"></p><p id="correctionHistoryReadOnly" class="muted">Read-only history. Original values stay recorded. All times are Philippine time.</p><p id="correctionHistoryStatus" role="status" aria-live="polite"></p><div id="correctionHistoryEntries"></div></div>
+    <footer class="correction-history-footer"><button type="button" class="small-button" id="correctionHistoryMore">Load older corrections</button><button type="button" class="small-button" data-close-correction-history>Close</button></footer>
+  </section>
+</div>
 <div class="dashboard-modal-backdrop" id="attendanceCorrectionModal" hidden>
 <section class="dashboard-modal attendance-correction-modal" role="dialog" aria-modal="true" aria-labelledby="correctionTitle">
 <header class="correction-heading"><div><p class="eyebrow">Attendance correction</p><h2 id="correctionTitle" tabindex="-1">Change attendance</h2></div><button class="modal-close" type="button" data-close-correction aria-label="Close correction">×</button></header>
