@@ -6,13 +6,13 @@ import {activityRecord,activitySnapshot} from '../admin/ActivityRecordPolicy.js'
 
 export function correctionValues({ checkIn, checkOut, arrival, reason, eventDate, event }) {
   const explanation = String(reason || '').trim();
-  if (explanation.length < 5 || explanation.length > 1000) throw new Error('Provide a reason between 5 and 1000 characters.');
+  if (explanation.length < 5 || explanation.length > 1000) throw new Error('Enter a reason (5–1000 characters).');
   if (arrival === 'absent') return { start: null, end: null, arrival, reason: explanation };
   const parse = value => new Date(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(value) ? value + '+08:00' : value);
   const start = parse(checkIn), end = checkOut ? parse(checkOut) : null;
   if (!checkIn || !Number.isFinite(start.getTime())) throw new Error('Enter a valid check-in time.');
   if (end && (!Number.isFinite(end.getTime()) || end <= start)) throw new Error('Checkout must be later than check-in.');
-  if (eventDate && (attendanceDay(start) !== eventDate || end && attendanceDay(end) !== eventDate)) throw new Error('Attendance times must use the selected event date (' + eventDate + ', Philippine time).');
+  if (eventDate && (attendanceDay(start) !== eventDate || end && attendanceDay(end) !== eventDate)) throw new Error('Use the selected event date: ' + eventDate + ' (PH).');
   if (start > new Date() || (end && end > new Date())) throw new Error('Attendance times cannot be in the future.');
   if (!['present', 'late'].includes(arrival)) throw new Error('Select Present or Late.');
   const cutoff = attendanceMilliseconds(event?.lateAfterAt || event?.checkInClosesAt);
@@ -41,8 +41,8 @@ export function renderCorrectionRequestContext(context, record) {
 }
 
 export class AttendanceCorrectionController {
-  constructor({ db, user, role, getStudents, getEvents, eligibility, escapeHtml, notify, transaction = runTransaction }) {
-    Object.assign(this, { db, user, role, getStudents, getEvents, eligibility, escapeHtml, notify, transaction });
+  constructor({ db, user, role, getStudents, getEvents, eligibility, escapeHtml, notify, getActorName = () => user?.displayName || 'Administrator', transaction = runTransaction }) {
+    Object.assign(this, { db, user, role, getStudents, getEvents, eligibility, escapeHtml, notify, getActorName, transaction });
   }
 
   initialize() {
@@ -167,34 +167,36 @@ export class AttendanceCorrectionController {
   refreshValidation() {
     const selected = this.getEvents().find(item => item.id === document.querySelector('#correctionEvent').value);
     const checkIn = document.querySelector('#correctionCheckIn'), checkOut = document.querySelector('#correctionCheckOut');
+    const minimum = selected?.date ? selected.date + 'T00:00:00' : '';
+    const maximum = selected?.date ? selected.date + 'T23:59:59' : '';
     for (const input of [checkIn, checkOut]) {
-      input.min = selected?.date ? selected.date + 'T00:00:00' : '';
-      input.max = selected?.date ? selected.date + 'T23:59:59' : '';
+      // Reassigning these during an input event resets Chromium's segment typing.
+      if (input.min !== minimum) input.min = minimum;
+      if (input.max !== maximum) input.max = maximum;
     }
     const absent = document.querySelector('#correctionArrival').value === 'absent';
-    for (const input of [checkIn, checkOut]) input.disabled = absent;
-    checkIn.required = !absent;
+    for (const input of [checkIn, checkOut]) if (input.disabled !== absent) input.disabled = absent;
+    if (checkIn.required !== !absent) checkIn.required = !absent;
     document.querySelector('#correctionTimes').hidden = absent;
     document.querySelector('#correctionAbsentNote').hidden = !absent;
     document.querySelector('#correctionCurrentStatus').textContent = this.record
       ? (this.record.status === 'absent' || this.record.displayOnly ? 'Absent' : this.record.arrivalStatus === 'late' ? 'Late' : 'Present') : 'Review will load the current record';
     const schedule = document.querySelector('#correctionSchedule');
-    schedule.textContent = selected ? selected.name + '\n' + selected.date + ' · Philippine time\nCheck-in: ' + (selected.timeIn || 'Not set') + '–' + (selected.checkInCutoff || 'Not set') + '\nCheck-out: ' + (selected.timeOut || 'Not set') + '–' + (selected.checkOutCutoff || 'Not set') : 'Choose an event to see its schedule.';
-    const display = value => {
-      const time = attendanceMilliseconds(value);
-      return Number.isFinite(time) ? new Date(time).toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'medium' }) : 'Not recorded';
+    const clock = value => {
+      const parts = /^(\d{2}):(\d{2})$/.exec(value || '');
+      return parts ? `${Number(parts[1]) % 12 || 12}:${parts[2]} ${Number(parts[1]) < 12 ? 'AM' : 'PM'}` : 'Not set';
     };
-    const before = document.querySelector('#correctionBefore');
-    before.textContent = this.record ? 'Before: ' + display(this.record.checkedInAt || this.record.attendedAt) + ' → ' + display(this.record.checkedOutAt) : '';
-    before.hidden = !this.record;
+    const cutoffTime = attendanceMilliseconds(selected?.lateAfterAt || selected?.checkInClosesAt);
+    const cutoff = Number.isFinite(cutoffTime) ? new Date(cutoffTime).toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit', hour12: true }) : clock(selected?.checkInCutoff || selected?.timeOut);
+    schedule.textContent = selected ? selected.date + ' · Philippine time\nLate from ' + cutoff + ' · Checkout ' + clock(selected.timeOut) + '–' + clock(selected.checkOutCutoff) : 'Choose an event session.';
     const error = document.querySelector('#correctionTimeError'), after = document.querySelector('#correctionAfter');
     try {
       if (!selected) throw Error('Choose an event.');
       const values = correctionValues({ checkIn: checkIn.value, checkOut: checkOut.value, arrival: document.querySelector('#correctionArrival').value, reason: 'Preview correction', eventDate: selected.date, event: selected });
       const elapsed = values.end ? values.end - values.start : null;
-      if (this.desiredArrival && values.arrival !== this.desiredArrival) throw Error(`This check-in time is ${values.arrival === 'late' ? 'Late' : 'Present'}. Adjust the time to match your selection; status follows the session cutoff.`);
+      if (this.desiredArrival && values.arrival !== this.desiredArrival) throw Error(this.desiredArrival === 'late' ? `For Late, set check-in to ${cutoff} or later.` : `For Present, set check-in before ${cutoff}.`);
       document.querySelector('#correctionArrival').value = values.arrival;
-      after.textContent = values.arrival === 'absent' ? 'Absent · No attendance times. Original details remain in correction history.' : 'After: ' + display(values.start) + ' → ' + display(values.end) + ' · ' + values.arrival + ' · Duration: ' + (elapsed === null ? 'Awaiting checkout' : elapsed < 60000 ? 'Less than 1 minute' : Math.floor(elapsed / 60000) + ' minutes');
+      after.textContent = values.arrival === 'absent' ? '' : (values.arrival === 'late' ? 'Late' : 'Present') + ' · ' + (elapsed === null ? 'Awaiting checkout' : 'Duration: ' + (elapsed < 60000 ? 'Less than 1 minute' : Math.floor(elapsed / 60000) + ' minutes'));
       error.textContent = ''; document.querySelector('#saveAttendanceCorrection').disabled = Boolean(this.saving);
     } catch (issue) {
       error.textContent = issue.message; after.textContent = ''; document.querySelector('#saveAttendanceCorrection').disabled = true;
@@ -232,11 +234,12 @@ export class AttendanceCorrectionController {
     const student = this.getStudents().find(item => item.uid === input.studentUid), event = this.getEvents().find(item => item.id === input.eventId);
     document.querySelector('#correctionReviewSubject').textContent = [student?.firstName, student?.lastName, student?.accountId, event?.name].filter(Boolean).join(' · ');
     document.querySelector('#correctionReviewReason').textContent = values.reason;
-    document.querySelector('#correctionReviewActor').textContent = this.user.displayName || this.user.email || this.user.uid;
+    const actorName = this.getActorName();
+    document.querySelector('#correctionReviewActor').textContent = typeof actorName === 'string' && actorName.trim() ? actorName.trim() : 'Administrator';
     document.querySelector('#correctionAbsentWarning').hidden = values.arrival !== 'absent';
     document.querySelector('#correctionReviewNote').textContent = values.arrival === 'absent'
-      ? 'This replaces active attendance with Absent. Original times and checkpoint details remain in history. Existing fines are unchanged.'
-      : 'Arrival follows the check-in cutoff. Attendance times use Philippine time; the save time is recorded separately.';
+      ? 'Original attendance stays in history. Existing fines stay unchanged.'
+      : 'Times are in Philippine time. Changes are saved to history.';
     this.review = { ...input, arrival: values.arrival, expectedVersion: correctionVersion(before), eventVersion: correctionVersion(event) };
     document.querySelector('#correctionEditor').hidden = true;
     document.querySelector('#correctionReview').hidden = false;
