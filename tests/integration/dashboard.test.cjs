@@ -3286,3 +3286,57 @@ test('correction review uses the current administrator profile name instead of l
  const fallback=new AttendanceCorrectionController({user:{uid:'private-uid',email:'private@example.test'},escapeHtml:String,getStudents:()=>[],getEvents:()=>[]});
  fallback.showReview(null,{studentUid:'s',eventId:'e'},values);assert.equal(actor.textContent,'Administrator');
 });
+
+test('correction history pages immutable audits newest first with a bounded cursor query', async () => {
+  const { AttendanceCorrectionHistoryRepository, correctionHistoryRows } = await isolatedModule('assets/js/controllers/attendance/AttendanceCorrectionHistoryController.js');
+  const requests=[]; const docs=Array.from({length:20},(_,i)=>({id:String(i),data:()=>({by:'admin',reason:'Verified'})}));
+  const repo=new AttendanceCorrectionHistoryRepository('db',async request=>{requests.push(request);return {docs};});
+  const page=await repo.page({attendanceId:'s_e'});
+  assert.equal(page.records.length,20);assert.equal(page.more,true);assert.equal(page.cursor,docs[19]);
+  assert.equal(requests[0][0].path,'db/attendance/s_e/corrections');assert.equal(requests[0][1][0],'at');assert.equal(requests[0][1][1],'desc');assert.equal(requests[0][2].limit,20);
+  await repo.page({attendanceId:'s_e',cursor:page.cursor});assert.equal(requests[1][2].cursor,docs[19]);
+  await assert.rejects(repo.page({attendanceId:'../other'}));await assert.rejects(repo.page({attendanceId:'s_e',size:100}));assert.equal(requests.length,2);
+  const audit={before:{arrivalStatus:'present',status:'checked-in',checkedInAt:'2026-11-25T01:00:00Z'},after:{status:'absent'}};
+  const original=JSON.stringify(audit),rows=correctionHistoryRows(audit);
+  assert.equal(rows[0][1],'Present');assert.equal(rows[0][2],'Absent');assert.match(rows[1][1],/9:00:00/);assert.equal(rows[1][2],'Not recorded');assert.equal(JSON.stringify(audit),original);
+});
+
+test('history is on demand, escapes content, preserves pages on failure and ignores closed requests', async () => {
+  const browser=fakeBrowser();let calls=0,fail=false,resolve;let role='attendance_admin';
+  const {AttendanceCorrectionHistoryController}=await isolatedModule('assets/js/controllers/attendance/AttendanceCorrectionHistoryController.js',{},browser);
+  const controller=new AttendanceCorrectionHistoryController({...browser,getRole:()=>role,getStudents:()=>[],getActorName:()=>'<Admin>',escapeHtml:value=>String(value).replaceAll('<','&lt;').replaceAll('>','&gt;'),repository:{page:async()=>{calls++;if(fail)throw Error('offline');return {records:[{id:'a',by:'admin',reason:'<script>bad</script>',before:null,after:{status:'absent'},at:'2026-11-25T01:00:00Z'}],cursor:'cursor',more:true};}}});
+  controller.initialize();assert.equal(calls,0);
+  const record={id:'s_e',studentUid:'s',eventId:'e'};
+  role='student';await controller.open(record);assert.equal(calls,0);
+  role='attendance_admin';await controller.open({...record,id:'forged'});assert.equal(calls,0);
+  await controller.open(record);assert.equal(calls,1);
+  const entries=browser.document.querySelector('#correctionHistoryEntries');assert.match(entries.innerHTML,/&lt;Admin&gt;/);assert.doesNotMatch(entries.innerHTML,/<script>/);
+  fail=true;await controller.load();assert.equal(controller.records.length,1);assert.equal(controller.cursor,'cursor');assert.equal(browser.document.querySelector('#correctionHistoryMore').textContent,'Retry');
+  controller.repository.page=()=>new Promise(done=>resolve=done);const pending=controller.load();controller.close();resolve({records:[{id:'late'}],more:false});await pending;assert.equal(entries.innerHTML,'');assert.equal(controller.records.length,0);
+  controller.dispose();assert.equal(controller.scope.cleanups.length,0);
+});
+
+test('quick attendance statuses filter loaded sessions without reads and preserve search context',async()=>{
+  const browser=fakeBrowser();let reads=0;
+  const {AttendanceHistoryController}=await isolatedModule('assets/js/controllers/attendance/AttendanceHistoryController.js',{},browser);
+  const controller=new AttendanceHistoryController({repository:{page:()=>{reads++;}},getStudents:()=>[{uid:'s',firstName:'Alex'},{uid:'other',firstName:'Other'}],getEvents:()=>[{id:'e',date:'2026-11-25'}],summary:{needsReview:r=>r.review},render(){},notify(){}});
+  controller.applied={event:'e',session:'both',search:'alex',status:''};controller.records=[{id:'1',studentUid:'s',eventId:'e',checkedInAt:1,arrivalStatus:'present',review:true},{id:'2',studentUid:'s',eventId:'e',checkedInAt:2,checkedOutAt:3,arrivalStatus:'late'},{id:'3',studentUid:'s',eventId:'e',status:'absent'},{id:'4',studentUid:'other',eventId:'e',checkedInAt:1,arrivalStatus:'present'}];
+  for(const [status,ids] of [['',['1','2','3']],['present',['1']],['late',['2']],['absent',['3']],['review',['1']]])assert.deepEqual(Array.from(controller.displayRecords({...controller.applied,status}),r=>r.id),ids);
+  controller.initialize();const button={disabled:false,dataset:{attendanceQuickStatus:'present'}};
+  browser.document.querySelector('#attendanceStudentSearch').value='alex';browser.document.querySelector('#adminAttendanceEventFilter').value='e';
+  controller.onQuickFilter({target:{closest:()=>button}});assert.equal(reads,0);assert.equal(controller.applied.search,'alex');assert.equal(controller.applied.status,'present');
+  assert.equal(controller.records.length,4);controller.dispose();
+});
+
+test('quick status counts include verified projected absences, overlap review, and exclude unloaded roster guesses',async()=>{
+  const browser=fakeBrowser();const {AttendanceHistoryController}=await isolatedModule('assets/js/controllers/attendance/AttendanceHistoryController.js',{},browser);
+  const projected={id:'absent:s:e',studentUid:'s',eventId:'e',status:'absent',displayOnly:true};
+  const controller=new AttendanceHistoryController({getStudents:()=>[{uid:'s'}],getEvents:()=>[{id:'e'}],summary:{needsReview:r=>r.review},prepareRecords:(rows,state)=>state.verified&&!state.partial&&!state.busy?[...rows,projected]:rows});
+  controller.applied={event:'e',status:'present'};controller.verified=true;controller.more=false;controller.records=[{id:'saved',studentUid:'s',eventId:'e',arrivalStatus:'present',checkedInAt:1,review:true}];
+  const buttons=['','present','late','absent','review'].map(status=>{const count={};return {dataset:{attendanceQuickStatus:status},setAttribute:(name,value)=>{count[name]=value;},querySelector:()=>count,count};});
+  browser.document.querySelector('#attendanceQuickFilters').querySelectorAll=()=>buttons;
+  controller.updateQuickFilters();assert.deepEqual(buttons.map(button=>button.count.textContent),[2,1,0,1,1]);assert.equal(buttons[1].count['aria-pressed'],'true');
+  assert.equal(controller.displayRecords().length,1);assert.equal(controller.applied.status,'present');
+  controller.more=true;controller.updateQuickFilters();assert.equal(buttons[3].count.textContent,0);assert.match(browser.document.querySelector('#attendanceQuickFilterNote').textContent,/More records available/);
+  controller.busy=true;controller.updateQuickFilters();assert.ok(buttons.every(button=>button.disabled));
+});

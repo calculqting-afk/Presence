@@ -89,6 +89,14 @@ export class AttendanceHistoryController {
       }
       this.draw();
     };
+    this.quickFilters = document.querySelector('#attendanceQuickFilters');
+    this.onQuickFilter = event => {
+      const button = event.target.closest('[data-attendance-quick-status]');
+      if (!button || button.disabled || !['', 'present', 'late', 'absent', 'review'].includes(button.dataset.attendanceQuickStatus)) return;
+      document.querySelector('#attendanceStatus').value = button.dataset.attendanceQuickStatus;
+      this.onLocalFilter();
+    };
+    this.quickFilters?.addEventListener('click', this.onQuickFilter);
     this.form.addEventListener('submit', this.onFilter);
     this.eventControl.addEventListener('change', this.onEventFilter);
     this.previous.addEventListener('click', this.onPrevious);
@@ -104,8 +112,7 @@ export class AttendanceHistoryController {
       session: value('#attendanceSession') || 'both',
       event: value('#adminAttendanceEventFilter'), status: value('#attendanceStatus'), sort: value('#attendanceSort') };
   }
-  filtered() {
-    const filters = this.applied || this.filters();
+  filtered(filters = this.applied || this.filters()) {
     const ids = this.selectedSessions(filters).map(event => event.id);
     const students = new Map(this.getStudents().map(student => [student.uid, student]));
     const events = new Map(this.getEvents().map(event => [event.id, event]));
@@ -118,12 +125,36 @@ export class AttendanceHistoryController {
       return (!filters.search || text.includes(filters.search)) && (!filters.section || section === filters.section)
         && (!filters.course || CoursePolicy.normalize(record.studentCourse || student?.course) === filters.course)
         && (!filters.event || filters.event === 'all' || ids.includes(record.eventId))
-        && (!filters.status || (filters.status === 'absent' ? record.status === 'absent' && !review
-          : filters.status === 'checked-in' ? Boolean(record.checkedInAt || record.attendedAt)
-          : filters.status === 'late' ? record.arrivalStatus === 'late'
-          : filters.status === 'review' ? review
-          : filters.status === 'completed' ? Boolean(record.checkedOutAt) && !review : !record.checkedOutAt && !review));
+        && this.matchesStatus(record, filters.status, review);
     });
+  }
+  matchesStatus(record, status, review = this.reviewRequired(record)) {
+    if (!status) return true;
+    if (status === 'present') return Boolean(record.checkedInAt || record.attendedAt) && record.status !== 'absent' && record.arrivalStatus === 'present';
+    if (status === 'absent') return record.status === 'absent' && !review;
+    if (status === 'checked-in') return Boolean(record.checkedInAt || record.attendedAt);
+    if (status === 'late') return record.arrivalStatus === 'late';
+    if (status === 'review') return Boolean(review);
+    if (status === 'completed') return Boolean(record.checkedOutAt) && !review;
+    return !record.checkedOutAt && !review;
+  }
+  reviewRequired(record) {
+    return !this.getStudents().some(student => student.uid === record.studentUid) || record.rosterUnverified || record.status === 'review' || this.summary.needsReview(record, this.getEvents().find(event => event.id === record.eventId));
+  }
+  updateQuickFilters() {
+    const bar = document.querySelector('#attendanceQuickFilters');
+    if (!bar) return;
+    const filters = this.applied || this.filters();
+    const chooseEvent = this.requireEvent && (!filters.event || filters.event === 'all');
+    const records = chooseEvent ? [] : this.displayRecords({ ...filters, status: '' });
+    bar.querySelectorAll('[data-attendance-quick-status]').forEach(button => {
+      const status = button.dataset.attendanceQuickStatus;
+      button.setAttribute('aria-pressed', String((filters.status || '') === status));
+      button.disabled = Boolean(this.busy || chooseEvent);
+      button.querySelector('[data-quick-status-count]').textContent = records.filter(record => this.matchesStatus(record, status)).length;
+    });
+    const note = document.querySelector('#attendanceQuickFilterNote');
+    if (note) note.textContent = chooseEvent ? 'Choose an event to view attendance.' : 'Loaded session records · Counts may overlap.' + (this.more ? ' More records available.' : '');
   }
   sortForDisplay(records) {
     const sort = (this.applied || this.filters()).sort || 'check-in-desc';
@@ -212,8 +243,9 @@ export class AttendanceHistoryController {
       if (generation === this.generation) { this.busy = false; this.draw(); }
     }
   }
-  displayRecords() {
-    return this.prepareRecords(this.filtered(), { busy: this.busy, partial: this.more, verified: this.verified });
+  displayRecords(filters = this.applied || this.filters()) {
+    return this.prepareRecords(this.filtered(filters), { busy: this.busy, partial: this.more, verified: this.verified, filters })
+      .filter(record => this.matchesStatus(record, filters.status));
   }
   pageItems() {
     const records = this.displayRecords();
@@ -223,6 +255,7 @@ export class AttendanceHistoryController {
     return [...groups.values()];
   }
   draw() {
+    this.updateQuickFilters();
     if (this.requireEvent && (!(this.applied || this.filters()).event || (this.applied || this.filters()).event === 'all')) {
       this.render([], { chooseEvent: true });
       this.info.textContent = '';
@@ -248,6 +281,7 @@ export class AttendanceHistoryController {
     this.suspend();
     if (!this.initialized) return;
     this.toolbar.dispose();
+    this.quickFilters?.removeEventListener('click', this.onQuickFilter);
     this.form.removeEventListener('submit', this.onFilter);
     this.eventControl.removeEventListener('change', this.onEventFilter);
     this.previous.removeEventListener('click', this.onPrevious); this.next.removeEventListener('click', this.onNext);

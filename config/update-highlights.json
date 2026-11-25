@@ -1,4 +1,9 @@
 {
+  "1.8.35": [
+    "View attendance correction history with before-and-after details.",
+    "See who made each correction, when, and why.",
+    "Quick filters for All, Present, Late, Absent and Needs review."
+  ],
   "1.8.34": [
     "Absent corrections now show the correct dashboard status.",
     "Previous During confirmations stay in history without a misleading badge.",
