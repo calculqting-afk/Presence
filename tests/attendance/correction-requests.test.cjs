@@ -42,7 +42,7 @@ async function fixture() {
   };
   let listener, errorListener, liveReference, unsubscribed = false;
   const sdk = { getCountFromServer: async () => ({ data: () => ({ count: 0 }) }), doc: reference, collection: reference, runTransaction: transaction, serverTimestamp: () => 'SERVER', Timestamp: { fromDate: date => date },
-    query: (...args) => args, where: (...args) => args, getDocFromServer: async ref => snapshot(ref),
+    query: (...args) => args, where: (...args) => args, orderBy: (...args) => args, limit: size => ({limit:size}), startAfter: cursor => ({cursor}), getDocsFromServer: async () => ({docs:[]}), getDocFromServer: async ref => snapshot(ref),
     onSnapshot: (ref, options, next, error) => { liveReference = ref; listener = next; errorListener = error; return () => { unsubscribed = true; }; } };
   const context = vm.createContext({ console }), cache = new Map();
   const load = file => { if (!cache.has(file)) cache.set(file, new vm.SourceTextModule(fs.readFileSync(file, 'utf8'), { context, identifier: file })); return cache.get(file); };
@@ -163,24 +163,23 @@ test('only attendance correction roles receive the admin request queue', async (
   for (const role of ['super_admin', 'head_admin', 'attendance_admin']) assert.ok(f.exports.ROLE_VIEWS[role].includes('correction-requests'));
   for (const role of ['student_manager', 'student']) assert.ok(!f.exports.ROLE_VIEWS[role].includes('correction-requests'));
 });
-test('admin pending badge and review action preserve exact student/session and clear stale counts on sync errors', async () => {
+test('admin pending badge uses an independent count, retains it on failure and review preserves student/session', async () => {
   const f = await fixture(), labels = {};
   const nodes = { '[data-request-list]': { innerHTML: '' }, '[data-request-sync]': {}, '[data-request-filter]': { value: 'pending', addEventListener() {}, removeEventListener() {} } };
   const rootNode = { innerHTML: '', addEventListener() {}, removeEventListener() {}, querySelector: selector => nodes[selector] || null };
   const badge = { hidden: true, closest: () => ({ setAttribute: (key, value) => { labels[key] = value; } }) };
   let opened;
-  const ui = new f.exports.CorrectionRequestsController({ root: rootNode, badge, db: {}, user: { uid: 'admin' }, role: 'attendance_admin', getEvents: () => [f.stored.get('events/morning')], getStudents: () => [f.stored.get('students/student')], onApprove: record => { opened = record; }, escapeHtml: String, notify() {} });
+  const ui = new f.exports.CorrectionRequestsController({ root: rootNode, badge, db: {}, user: { uid: 'admin' }, role: 'attendance_admin', getEvents: () => [f.stored.get('events/morning')], getStudents: () => [f.stored.get('students/student')], requestRepository: {page:async()=>({rows:[{id:'student_morning',studentUid:'student',eventId:'morning',kind:'missed-check-in',reason:submission.reason,status:'pending'}],more:false}),count:async()=>1}, onApprove: record => { opened = record; }, escapeHtml: String, notify() {} });
   ui.initialize();
-  const docs = [{ id: 'student_morning', data: () => ({ studentUid: 'student', eventId: 'morning', kind: 'missed-check-in', reason: submission.reason, status: 'pending' }) }];
-  f.emit({ docs, metadata: {} });
+  await new Promise(resolve=>setImmediate(resolve));
   assert.equal(badge.hidden, false); assert.equal(badge.textContent, '1');
   assert.match(labels['aria-label'], /1 pending/);
   const button = { dataset: { reviewRequest: 'student_morning' } };
   await ui.click({ target: { closest: selector => selector === '[data-review-request]' ? button : null } });
   assert.equal(opened.studentUid, 'student'); assert.equal(opened.eventId, 'morning');
   assert.equal(opened.correctionRequestId, 'student_morning');
-  f.failListener(); assert.equal(badge.hidden, true);
-  ui.render(); assert.equal(badge.hidden, true);
+  ui.reader.repository.count=async()=>{throw Error('offline');};await ui.reader.refreshCount(true);
+  ui.render(); assert.equal(badge.hidden, false);assert.equal(badge.textContent,'1');
   ui.dispose();
 });
 

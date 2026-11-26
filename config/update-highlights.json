@@ -1,4 +1,9 @@
 {
+  "1.8.36": [
+    "Present reports now match the attendance filters.",
+    "Correction requests load on demand with fewer reads.",
+    "Search all correction requests by Student ID."
+  ],
   "1.8.35": [
     "View attendance correction history with before-and-after details.",
     "See who made each correction, when, and why.",

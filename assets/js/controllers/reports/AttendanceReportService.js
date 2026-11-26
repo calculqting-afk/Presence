@@ -90,6 +90,7 @@ export class AttendanceReportService {
         checkOutIso: AttendanceReportService.date(record.checkedOutAt)?.toISOString() || null,
         checkInMilliseconds: AttendanceSort.checkIn(record),
         hasCheckIn: Boolean(checkIn),
+        onTime: Boolean(checkIn) && record.status !== 'absent' && record.arrivalStatus === 'present',
         arrival: record.pending && !profileMissing ? 'Not yet checked in' : absent ? 'Absent' : !checkIn ? 'No check-in' : record.arrivalStatus === 'late' ? 'Late' : 'Present',
         completion: timeIssue ? attendanceReviewLabel(timeIssue) : profileMissing ? 'Needs review - profile missing' : status === 'completed' ? 'Completed' : status === 'review' ? 'Needs review' : status === 'absent' ? 'Absent' : status === 'pending' ? 'Pending' : 'Checked in',
         status, late: Boolean(checkIn) && record.arrivalStatus === 'late', corrected: record.recordSource === 'admin-corrected'
@@ -97,12 +98,12 @@ export class AttendanceReportService {
     });
     rows = rows.filter(row => (!filters.section || row.section === filters.section)
       && (!filters.course || row.course === filters.course)
-      && (!filters.status || (filters.status === 'checked-in' ? row.hasCheckIn : filters.status === 'late' ? row.late : row.status === filters.status)));
+      && (!filters.status || (filters.status === 'present' ? row.onTime : filters.status === 'checked-in' ? row.hasCheckIn : filters.status === 'late' ? row.late : row.status === filters.status)));
     const lastName = String(filters.sort || '').startsWith('last-name');
     rows.sort((a, b) => AttendanceSort.compare(a, b, { sort: filters.sort || 'check-in-desc',
       time: row => row.checkInMilliseconds,
       name: row => lastName ? row.sortName : row.name, key: row => row.studentId }));
-    rows = rows.map(({ checkInMilliseconds, hasCheckIn, ...row }) => row);
+    rows = rows.map(({ checkInMilliseconds, hasCheckIn, onTime, ...row }) => row);
     if (rows.length > 5000) throw new Error('This report exceeds 5,000 rows. Select a section to reduce its size.');
     const totals = { rows: rows.length, present: 0, late: 0, completed: 0, review: 0, absent: 0, pending: 0 };
     for (const row of rows) {

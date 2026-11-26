@@ -41,8 +41,8 @@ export function renderCorrectionRequestContext(context, record) {
 }
 
 export class AttendanceCorrectionController {
-  constructor({ db, user, role, getStudents, getEvents, eligibility, escapeHtml, notify, getActorName = () => user?.displayName || 'Administrator', transaction = runTransaction }) {
-    Object.assign(this, { db, user, role, getStudents, getEvents, eligibility, escapeHtml, notify, getActorName, transaction });
+  constructor({ db, user, role, getStudents, getEvents, eligibility, escapeHtml, notify, getActorName = () => user?.displayName || 'Administrator', transaction = runTransaction, onSaved = () => {} }) {
+    Object.assign(this, { db, user, role, getStudents, getEvents, eligibility, escapeHtml, notify, getActorName, transaction, onSaved });
   }
 
   initialize() {
@@ -271,7 +271,9 @@ export class AttendanceCorrectionController {
       } else {
         if (this.review.arrival === 'absent' && !document.querySelector('#correctionAbsentConfirm').checked) throw Error('Confirm that this student should be marked Absent.');
         if (this.review.eventVersion !== correctionVersion(this.getEvents().find(item => item.id === this.review.eventId))) throw Error('The event schedule changed. Go back and review it again.');
-        await this.save(this.review);
+        const savedReview = this.review;
+        await this.save(savedReview);
+        this.onSaved(savedReview);
         this.modal.hidden = true; this.review = null;
         this.trigger?.focus?.();
         this.notify('Attendance corrected', 'The reason, administrator, save time and previous record were saved together.');
