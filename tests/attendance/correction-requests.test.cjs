@@ -225,3 +225,12 @@ test('student correction details load only in the visible summary and reject res
   document.hidden=true;handlers.get('visibilitychange')();assert.equal(ui.unsubscribe,null);
   ui.dispose();assert.equal(handlers.size,0);
 });
+
+test('admin request cards use only loaded detail records and obtain fresh context before correction review',async()=>{
+ const f=await fixture(),nodes={'[data-request-list]':{innerHTML:''},'[data-request-sync]':{},'[data-request-filter]':{value:'pending',addEventListener(){},removeEventListener(){}}};let detailReads=0,opened;
+ const rootNode={innerHTML:'',addEventListener(){},removeEventListener(){},querySelector:selector=>nodes[selector]||null};
+ const repo={page:async()=>({rows:[{id:'student_morning',studentUid:'student',eventId:'morning',status:'pending',reason:submission.reason,kind:'missed-check-in'}],more:false}),count:async()=>1,detail:async(kind,id)=>{detailReads++;return kind==='students'?{uid:id,firstName:'Visible',lastName:'Student',accountId:'REQ123',active:true,section:'2A'}:{id,name:'Visible event',date:'2020-10-01',attendanceRoster:{student:'2A'}};}};
+ const ui=new f.exports.CorrectionRequestsController({root:rootNode,db:{},user:{uid:'admin'},role:'attendance_admin',getEvents:()=>{throw Error('Whole event list used');},getStudents:()=>{throw Error('Whole student list used');},escapeHtml:String,notify(){},requestRepository:repo,onApprove:(record,context)=>{opened={record,context};}});
+ ui.initialize();await new Promise(resolve=>setImmediate(resolve));assert.equal(detailReads,2);assert.match(nodes['[data-request-list]'].innerHTML,/Visible Student/);assert.match(nodes['[data-request-list]'].innerHTML,/Visible event/);
+ const button={dataset:{reviewRequest:'student_morning'}};await ui.click({target:{closest:selector=>selector==='[data-review-request]'?button:null}});assert.equal(detailReads,4);assert.equal(opened.context.student.active,true);assert.equal(opened.context.event.attendanceRoster.student,'2A');assert.equal(opened.record.studentUid,'student');ui.dispose();assert.equal(ui.reader.metadata.size,0);
+});

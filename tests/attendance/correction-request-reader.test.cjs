@@ -62,3 +62,29 @@ test('returning after an interrupted ID lookup resolves the selected ID before r
 test('late pending counts after logout cannot restore another account badge',async()=>{
  const f=await fixture();await f.open();let resolve;f.repository.count=()=>new Promise(done=>resolve=done);const pending=f.reader.refreshCount(true);f.window.emit('presence:device-signing-out');assert.equal(f.controller.badgeCount,0);resolve(999);await pending;assert.equal(f.controller.badgeCount,0);assert.equal(f.controller.requests.length,0);
 });
+
+test('request details read only distinct loaded students/events, reuse cache and omit private/large profile fields',async()=>{
+ const f=await fixture(),details=[];f.reader.supportsMetadata=true;
+ f.repository.page=async()=>({rows:Array.from({length:25},(_,i)=>({id:'r'+i,studentUid:'s'+i%2,eventId:'e'})),cursor:'cursor',more:true});
+ f.repository.detail=async(kind,id)=>{details.push([kind,id]);return kind==='students'?{uid:id,firstName:'Name',accountId:id,photoDataUrl:'large',birthday:'private',active:true}:{id,name:'Event',attendanceRoster:{s0:'2A'}};};
+ await f.open();assert.equal(details.length,3);assert.equal(f.reader.detailValues('students').length,2);assert.equal('photoDataUrl' in f.reader.detailValues('students')[0],false);assert.equal('birthday' in f.reader.detailValues('students')[0],false);
+ await f.reader.load();assert.equal(details.length,3);f.leave();await f.open();assert.equal(details.length,3);
+ const fresh=await f.reader.reviewDetails(f.controller.requests[0]);assert.equal(details.length,5);assert.equal(fresh.student.active,true);assert.deepEqual(fresh.event.attendanceRoster,{s0:'2A'});
+ f.window.emit('presence:device-signing-out');assert.equal(f.reader.metadata.size,0);
+});
+test('request metadata stops starting new batches after navigation and discards late data',async()=>{
+ const f=await fixture(),pending=[];f.reader.supportsMetadata=true;
+ f.repository.page=async()=>({rows:Array.from({length:25},(_,i)=>({id:'r'+i,studentUid:'s'+i,eventId:'e'+i})),more:false});
+ f.repository.detail=(kind,id)=>new Promise(resolve=>pending.push(()=>resolve({uid:id,id,firstName:'Old'})));
+ await f.open();assert.equal(pending.length,10);f.leave();pending.forEach(resolve=>resolve());await f.settle();assert.equal(pending.length,10);assert.equal(f.reader.metadata.size,0);assert.equal(f.controller.requests.length,0);
+});
+test('fresh correction review rejects removed profiles and preserves full event context',async()=>{
+ const f=await fixture();f.reader.supportsMetadata=true;f.repository.page=async()=>({rows:[],more:false});f.repository.detail=async(kind,id)=>kind==='students'?{uid:id,active:false}:{id,attendanceRoster:{s:'2A'}};await f.open();await assert.rejects(f.reader.reviewDetails({studentUid:'s',eventId:'e'}),/unavailable/);
+});
+
+test('fresh already-loaded request details avoid new reads but explicit Refresh revalidates them',async()=>{
+ const f=await fixture(),reads=[];f.reader.supportsMetadata=true;f.repository.page=async()=>({rows:[{id:'r',studentUid:'s',eventId:'e'}],more:false});
+ f.controller.getCachedDetail=(kind,id)=>({at:100000,value:kind==='students'?{uid:id,firstName:'Cached'}:{id,name:'Cached event'}});
+ f.repository.detail=async(kind,id)=>{reads.push([kind,id]);return kind==='students'?{uid:id,firstName:'Fresh',active:true}:{id,name:'Fresh event'};};await f.open();assert.equal(reads.length,0);assert.equal(f.reader.detailValues('students')[0].firstName,'Cached');
+ await f.reader.search('','pending',true);assert.equal(reads.length,2);assert.equal(f.reader.detailValues('students')[0].firstName,'Fresh');
+});

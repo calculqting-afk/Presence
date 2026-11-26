@@ -7,8 +7,8 @@ import { ButtonLoadingController } from '../ui/ButtonLoadingController.js';
 import { CorrectionRequestFilters } from './CorrectionRequestFilters.js';
 
 export class CorrectionRequestsController {
-  constructor({ root, badge, db, user, role = 'student', getEvents, getStudent, getStudents = () => [], onApprove, escapeHtml, notify, window = root?.ownerDocument?.defaultView, getView = () => 'correction-requests', getUser = () => user, requestRepository }) {
-    Object.assign(this, { getUser, requestRepository, window, getView, root, badge, db, user, role, getEvents, getStudent, getStudents, onApprove, escapeHtml, notify });
+  constructor({ root, badge, db, user, role = 'student', getEvents, getStudent, getStudents = () => [], onApprove, escapeHtml, notify, window = root?.ownerDocument?.defaultView, getView = () => 'correction-requests', getUser = () => user, requestRepository, getCachedDetail = () => null }) {
+    Object.assign(this, { getCachedDetail, getUser, requestRepository, window, getView, root, badge, db, user, role, getEvents, getStudent, getStudents, onApprove, escapeHtml, notify });
     this.admin = role !== 'student'; this.requests = []; this.declineDrafts = new Map();
     this.service = new CorrectionRequestService({ db, user, role });
     this.loading = new ButtonLoadingController({ document: root?.ownerDocument });
@@ -71,7 +71,7 @@ export class CorrectionRequestsController {
   refreshEvents() {
     if (!this.initialized || this.admin) return;
     const select = this.root.querySelector('[data-request-event]'), previous = select.value, e = this.escapeHtml;
-    const events = this.getEvents().filter(event => Date.now() > AttendanceViews.time(event, 'checkOutClosesAt') && EventAudiencePolicy.canAttend(this.getStudent(), event) && !this.requests.some(item => item.eventId === event.id));
+    const events = this.events().filter(event => Date.now() > AttendanceViews.time(event, 'checkOutClosesAt') && EventAudiencePolicy.canAttend(this.getStudent(), event) && !this.requests.some(item => item.eventId === event.id));
     select.innerHTML = '<option value="">Choose an event/session…</option>' + events.map(event => `<option value="${e(event.id)}">${e(`${AttendanceViews.title(event)} — ${AttendanceViews.label(event)} · ${event.date}`)}</option>`).join('');
     if (events.some(event => event.id === previous)) select.value = previous;
   }
@@ -99,6 +99,8 @@ export class CorrectionRequestsController {
     this.root.querySelector('[name="reason"]').focus();
     return true;
   }
+  students() { return this.admin && this.reader?.supportsMetadata ? this.reader.detailValues('students') : this.getStudents(); }
+  events() { return this.admin && this.reader?.supportsMetadata ? this.reader.detailValues('events') : this.getEvents(); }
   render() {
     if (!this.initialized || !this.available) return;
     if (this.busy) { this.renderPending = true; return; }
@@ -110,9 +112,9 @@ export class CorrectionRequestsController {
       section: this.root.querySelector('[data-request-section]')?.value || ''
     };
     if (!this.admin) this.updateBadge(this.requests.filter(item => item.status === 'pending').length);
-    this.root.querySelector('[data-request-list]').innerHTML = this.requests.filter(item => CorrectionRequestFilters.matches(item, this.getStudents().find(student => student.uid === item.studentUid), filters)).map(item => {
-      const event = this.getEvents().find(event => event.id === item.eventId);
-      const student = this.getStudents().find(student => student.uid === item.studentUid);
+    this.root.querySelector('[data-request-list]').innerHTML = this.requests.filter(item => CorrectionRequestFilters.matches(item, this.students().find(student => student.uid === item.studentUid), filters)).map(item => {
+      const event = this.events().find(event => event.id === item.eventId);
+      const student = this.students().find(student => student.uid === item.studentUid);
       const time = value => value?.toDate?.()?.toLocaleString() || 'Time unavailable';
       const person = student ? [student.firstName, student.middleName, student.lastName].filter(Boolean).join(' ') : item.studentUid;
       const year = CorrectionRequestFilters.year(student?.section);
@@ -148,7 +150,7 @@ export class CorrectionRequestsController {
     if (!this.admin) return;
     const select = this.root.querySelector('[data-request-section]');
     if (!select) return;
-    const sections = [...new Set(this.getStudents().map(student => student.section).filter(Boolean))].sort();
+    const sections = [...new Set(this.students().map(student => student.section).filter(Boolean))].sort();
     if (select.value && !sections.includes(select.value)) sections.push(select.value);
     const signature = sections.join('|');
     if (signature === this.sectionSignature) return;
@@ -200,9 +202,11 @@ export class CorrectionRequestsController {
     const generation = this.reader?.generation;
     this.busy = true; this.loading.start('request-review', button, 'Loading attendance…');
     try {
+      const details = await this.reader?.reviewDetails(item);
+      if (this.reader && (generation !== this.reader.generation || !this.reader.active())) return;
       const snapshot = await getDocFromServer(doc(this.db, 'attendance', `${item.studentUid}_${item.eventId}`));
       if (!this.initialized || this.reader && (generation !== this.reader.generation || !this.reader.active())) return;
-      this.onApprove({ ...(snapshot.exists() ? snapshot.data() : {}), studentUid: item.studentUid, eventId: item.eventId, correctionRequestId: item.id, correctionRequestReason: item.reason });
+      this.onApprove({ ...(snapshot.exists() ? snapshot.data() : {}), studentUid: item.studentUid, eventId: item.eventId, correctionRequestId: item.id, correctionRequestReason: item.reason }, details);
     } catch (error) { this.notify('Review unavailable', error.message); }
     finally { this.busy = false; this.loading.reset('request-review'); if (this.renderPending && this.initialized) { this.renderPending = false; this.render(); } }
   }

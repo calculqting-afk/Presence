@@ -1,4 +1,9 @@
 {
+  "1.8.37": [
+    "Unchanged profile saves no longer write to the database.",
+    "Fine verification checks only the selected event.",
+    "Correction requests load fewer student and event details."
+  ],
   "1.8.36": [
     "Present reports now match the attendance filters.",
     "Correction requests load on demand with fewer reads.",

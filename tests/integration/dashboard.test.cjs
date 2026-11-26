@@ -3340,3 +3340,32 @@ test('quick status counts include verified projected absences, overlap review, a
   controller.more=true;controller.updateQuickFilters();assert.equal(buttons[3].count.textContent,0);assert.match(browser.document.querySelector('#attendanceQuickFilterNote').textContent,/More records available/);
   controller.busy=true;controller.updateQuickFilters();assert.ok(buttons.every(button=>button.disabled));
 });
+
+test('profile saves skip unchanged fields and photos, write real changes once, and retry failed saves for both roles',async()=>{
+ for(const kind of ['student','admin']){
+  const browser=fakeBrowser(),writes=[],messages=[];let syncs=0,fail=false,resolve;
+  const user={uid:'profile-user',email:'admin@example.test',getIdToken:async()=> 'test-token'};
+  const shared=birthdayOnboardingShared({currentUser:user,auth:{currentUser:user},doc:(_,collection,id)=>({collection,id}),setDoc:async(ref,data)=>{if(fail)throw Error('offline');writes.push({ref,data});if(resolve)await new Promise(done=>resolve(done));},serverTimestamp:()=> 'server',showDashboardToast:(...args)=>messages.push(args)});
+  const globals={...browser,fetch:async()=>{syncs++;return {ok:true,json:async()=>({})};},AbortSignal:{timeout:()=>undefined}};
+  const name=kind==='student'?'StudentDashboard':'AdminDashboard';const mod=await isolatedModule('assets/js/'+kind+'/'+name+'.js',shared,globals);
+  const {profileFormState}=await import('../../assets/js/core/students/ProfileFormState.js');
+  browser.document.querySelector('#profileAccountId').value='ID-1';
+  const state={document:browser.document,studentProfile:{accountId:'ID-1'},can:()=>true,pendingProfilePhoto:'photo-a',pendingAdminProfilePhoto:'photo-a',closeStudentProfileModal(){}};
+  state[kind+'ProfileBaseline']=profileFormState(browser.document,kind,'photo-a');
+  const method=mod[name].prototype[kind==='student'?'handleStudentProfileFormSubmit':'handleAdminProfileFormSubmit'];
+  await method.call(state,{preventDefault(){}});assert.equal(writes.length,0);assert.equal(syncs,0);assert.equal(messages.at(-1)[0],'No changes to save');
+  const field=browser.document.querySelector(kind==='student'?'#profilePhone':'#adminProfilePhone');field.value=' 09123456789 ';
+  await method.call(state,{preventDefault(){}});await new Promise(done=>setImmediate(done));assert.equal(writes.length,1);assert.equal(writes[0].data.phone,'09123456789');assert.equal(syncs,kind==='student'?1:0);
+  await method.call(state,{preventDefault(){}});assert.equal(writes.length,1);
+  state[kind==='student'?'pendingProfilePhoto':'pendingAdminProfilePhoto']='';fail=true;await method.call(state,{preventDefault(){}});assert.equal(writes.length,1);assert.equal(state.profileSaveBusy,false);
+  fail=false;await method.call(state,{preventDefault(){}});assert.equal(writes.length,2);assert.equal(writes[1].data.photoDataUrl,'');
+  field.value='another';let unblock;resolve=done=>{unblock=done;};const first=method.call(state,{preventDefault(){}});await method.call(state,{preventDefault(){}});assert.equal(writes.length,3);unblock();await first;assert.equal(state.profileSaveBusy,false);
+ }
+});
+
+test('request correction refreshes its context before saving and refuses a changed event without writes',async()=>{
+ const browser=fakeBrowser();const {AttendanceCorrectionController,correctionVersion}=await isolatedModule('assets/js/controllers/attendance/AttendanceCorrectionController.js',{},browser);
+ const original={id:'e',name:'Before',date:'2026-11-26'};let event=original,writes=0,checks=0;
+ const state={record:{correctionRequestId:'request'},review:{arrival:'present',eventId:'e',eventVersion:correctionVersion(original)},getEvents:()=>[event],beforeReview:async record=>{assert.equal(record.correctionRequestId,'request');checks++;event={...original,name:'Changed elsewhere'};},save:async()=>{writes++;}};
+ await AttendanceCorrectionController.prototype.submit.call(state);assert.equal(checks,1);assert.equal(writes,0);assert.match(browser.document.querySelector('#correctionSubmitError').textContent,/schedule changed/);assert.equal(state.saving,false);
+});

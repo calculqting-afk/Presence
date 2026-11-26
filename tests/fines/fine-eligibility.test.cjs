@@ -66,3 +66,9 @@ test('manual absence remains a fine candidate only for a closed and confirmed ro
  f.records.push({studentUid:'student',eventId:'ongoing',status:'absent'},{studentUid:'student',eventId:'legacy',status:'absent'});
  assert.deepEqual(f.service.candidates(f.student,f.events,f.records).map(e=>e.id),['absent','present']);
 });
+
+test('fine preflight scopes its server lookup to the selected UID and event without dropping duplicate attendance records',async()=>{
+ const f=await fixture(),calls=[];f.service.loadAttendance=async(uid,eventId)=>{calls.push([uid,eventId]);return f.records.filter(record=>record.studentUid===uid&&record.eventId===eventId);};
+ assert.equal((await f.service.verify(f.student,'absent')).id,'absent');assert.deepEqual(calls,[['student','absent']]);
+ f.records.push({studentUid:'student',eventId:'absent',status:'absent'},{studentUid:'student',eventId:'absent',checkedInAt:new Date()});await assert.rejects(f.service.verify(f.student,'absent'),/no confirmed absence/);
+});

@@ -14,7 +14,8 @@
     ] },
     {"collectionGroup":"attendanceCorrectionRequests","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"submittedAt","order":"DESCENDING"}]},
     {"collectionGroup":"attendanceCorrectionRequests","queryScope":"COLLECTION","fields":[{"fieldPath":"studentUid","order":"ASCENDING"},{"fieldPath":"submittedAt","order":"DESCENDING"}]},
-    {"collectionGroup":"attendanceCorrectionRequests","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"studentUid","order":"ASCENDING"},{"fieldPath":"submittedAt","order":"DESCENDING"}]}
+    {"collectionGroup":"attendanceCorrectionRequests","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"studentUid","order":"ASCENDING"},{"fieldPath":"submittedAt","order":"DESCENDING"}]},
+    {"collectionGroup":"attendance","queryScope":"COLLECTION","fields":[{"fieldPath":"studentUid","order":"ASCENDING"},{"fieldPath":"eventId","order":"ASCENDING"}]}
   ],
   "fieldOverrides": []
 }

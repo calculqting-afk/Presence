@@ -41,8 +41,8 @@ export function renderCorrectionRequestContext(context, record) {
 }
 
 export class AttendanceCorrectionController {
-  constructor({ db, user, role, getStudents, getEvents, eligibility, escapeHtml, notify, getActorName = () => user?.displayName || 'Administrator', transaction = runTransaction, onSaved = () => {} }) {
-    Object.assign(this, { db, user, role, getStudents, getEvents, eligibility, escapeHtml, notify, getActorName, transaction, onSaved });
+  constructor({ db, user, role, getStudents, getEvents, eligibility, escapeHtml, notify, getActorName = () => user?.displayName || 'Administrator', transaction = runTransaction, onSaved = () => {}, beforeReview = async () => {} }) {
+    Object.assign(this, { db, user, role, getStudents, getEvents, eligibility, escapeHtml, notify, getActorName, transaction, onSaved, beforeReview });
   }
 
   initialize() {
@@ -258,6 +258,7 @@ export class AttendanceCorrectionController {
     this.form?.setAttribute('aria-busy', 'true');
     document.querySelector('#correctionSubmitError').textContent = '';
     try {
+      await this.beforeReview(this.record);
       if (!this.review) {
         const input = { studentUid: document.querySelector('#correctionStudent').value, eventId: document.querySelector('#correctionEvent').value,
           checkIn: document.querySelector('#correctionCheckIn').value, checkOut: document.querySelector('#correctionCheckOut').value,

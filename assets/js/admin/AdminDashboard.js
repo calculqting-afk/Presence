@@ -1,3 +1,4 @@
+import { profileFormState, sameProfileForm } from '../core/students/ProfileFormState.js';
 import { AttendanceCorrectionHistoryController, AttendanceCorrectionHistoryRepository } from '../controllers/attendance/AttendanceCorrectionHistoryController.js';
 import { DuringAttendanceController } from '../controllers/attendance/DuringAttendanceController.js';
 import { duringStatusMarkup } from '../core/attendance/DuringAttendancePolicy.js';
@@ -282,7 +283,7 @@ export class AdminDashboard {
         const snapshot = await getDocFromServer(doc(db, 'events', id));
         return snapshot.exists() ? { ...snapshot.data(), id: snapshot.id } : null;
       },
-      loadAttendance: async uid => (await getDocsFromServer(query(collection(db, 'attendance'), where('studentUid', '==', uid)))).docs.map(item => item.data())
+      loadAttendance: async (uid, eventId) => (await getDocsFromServer(query(collection(db, 'attendance'), where('studentUid', '==', uid), where('eventId', '==', eventId)))).docs.map(item => item.data())
     });
     dashboard.schedulePresenter = new EventSchedulePresenter({
       formatTime: formatEventTime,
@@ -364,11 +365,14 @@ export class AdminDashboard {
       role: currentUserRole,
       getActorName: () => dashboard.document.querySelector('[data-admin-name]')?.textContent,
       onSaved: review => { if (review.requestId) void dashboard.correctionRequests?.reader?.decisionSaved(review.requestId, 'approved', review.reason); },
-      getStudents: () => dashboard.students,
-      getEvents: () => dashboard.events,
+      getStudents: () => dashboard.correctionController?.requestId ? [dashboard.requestCorrectionDetails?.student].filter(Boolean) : dashboard.students,
+      getEvents: () => dashboard.correctionController?.requestId ? [dashboard.requestCorrectionDetails?.event].filter(Boolean) : dashboard.events,
       eligibility: (student, event) => dashboard.summaryService.eligibility(student, event),
       escapeHtml,
-      notify: showDashboardToast
+      notify: showDashboardToast,
+      beforeReview: async record => {
+        if (record?.correctionRequestId) dashboard.requestCorrectionDetails = await dashboard.correctionRequests.reader.reviewDetails(record);
+      }
     });
     dashboard.revocationController = new AttendanceRevocationController({ db, user: currentUser, role: currentUserRole,
       requireRecentLogin: () => dashboard.recentLogin.require(),
@@ -665,8 +669,9 @@ export class AdminDashboard {
       if (activeView === "geofence") dashboard.loadGeofenceManager();
       if (["dashboard", "modify-events", "past-events"].includes(activeView)) dashboard.renderAdminEvents();
     });
-    dashboard.listen('events', ['dashboard', 'create', 'modify-events', 'past-events', 'attendance-line', 'assign-fine', 'geofence', 'correction-requests', 'profile'], query(collection(db, "events"), orderBy("openAt", "asc")), snapshot => {
+    dashboard.listen('events', ['dashboard', 'create', 'modify-events', 'past-events', 'attendance-line', 'assign-fine', 'geofence', 'profile'], query(collection(db, "events"), orderBy("openAt", "asc")), snapshot => {
       dashboard.mascotEventsConfirmed = !snapshot.metadata?.fromCache && !snapshot.metadata?.hasPendingWrites;
+      if (dashboard.mascotEventsConfirmed) dashboard.requestEventsCheckedAt = Date.now();
       dashboard.events = snapshot.docs.map(item => ({
         id: item.id,
         ...item.data(),
@@ -686,8 +691,9 @@ export class AdminDashboard {
       dashboard.scheduleAdminEventStatusRefresh();
       dashboard.correctionRequests?.render();
     });
-    dashboard.listen('students', ["dashboard", "create", ...(!D1_DIRECTORY_ENABLED ? ['modify-students'] : []), "assign-fine", "attendance-line", "correction-requests", "profile"], collection(db, "students"), snapshot => {
+    dashboard.listen('students', ["dashboard", "create", ...(!D1_DIRECTORY_ENABLED ? ['modify-students'] : []), "assign-fine", "attendance-line", "profile"], collection(db, "students"), snapshot => {
       dashboard.studentsLoaded = !snapshot.metadata?.fromCache && !snapshot.metadata?.hasPendingWrites;
+      if (dashboard.studentsLoaded) dashboard.requestStudentsCheckedAt = Date.now();
       dashboard.students = snapshot.docs.map(item => CoursePolicy.profile({
         uid: item.id,
         ...item.data()
@@ -911,9 +917,12 @@ export class AdminDashboard {
     if (!this.scope.initialized || this.correctionRequests) return;
     this.correctionRequests = new CorrectionRequestsController({ root: this.document.querySelector('#adminCorrectionRequests'),
       window: this.window, getView: () => activeView, getUser: () => currentUser, badge: this.document.querySelector('#correctionRequestNavCount'), db, user: currentUser, role: currentUserRole,
-      getEvents: () => this.events, getStudents: () => this.students, onApprove: record => this.correctionController.open(record), escapeHtml, notify: showDashboardToast });
+      getCachedDetail: (kind, id) => kind === 'students'
+        ? { value: this.studentsLoaded && this.students.find(student => student.uid === id), at: this.requestStudentsCheckedAt }
+        : { value: this.mascotEventsConfirmed && this.events.find(event => event.id === id), at: this.requestEventsCheckedAt },
+      getEvents: () => this.events, getStudents: () => this.students, onApprove: (record, details) => { this.requestCorrectionDetails = details; this.correctionController.open(record); }, escapeHtml, notify: showDashboardToast });
     this.correctionRequests.initialize();
-    this.scope.addCleanup(() => this.correctionRequests.dispose());
+    this.scope.addCleanup(() => { this.correctionRequests.dispose(); this.requestCorrectionDetails = null; });
   }
   async loadAccountApprovals() {
     const dashboard = this;
@@ -1151,6 +1160,7 @@ export class AdminDashboard {
     });
     dashboard.pendingAdminProfilePhoto = profile.photoDataUrl || "";
     dashboard.updateAdminPhotoPreview(dashboard.pendingAdminProfilePhoto);
+    dashboard.adminProfileBaseline = profileFormState(dashboard.document, 'admin', dashboard.pendingAdminProfilePhoto);
     updateDashboardGreeting(displayName);
   }
   updateDataCleanupState() {
@@ -2071,6 +2081,12 @@ export class AdminDashboard {
       return;
     }
     event.preventDefault();
+    if (dashboard.profileSaveBusy) return;
+    const formState = profileFormState(dashboard.document, 'admin', dashboard.pendingAdminProfilePhoto);
+    if (sameProfileForm(dashboard.adminProfileBaseline, formState)) {
+      showDashboardToast('No changes to save', 'Your profile is already up to date.'); return;
+    }
+    dashboard.profileSaveBusy = true;
     try {
       await setDoc(doc(db, "adminProfiles", currentUser.uid), {
         displayName: dashboard.document.querySelector("#adminDisplayName").value.trim(),
@@ -2082,10 +2098,11 @@ export class AdminDashboard {
       }, {
         merge: true
       });
+      dashboard.adminProfileBaseline = formState;
       showDashboardToast("Profile updated", "Your changes are now live.");
     } catch (error) {
       showDashboardToast("Unable to update profile", error.code === "permission-denied" ? "Publish the latest database rules first." : error.message);
-    }
+    } finally { dashboard.profileSaveBusy = false; }
   }
   async handleAdminProfilePhotoChange(event) {
     const dashboard = this;

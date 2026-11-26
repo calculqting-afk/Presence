@@ -23,6 +23,11 @@ export class CorrectionRequestRepository {
   async count() {
     return (await getCountFromServer(query(collection(this.db, 'attendanceCorrectionRequests'), where('status', '==', 'pending')))).data().count;
   }
+  async detail(kind, id) {
+    if (!['students', 'events'].includes(kind) || !/^[A-Za-z0-9_-]{1,128}$/.test(id || '')) throw Error('Invalid request details.');
+    const snapshot = await getDocFromServer(doc(this.db, kind, id));
+    return snapshot.exists() ? { ...snapshot.data(), [kind === 'students' ? 'uid' : 'id']: id } : null;
+  }
   async decision(id) {
     const snapshot = await getDocFromServer(doc(this.db, 'attendanceCorrectionRequests', id));
     return snapshot.exists() ? { ...snapshot.data(), id: snapshot.id || id } : null;
@@ -34,7 +39,8 @@ export class CorrectionRequestReader {
   constructor({ controller, repository = new CorrectionRequestRepository(controller.db), now = () => Date.now() }) {
     Object.assign(this, { controller, repository, now });
     this.scope = new ControllerScope(); this.generation = 0; this.status = 'pending'; this.studentId = ''; this.studentUid = '';
-    this.ownerUid = controller.user.uid; this.more = false;
+    this.ownerUid = controller.user.uid; this.more = false; this.metadata = new Map();
+    this.supportsMetadata = typeof repository.detail === 'function';
   }
   field(selector) { return this.controller.root.querySelector(selector); }
   active() {
@@ -55,7 +61,7 @@ export class CorrectionRequestReader {
   }
   stop() { this.generation++; this.loading = false; this.countTask = null; }
   clear() {
-    this.stop(); this.controller.requests = []; this.controller.available = false; this.controller.declineDrafts.clear();
+    this.stop(); this.metadata.clear(); this.controller.requests = []; this.controller.available = false; this.controller.declineDrafts.clear();
     this.loadedAt = undefined; this.countAt = undefined; this.cursor = null; this.more = false;
     this.studentId = ''; this.studentUid = ''; this.status = 'pending'; this.noStudent = false; this.needsResolution = false;
     const idField = this.field('[data-request-id]'), statusField = this.field('[data-request-filter]');
@@ -73,6 +79,7 @@ export class CorrectionRequestReader {
   async search(id = this.studentId, status = this.status, force = false) {
     if (!this.active() || this.controller.busy) return;
     id = String(id || '').trim();
+    if (force) this.metadata.clear();
     if (!['pending', 'approved', 'declined', 'all'].includes(status)) return;
     const reuseUid = id === this.studentId && !force;
     this.stop(); this.status = status; this.studentId = id; this.loadedAt = undefined;
@@ -106,6 +113,8 @@ export class CorrectionRequestReader {
       const result = this.noStudent ? { rows: [], cursor: null, more: false }
         : await this.repository.page({ status: this.status, studentUid: this.studentUid, cursor: this.cursor });
       if (generation !== this.generation || !this.active()) return;
+      await this.loadDetails(result.rows, generation, !forceCount);
+      if (generation !== this.generation || !this.active()) return;
       const ids = new Set(this.controller.requests.map(item => item.id));
       this.controller.requests.push(...result.rows.filter(item => !ids.has(item.id)));
       this.cursor = result.cursor; this.more = result.more; if (reset || this.loadedAt === undefined) this.loadedAt = this.now(); this.stale = false;
@@ -115,6 +124,45 @@ export class CorrectionRequestReader {
     } finally {
       if (generation === this.generation && this.active()) { this.loading = false; this.draw(); }
     }
+  }
+  detailValues(kind) {
+    const ids = new Set(this.controller.requests.map(item => kind === 'students' ? item.studentUid : item.eventId));
+    return [...ids].map(id => this.metadata.get(kind + ':' + id)?.value).filter(Boolean);
+  }
+  cacheDetail(kind, id, value, at = this.now()) {
+    const fields = kind === 'students' ? ['uid','accountId','firstName','middleName','lastName','section','email'] : ['id','name','date','sessionPeriod','sessionGroupId','timeIn','timeOut'];
+    this.metadata.set(kind + ':' + id, { at, value: value && Object.fromEntries(fields.map(field => [field, value[field]])) });
+  }
+  async loadDetails(records, generation, allowSeed = true) {
+    if (!this.supportsMetadata) return;
+    const missing = new Map();
+    for (const record of records) for (const [kind, id] of [['students', record.studentUid], ['events', record.eventId]]) {
+      const seed = allowSeed && this.controller.getCachedDetail?.(kind, id);
+      if (!this.metadata.has(kind + ':' + id) && seed?.value && this.now() - seed.at >= 0 && this.now() - seed.at < 60000) this.cacheDetail(kind, id, seed.value, seed.at);
+      const cached = this.metadata.get(kind + ':' + id);
+      if (!cached || this.now() - cached.at >= 60000) missing.set(kind + ':' + id, [kind, id]);
+    }
+    const entries = [...missing.values()];
+    // Bound parallel reads and stop starting more batches after navigation.
+    for (let offset = 0; offset < entries.length; offset += 10) {
+      if (generation !== this.generation || !this.active()) return;
+      const batch = entries.slice(offset, offset + 10);
+      const results = await Promise.allSettled(batch.map(([kind, id]) => this.repository.detail(kind, id)));
+      if (generation !== this.generation || !this.active()) return;
+      results.forEach((result, index) => { if (result.status === 'fulfilled') this.cacheDetail(...batch[index], result.value); });
+      const failed = results.find(result => result.status === 'rejected');
+      if (failed) throw failed.reason;
+    }
+  }
+  async reviewDetails(record) {
+    if (!this.supportsMetadata) return;
+    const generation = this.generation;
+    if (!this.active()) throw Error('Return to Correction Requests and refresh before reviewing.');
+    const [student, event] = await Promise.all([this.repository.detail('students', record.studentUid), this.repository.detail('events', record.eventId)]);
+    if (generation !== this.generation || !this.active()) throw Error('Review cancelled after navigation or session change.');
+    if (!student || !event || student.active === false) throw Error('The student or event is unavailable. Refresh the request list.');
+    this.cacheDetail('students', record.studentUid, student); this.cacheDetail('events', record.eventId, event);
+    return { student, event };
   }
   message(error) {
     return error.code === 'failed-precondition' ? 'Request indexes are not ready. Try Refresh shortly.'

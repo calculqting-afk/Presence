@@ -13,7 +13,7 @@ export class FineEligibilityService {
       .filter(event => this.summary.eligibility(student, event) === 'eligible');
   }
   async verify(student, eventId) {
-    const [event, records] = await Promise.all([this.loadEvent(eventId), this.loadAttendance(student.uid)]);
+    const [event, records] = await Promise.all([this.loadEvent(eventId), this.loadAttendance(student.uid, eventId)]);
     if (!event || !this.candidates(student, [event], records).some(item => item.id === eventId)) {
       throw new Error('This student has no confirmed absence for this event. Upcoming, ongoing, attended, and unverified events cannot receive a missed-attendance fine.');
     }
