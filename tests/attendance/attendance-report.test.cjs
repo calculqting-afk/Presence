@@ -452,3 +452,13 @@ test('manual absent correction exports as absent without attendance times or dup
  const report=snapshot(service,[{id:'a_event-1',studentUid:'a',eventId:event.id,status:'absent',arrivalStatus:'absent',recordSource:'admin-corrected'}]);
  const rows=report.rows.filter(row=>row.studentUid==='a');assert.equal(rows.length,1);assert.equal(rows[0].status,'absent');assert.equal(rows[0].checkInIso,null);assert.equal(rows[0].checkOutIso,null);
 });
+
+test('Present report filter matches on-time saved check-ins independently of completion and excludes late/absent',async()=>{
+ const service=await serviceAt('2026-10-17T10:00:00Z');
+ const records=[{...checkIn,arrivalStatus:'present'}, {...checkIn,id:'r2',studentUid:'b',arrivalStatus:'late',checkedOutAt:stamp('2026-10-17T08:00:00Z')}, {id:'r3',studentUid:'c',eventId:event.id,status:'absent',arrivalStatus:'absent'}];
+ let report=snapshot(service,records,{filters:{status:'present'}});assert.equal(report.rows.length,1);assert.equal(report.rows[0].studentUid,'a');assert.equal(report.rows[0].status,'review');assert.equal(report.rows[0].arrival,'Present');
+ records[0].checkedOutAt=stamp('2026-10-17T08:00:00Z');report=snapshot(service,records,{filters:{status:'present'}});assert.equal(report.rows.length,1);assert.equal(report.rows[0].status,'completed');
+ const {AttendanceExcelExporter}=await import('../../assets/js/controllers/reports/AttendanceExcelExporter.js');const workbook=await new AttendanceExcelExporter().generate(report);assert.ok(workbook);assert.equal(snapshot(service,records,{filters:{status:'late'}}).rows.length,1);
+ delete records[0].arrivalStatus;assert.equal(snapshot(service,records,{filters:{status:'present'}}).rows.length,0);
+ records[0].arrivalStatus='present';records[0].checkedInAt=null;assert.equal(snapshot(service,records,{filters:{status:'present'}}).rows.length,0);
+});

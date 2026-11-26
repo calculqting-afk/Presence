@@ -1,4 +1,4 @@
-import { PendingRequestsWatch } from '../admin/PendingRequestsWatch.js';
+import { CorrectionRequestReader } from './CorrectionRequestReader.js';
 import { collection, doc, query, where, onSnapshot, getDocFromServer } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { CorrectionRequestService, CORRECTION_KINDS } from './CorrectionRequestService.js';
 import { AttendanceViews } from './AttendanceViews.js';
@@ -7,8 +7,8 @@ import { ButtonLoadingController } from '../ui/ButtonLoadingController.js';
 import { CorrectionRequestFilters } from './CorrectionRequestFilters.js';
 
 export class CorrectionRequestsController {
-  constructor({ root, badge, db, user, role = 'student', getEvents, getStudent, getStudents = () => [], onApprove, escapeHtml, notify, window = root?.ownerDocument?.defaultView, getView = () => 'correction-requests' }) {
-    Object.assign(this, { window, getView, root, badge, db, user, role, getEvents, getStudent, getStudents, onApprove, escapeHtml, notify });
+  constructor({ root, badge, db, user, role = 'student', getEvents, getStudent, getStudents = () => [], onApprove, escapeHtml, notify, window = root?.ownerDocument?.defaultView, getView = () => 'correction-requests', getUser = () => user, requestRepository }) {
+    Object.assign(this, { getUser, requestRepository, window, getView, root, badge, db, user, role, getEvents, getStudent, getStudents, onApprove, escapeHtml, notify });
     this.admin = role !== 'student'; this.requests = []; this.declineDrafts = new Map();
     this.service = new CorrectionRequestService({ db, user, role });
     this.loading = new ButtonLoadingController({ document: root?.ownerDocument });
@@ -18,11 +18,11 @@ export class CorrectionRequestsController {
     this.initialized = true;
     const e = this.escapeHtml;
     this.root.innerHTML = `<h3>${this.admin ? 'Review correction requests' : 'Request an attendance correction'}</h3><p>Requests do not change attendance until an admin saves a verified correction. Existing fines are reviewed separately.</p>${this.admin
-      ? `<div class="correction-request-filters"><label class="field request-search-field">Student<input type="search" data-request-search placeholder="Search name, student ID or email"></label><label class="field">Section<select data-request-section><option value="">All sections</option></select></label><label class="field">Status<select data-request-filter><option value="pending">Pending</option><option value="all">All requests</option><option value="approved">Approved</option><option value="declined">Declined</option></select></label><button class="outline-button" type="button" data-clear-request-filters>Clear</button></div>`
-      : `<form data-request-form class="correction-request-form"><label class="field">Event and session<select name="eventId" required data-request-event></select></label><label class="field">Problem<select name="kind">${Object.entries(CORRECTION_KINDS).map(([value, label]) => `<option value="${value}">${e(label)}</option>`).join('')}</select></label><label class="field full">Reason<textarea name="reason" minlength="5" maxlength="1000" required></textarea></label><p class="full">Choose a closed session assigned to you. One request is kept per session, including its final decision. Contact an admin if further review is needed.</p><button class="primary-button" type="submit">Submit request</button></form>`}<p data-request-sync role="status">Loading requests…</p><div data-request-list></div>`;
+      ? `<form data-request-id-form class="correction-request-id-search"><label class="field">Search all requests by Student ID<input type="search" name="studentId" data-request-id placeholder="Enter complete Student ID" maxlength="100"></label><button class="primary-button" type="submit" data-request-id-submit>Search Student ID</button></form><div class="correction-request-filters"><label class="field request-search-field">Search loaded requests<input type="search" data-request-search placeholder="Name, ID or email in loaded results"></label><label class="field">Section in loaded requests<select data-request-section><option value="">All sections</option></select></label><label class="field">Status<select data-request-filter><option value="pending">Pending</option><option value="all">All requests</option><option value="approved">Approved</option><option value="declined">Declined</option></select></label><button class="outline-button" type="button" data-clear-request-filters>Clear</button></div>`
+      : `<form data-request-form class="correction-request-form"><label class="field">Event and session<select name="eventId" required data-request-event></select></label><label class="field">Problem<select name="kind">${Object.entries(CORRECTION_KINDS).map(([value, label]) => `<option value="${value}">${e(label)}</option>`).join('')}</select></label><label class="field full">Reason<textarea name="reason" minlength="5" maxlength="1000" required></textarea></label><p class="full">Choose a closed session assigned to you. One request is kept per session, including its final decision. Contact an admin if further review is needed.</p><button class="primary-button" type="submit">Submit request</button></form>`}<p data-request-sync role="status">Loading requests…</p><div data-request-list></div>${this.admin ? '<div class="correction-request-pages"><p data-request-loaded></p><button class="outline-button" type="button" data-request-refresh>Refresh</button><button class="primary-button" type="button" data-request-more hidden>Load more</button></div>' : ''}`;
     this.onSubmit = event => { event.preventDefault(); void this.submit(event); };
     this.onClick = event => { void this.click(event); };
-    this.onFilter = () => { if (this.admin && this.watch?.active) this.subscribe(); else this.render(); };
+    this.onFilter = () => { if (this.admin) void this.reader.search(this.reader.studentId, this.root.querySelector('[data-request-filter]').value); else this.render(); };
     this.onInput = event => { if (event.target.matches?.('[data-request-search]')) this.render(); };
     this.onChange = event => { if (event.target.matches?.('[data-request-section]')) this.render(); };
     this.root.addEventListener('submit', this.onSubmit);
@@ -31,10 +31,8 @@ export class CorrectionRequestsController {
     this.root.addEventListener('change', this.onChange);
     this.root.querySelector('[data-request-filter]')?.addEventListener('change', this.onFilter);
     if (this.admin) {
-      this.watch = new PendingRequestsWatch({ document: this.root.ownerDocument, window: this.window, view: 'correction-requests', currentView: this.getView,
-        reference: query(collection(this.db, 'attendanceCorrectionRequests'), where('status', '==', 'pending')),
-        count: count => this.updateBadge(count), open: () => this.subscribe(), close: () => { this.subscriptionGeneration = (this.subscriptionGeneration || 0) + 1; this.unsubscribe?.(); this.unsubscribe = null; this.requests = []; this.available = false; } });
-      this.watch.initialize();
+      this.reader = new CorrectionRequestReader({ controller: this, repository: this.requestRepository });
+      this.reader.initialize();
     } else {
       this.onStudentView = () => {
         const active = this.getView() === 'attendances' && !this.root.hidden && !this.root.ownerDocument?.hidden;
@@ -51,20 +49,18 @@ export class CorrectionRequestsController {
     this.refreshEvents();
   }
   subscribe() {
+    if (this.admin) { void this.reader?.load(true); return; }
     const generation = this.subscriptionGeneration = (this.subscriptionGeneration || 0) + 1;
     this.unsubscribe?.();
-    const status = this.root.querySelector('[data-request-filter]')?.value || 'pending';
-    const reference = this.admin
-      ? status === 'all' ? collection(this.db, 'attendanceCorrectionRequests') : query(collection(this.db, 'attendanceCorrectionRequests'), where('status', '==', status))
-      : query(collection(this.db, 'attendanceCorrectionRequests'), where('studentUid', '==', this.user.uid));
+    const reference = query(collection(this.db, 'attendanceCorrectionRequests'), where('studentUid', '==', this.user.uid));
     this.unsubscribe = onSnapshot(reference, { includeMetadataChanges: true }, snapshot => {
-      if (!this.initialized || generation !== this.subscriptionGeneration || this.admin && !this.watch.active || snapshot.metadata?.hasPendingWrites) return;
+      if (!this.initialized || generation !== this.subscriptionGeneration || snapshot.metadata?.hasPendingWrites) return;
       this.available = true;
       this.requests = snapshot.docs.map(item => ({ ...item.data(), id: item.id })).sort((a, b) => (b.submittedAt?.seconds || 0) - (a.submittedAt?.seconds || 0));
       this.root.querySelector('[data-request-sync]').textContent = snapshot.metadata?.fromCache ? 'Cached requests — reconnect to verify the latest decisions.' : 'Requests synced.';
       this.render();
     }, () => {
-      if (!this.initialized || generation !== this.subscriptionGeneration || this.admin && !this.watch.active) return;
+      if (!this.initialized || generation !== this.subscriptionGeneration) return;
       this.available = false;
       this.root.querySelector('[data-request-sync]').textContent = 'Requests unavailable. Publish the latest Firestore rules and reload, or check your connection.';
       this.root.querySelector('[data-request-list]').textContent = 'Could not verify requests.';
@@ -113,8 +109,7 @@ export class CorrectionRequestsController {
       search: this.root.querySelector('[data-request-search]')?.value || '',
       section: this.root.querySelector('[data-request-section]')?.value || ''
     };
-    if (!this.admin || filters.status === 'pending' || filters.status === 'all') this.updateBadge(this.requests.filter(item => item.status === 'pending').length);
-    else void this.watch.refresh();
+    if (!this.admin) this.updateBadge(this.requests.filter(item => item.status === 'pending').length);
     this.root.querySelector('[data-request-list]').innerHTML = this.requests.filter(item => CorrectionRequestFilters.matches(item, this.getStudents().find(student => student.uid === item.studentUid), filters)).map(item => {
       const event = this.getEvents().find(event => event.id === item.eventId);
       const student = this.getStudents().find(student => student.uid === item.studentUid);
@@ -126,9 +121,10 @@ export class CorrectionRequestsController {
         ? `<aside class="correction-request-review"><button class="primary-button" type="button" data-review-request="${e(item.id)}">Review and correct</button><details class="correction-request-decline"><summary>Decline request</summary><form data-decline-request="${e(item.id)}" class="correction-decline-form"><label class="field">Required decline reason<textarea name="reason" minlength="5" maxlength="1000" required></textarea></label><button class="outline-button" type="submit">Confirm decline</button></form></details></aside>`
         : '<p class="correction-request-waiting">Awaiting admin review. Your saved attendance is unchanged.</p>';
       return `<article class="community-service-record correction-request-card"><div class="community-service-record-top"><strong>${e(event ? `${AttendanceViews.title(event)} — ${AttendanceViews.label(event)} · ${event.date}` : `Event ${item.eventId}`)}</strong><span class="badge ${item.status === 'approved' ? 'green' : item.status === 'pending' ? 'blue' : 'orange'}">${e(item.status)}</span></div>${this.admin ? `<div class="correction-request-person"><strong>${e(person)}</strong><span>${e(student?.accountId || item.studentUid)} · ${e(student?.section ? `Section ${student.section}` : 'Section unavailable')}${year ? ` · Year ${e(year)}` : ''}</span></div>` : ''}<div class="correction-request-body${this.admin && item.status === 'pending' ? ' has-review' : ''}"><div class="correction-request-content"><strong>${e(CORRECTION_KINDS[item.kind] || item.kind)}</strong><p class="correction-request-reason">${e(item.reason)}</p><small>Submitted: ${e(time(item.submittedAt))}</small></div>${decision}</div></article>`;
-    }).join('') || '<p>No matching correction requests.</p>';
+    }).join('') || (this.admin ? '<p>No matches in the loaded requests. Load more, adjust filters, or search by Student ID.</p>' : '<p>No matching correction requests.</p>');
     for (const form of this.root.querySelectorAll?.('[data-decline-request]') || []) form.elements.reason.value = this.declineDrafts.get(form.dataset.declineRequest) || '';
     this.refreshEvents();
+    this.reader?.draw();
   }
   studentCard(item, event) {
     const e = this.escapeHtml;
@@ -162,7 +158,11 @@ export class CorrectionRequestsController {
     select.value = previous;
   }
   async submit(event) {
-    const form = event.target, button = form.querySelector('[type="submit"]');
+    const form = event.target;
+    if (this.admin && form.matches('[data-request-id-form]')) {
+      await this.reader.search(form.elements.studentId.value, this.root.querySelector('[data-request-filter]').value); return;
+    }
+    const button = form.querySelector('[type="submit"]');
     if (this.busy || !button) return;
     this.busy = true;
     this.loading.start('request-save', button, this.admin ? 'Saving decision…' : 'Submitting request…');
@@ -174,27 +174,34 @@ export class CorrectionRequestsController {
       } else if (form.dataset.declineRequest && this.admin) {
         await this.service.decline(form.dataset.declineRequest, form.elements.reason.value);
         this.notify('Request declined', 'The decision was saved. Attendance and fines are unchanged.');
+        this.declineDrafts.delete(form.dataset.declineRequest);
+        await this.reader?.decisionSaved(form.dataset.declineRequest, 'declined', form.elements.reason.value);
       }
     } catch (error) { this.notify('Request not saved', error.message); }
     finally {
       this.busy = false; this.loading.reset('request-save');
       if (this.renderPending && this.initialized) { this.renderPending = false; this.render(); }
+      this.reader?.draw();
     }
   }
   async click(event) {
+    if (this.admin && this.busy) return;
+    if (this.admin && event.target.closest('[data-request-more]')) { await this.reader.load(); return; }
+    if (this.admin && event.target.closest('[data-request-refresh]')) { await this.reader.search(this.reader.studentId, this.reader.status, true); return; }
     if (event.target.closest('[data-clear-request-filters]')) {
-      for (const selector of ['[data-request-search]', '[data-request-section]']) { const field = this.root.querySelector(selector); if (field) field.value = ''; }
+      for (const selector of ['[data-request-search]', '[data-request-section]', '[data-request-id]']) { const field = this.root.querySelector(selector); if (field) field.value = ''; }
       const status = this.root.querySelector('[data-request-filter]'); if (status) status.value = 'pending';
-      if (this.admin && this.watch?.active) this.subscribe(); else this.render(); return;
+      if (this.admin) await this.reader.search('', 'pending'); else this.render(); return;
     }
     const button = event.target.closest('[data-review-request]');
     if (!button || !this.admin || this.busy) return;
     const item = this.requests.find(item => item.id === button.dataset.reviewRequest);
     if (!item || item.status !== 'pending') return;
+    const generation = this.reader?.generation;
     this.busy = true; this.loading.start('request-review', button, 'Loading attendance…');
     try {
       const snapshot = await getDocFromServer(doc(this.db, 'attendance', `${item.studentUid}_${item.eventId}`));
-      if (!this.initialized) return;
+      if (!this.initialized || this.reader && (generation !== this.reader.generation || !this.reader.active())) return;
       this.onApprove({ ...(snapshot.exists() ? snapshot.data() : {}), studentUid: item.studentUid, eventId: item.eventId, correctionRequestId: item.id, correctionRequestReason: item.reason });
     } catch (error) { this.notify('Review unavailable', error.message); }
     finally { this.busy = false; this.loading.reset('request-review'); if (this.renderPending && this.initialized) { this.renderPending = false; this.render(); } }
@@ -202,7 +209,7 @@ export class CorrectionRequestsController {
   dispose() {
     this.window?.removeEventListener('presence:viewchange', this.onStudentView);
     this.root?.ownerDocument?.removeEventListener('visibilitychange', this.onStudentView);
-    this.initialized = false; this.watch?.dispose(); this.unsubscribe?.(); this.updateBadge(0);
+    this.initialized = false; this.reader?.dispose(); this.unsubscribe?.(); this.updateBadge(0);
     this.loading.dispose();
     this.root?.removeEventListener('submit', this.onSubmit); this.root?.removeEventListener('click', this.onClick);
     this.root?.removeEventListener('input', this.onInput); this.root?.removeEventListener('change', this.onChange);

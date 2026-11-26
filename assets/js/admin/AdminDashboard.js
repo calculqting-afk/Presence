@@ -363,6 +363,7 @@ export class AdminDashboard {
       user: currentUser,
       role: currentUserRole,
       getActorName: () => dashboard.document.querySelector('[data-admin-name]')?.textContent,
+      onSaved: review => { if (review.requestId) void dashboard.correctionRequests?.reader?.decisionSaved(review.requestId, 'approved', review.reason); },
       getStudents: () => dashboard.students,
       getEvents: () => dashboard.events,
       eligibility: (student, event) => dashboard.summaryService.eligibility(student, event),
@@ -909,7 +910,7 @@ export class AdminDashboard {
     const { CorrectionRequestsController } = await import('../controllers/attendance/CorrectionRequestsController.js');
     if (!this.scope.initialized || this.correctionRequests) return;
     this.correctionRequests = new CorrectionRequestsController({ root: this.document.querySelector('#adminCorrectionRequests'),
-      window: this.window, getView: () => activeView, badge: this.document.querySelector('#correctionRequestNavCount'), db, user: currentUser, role: currentUserRole,
+      window: this.window, getView: () => activeView, getUser: () => currentUser, badge: this.document.querySelector('#correctionRequestNavCount'), db, user: currentUser, role: currentUserRole,
       getEvents: () => this.events, getStudents: () => this.students, onApprove: record => this.correctionController.open(record), escapeHtml, notify: showDashboardToast });
     this.correctionRequests.initialize();
     this.scope.addCleanup(() => this.correctionRequests.dispose());

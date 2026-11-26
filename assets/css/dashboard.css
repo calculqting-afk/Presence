@@ -1389,3 +1389,8 @@ button, a, summary { touch-action: manipulation; }
 #correctionSubmitError { color:var(--danger,#dd6666); }
 .correction-footer { margin:0; padding:16px 24px; border-top:1px solid var(--line); flex-wrap:wrap; }
 @media(max-width:540px) { .correction-body,.correction-heading { padding:16px; } .correction-footer { padding:14px 16px; } #attendanceCorrectionForm .form-grid { grid-template-columns:minmax(0,1fr); } .correction-footer .primary-button { flex:1; } }
+.correction-request-id-search { display:flex; align-items:end; flex-wrap:wrap; gap:12px; margin-top:20px; }
+.correction-request-id-search .field { flex:1; min-width:180px; }
+.correction-request-pages { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-top:18px; }
+.correction-request-pages p { flex:1 1 180px; font-size:.8rem; color:var(--muted); }
+@media(max-width:580px) { .correction-request-id-search > button { width:100%; } }
