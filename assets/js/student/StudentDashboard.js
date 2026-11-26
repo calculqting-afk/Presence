@@ -1,3 +1,4 @@
+import { profileFormState, sameProfileForm } from '../core/students/ProfileFormState.js';
 import { DuringAttendancePolicy, duringStatusMarkup } from '../core/attendance/DuringAttendancePolicy.js';
 import { PasswordRecoveryController } from '../controllers/accounts/PasswordRecoveryController.js';
 import { DeviceSessionController } from '../controllers/accounts/DeviceSessionController.js';
@@ -1018,6 +1019,7 @@ export class StudentDashboard {
     dashboard.document.querySelector("#profilePhoto").value = "";
     dashboard.pendingProfilePhoto = dashboard.studentProfile.photoDataUrl || "";
     dashboard.updatePhotoPreview(dashboard.pendingProfilePhoto);
+    dashboard.studentProfileBaseline = profileFormState(dashboard.document, 'student', dashboard.pendingProfilePhoto);
     dashboard.studentProfileModal.hidden = false;
     dashboard.document.querySelector("#profileFirstName").focus();
   }
@@ -1034,6 +1036,12 @@ export class StudentDashboard {
       showDashboardToast('Contact an administrator', 'A Super Admin or Head Admin must correct your login Student ID.');
       return;
     }
+    if (dashboard.profileSaveBusy) return;
+    const formState = profileFormState(dashboard.document, 'student', dashboard.pendingProfilePhoto);
+    if (sameProfileForm(dashboard.studentProfileBaseline, formState)) {
+      showDashboardToast('No changes to save', 'Your profile is already up to date.'); return;
+    }
+    dashboard.profileSaveBusy = true;
     try {
       const updateData = {
         ...hometownForm(dashboard.document, 'profile'),
@@ -1054,10 +1062,11 @@ export class StudentDashboard {
         void new StudentDirectoryClient().sync(auth.currentUser, currentUser.uid).catch(() => {});
       }
       dashboard.closeStudentProfileModal();
+      dashboard.studentProfileBaseline = formState;
       showDashboardToast("Profile updated", "Your changes are now live.");
     } catch (error) {
       showDashboardToast("Unable to update profile", error.code === "permission-denied" ? "Publish the latest database rules first." : error.message);
-    }
+    } finally { dashboard.profileSaveBusy = false; }
   }
   async handleProfilePhotoChange(event) {
     const dashboard = this;
